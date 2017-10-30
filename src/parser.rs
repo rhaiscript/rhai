@@ -353,7 +353,37 @@ impl<'a> Iterator for TokenIterator<'a> {
                 '+' => return Some(Token::Plus),
                 '-' => return Some(Token::Minus),
                 '*' => return Some(Token::Multiply),
-                '/' => return Some(Token::Divide),
+                '/' => {
+                    if let Some(&comment) = self.char_stream.peek() {
+                        match comment {
+                            '/' => {
+                                self.char_stream.next();
+                                while let Some(&comment_next) = self.char_stream.peek() {
+                                    match comment_next {
+                                        '\n' => break,
+                                        _ => { self.char_stream.next(); }
+                                    }
+                                }
+                            }
+                            '*' => {
+                                self.char_stream.next();
+                                while let Some(&comment_next) = self.char_stream.peek() {
+                                    match comment_next {
+                                        '*' => {
+                                            self.char_stream.next();
+                                            match self.char_stream.peek() {
+                                                Some(&'/') => { self.char_stream.next(); break; },
+                                                _ => { self.char_stream.next(); }
+                                            }
+                                        }
+                                        _ => { self.char_stream.next(); }
+                                    }
+                                }
+                            }
+                            _ => return Some(Token::Divide)
+                        }
+                    }
+                },
                 ';' => return Some(Token::Semicolon),
                 ':' => return Some(Token::Colon),
                 ',' => return Some(Token::Comma),
@@ -458,7 +488,7 @@ fn parse_call_expr<'a>(id: String,
                        input: &mut Peekable<TokenIterator<'a>>)
                        -> Result<Expr, ParseError> {
     let mut args = Vec::new();
- 
+
     if let Some(&Token::RParen) = input.peek() {
         input.next();
         return Ok(Expr::FnCall(id, args));
