@@ -401,3 +401,90 @@ fn test_array_with_structs() {
         assert!(false);
     }
 }
+
+#[test]
+fn test_slash_slash_comments() {
+    let mut engine = Engine::new();
+
+    if let Ok(result) = engine.eval::<i64>(r#"
+        let x = [1, 2, 3];
+        // this is a comment
+        x[1]
+        "#
+    ) {
+        assert_eq!(result, 2);
+    } else {
+        assert!(false);
+    }
+
+    if let Ok(result) = engine.eval::<i64>(r#"
+        let x = [1, 2, 3];
+        x[1] // another comment
+        "#
+    ) {
+        assert_eq!(result, 2);
+    } else {
+        assert!(false);
+    }
+
+    if let Err(_) = engine.eval::<i64>(r#"
+        let x = [1, 2, 3]; // let y = 1;
+        x[y]
+        "#
+    ) {
+        assert!(true);
+    } else {
+        assert!(false);
+    }
+}
+
+#[test]
+fn test_multiline_comments() {
+    let mut engine = Engine::new();
+
+    if let Ok(result) = engine.eval::<i64>(r#"
+        let x = [1, 2, 3];
+        /*
+            this
+            is
+            a
+            comment
+        */
+        x[1]
+        "#
+    ) {
+        assert_eq!(result, 2);
+    } else {
+        assert!(false);
+    }
+
+    if let Ok(result) = engine.eval::<i64>(r#"
+        let x = [1, 2, 3];
+        x[1] /* another comment */
+        "#
+    ) {
+        assert_eq!(result, 2);
+    } else {
+        assert!(false);
+    }
+
+    if let Err(_) = engine.eval::<i64>(r#"
+        let x = [1, 2, 3]; /* let y = 1; */
+        x[y]
+        "#
+    ) {
+        assert!(true);
+    } else {
+        assert!(false);
+    }
+
+    if let Ok(result) = engine.eval::<i64>(r#"
+        let x = 1; /* let y = 1; */ x = x + 1;
+        x
+        "#
+    ) {
+        assert_eq!(result, 2);
+    } else {
+        assert!(false);
+    }
+}
