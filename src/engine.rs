@@ -158,12 +158,6 @@ impl Engine {
         ident: String,
         args: Vec<&mut Any>,
     ) -> Result<Box<Any>, EvalAltResult> {
-        println!(
-            "Trying to call function {:?} with args {:?}",
-            ident,
-            args.iter().map(|x| (&**x).type_id()).collect::<Vec<_>>()
-        );
-
         let spec = FnSpec {
             ident: ident.clone(),
             args: Some(args.iter().map(|a| <Any as Any>::type_id(&**a)).collect()),
@@ -194,8 +188,6 @@ impl Engine {
     }
 
     pub fn register_fn_raw(&mut self, ident: String, args: Option<Vec<TypeId>>, f: Box<FnAny>) {
-        println!("Register; {:?} with args {:?}", ident, args,);
-
         let spec = FnSpec { ident, args };
 
         self.fns.insert(spec, FnIntExt::Ext(f));
