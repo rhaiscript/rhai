@@ -1,16 +1,42 @@
-use std::any::TypeId;
-use std::borrow::Borrow;
-use std::cmp::{PartialEq, PartialOrd};
-use std::collections::HashMap;
-use std::error::Error;
-use std::fmt;
-use std::sync::Arc;
-use std::ops::{Add, BitAnd, BitOr, BitXor, Deref, Div, Mul, Neg, Rem, Shl, Shr, Sub};
+use std::{
+    any::TypeId,
+    borrow::Borrow,
+    collections::HashMap,
+    error::Error,
+    fmt,
+    sync::Arc,
+    ops::{
+        Add,
+        BitAnd,
+        BitOr,
+        BitXor,
+        Deref,
+        Div,
+        Mul,
+        Neg,
+        Rem,
+        Shl,
+        Shr,
+        Sub
+    }
+};
 
-use any::{Any, AnyExt};
-use fn_register::{Mut, RegisterFn};
-use parser::{lex, parse, Expr, FnDef, Stmt};
+use any::{
+    Any,
+    AnyExt
+};
 use call::FunArgs;
+use fn_register::{
+    Mut
+    RegisterFn,
+};
+use parser::{
+    Expr,
+    FnDef,
+    lex,
+    parse,
+    Stmt
+};
 
 #[derive(Debug)]
 pub enum EvalAltResult {

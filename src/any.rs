@@ -1,5 +1,10 @@
-use std::any::{Any as StdAny, TypeId};
-use std::fmt;
+use std::{
+    any::{
+        Any as StdAny, 
+        TypeId
+    },
+    fmt
+};
 
 pub trait Any: StdAny {
     fn type_id(&self) -> TypeId;

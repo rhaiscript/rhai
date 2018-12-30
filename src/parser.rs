@@ -1,8 +1,10 @@
-use std::error::Error;
-use std::fmt;
-use std::iter::Peekable;
-use std::str::Chars;
-use std::char;
+use std::{
+    char
+    error::Error,
+    fmt,
+    iter::Peekable,
+    str::Chars,
+};
 
 #[derive(Debug, Clone)]
 pub enum LexError {

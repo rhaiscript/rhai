@@ -1,7 +1,10 @@
 use std::any::TypeId;
 
 use any::Any;
-use engine::{Engine, EvalAltResult};
+use engine::{
+    Engine,
+    EvalAltResult
+};
 
 pub trait RegisterFn<FN, ARGS, RET> {
     fn register_fn(&mut self, name: &str, f: FN);
