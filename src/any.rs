@@ -2,8 +2,6 @@ use std::any::{Any as StdAny, TypeId};
 use std::fmt;
 
 pub trait Any: StdAny {
-    fn type_id(&self) -> TypeId;
-
     fn box_clone(&self) -> Box<Any>;
 
     /// This type may only be implemented by `rhai`.
@@ -13,13 +11,7 @@ pub trait Any: StdAny {
 
 impl<T> Any for T
     where
-        T: Clone + StdAny + ?Sized
-{
-    #[inline]
-    fn type_id(&self) -> TypeId {
-        TypeId::of::<T>()
-    }
-
+        T: Clone + StdAny + ?Sized {
     #[inline]
     fn box_clone(&self) -> Box<Any> {
         Box::new(self.clone())

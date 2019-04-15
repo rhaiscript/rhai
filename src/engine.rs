@@ -184,7 +184,7 @@ impl Engine {
 
         let spec = FnSpec {
             ident: ident.clone(),
-            args: Some(args.iter().map(|a| <Any as Any>::type_id(&**a)).collect()),
+            args: Some(args.iter().map(|a| <Any>::type_id(&**a)).collect()),
         };
 
         self.fns
