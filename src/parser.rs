@@ -11,7 +11,8 @@ use crate::optimize::optimize_into_ast;
 use crate::stdlib::{
     borrow::Cow,
     boxed::Box,
-    char, fmt, format,
+    char,
+    fmt, format,
     iter::Peekable,
     ops::Add,
     str::Chars,
@@ -21,6 +22,9 @@ use crate::stdlib::{
     usize, vec,
     vec::Vec,
 };
+
+#[cfg(feature = "experimental_hashmap")]
+pub use crate::stdlib::collections::HashMap;
 
 /// The system integer type.
 ///
@@ -37,6 +41,10 @@ pub type INT = i32;
 /// The system floating-point type.
 #[cfg(not(feature = "no_float"))]
 pub type FLOAT = f64;
+
+/// The hash map type.
+#[cfg(feature = "experimental_hashmap")]
+pub type MAP = HashMap<String, Dynamic>;
 
 type LERR = LexError;
 type PERR = ParseErrorType;
@@ -364,6 +372,9 @@ pub enum Expr {
     #[cfg(not(feature = "no_index"))]
     /// [ expr, ... ]
     Array(Vec<Expr>, Position),
+    #[cfg(feature = "experimental_hashmap")]
+    /// [: ident: expr, ... ]
+    Map(HashMap<String, Expr>, Position),
     /// lhs && rhs
     And(Box<Expr>, Box<Expr>),
     /// lhs || rhs
@@ -453,6 +464,9 @@ impl Expr {
 
             #[cfg(not(feature = "no_index"))]
             Expr::Array(_, pos) => *pos,
+
+            #[cfg(feature = "experimental_hashmap")]
+            Expr::Map(_, pos) => *pos,
 
             #[cfg(not(feature = "no_index"))]
             Expr::Index(expr, _, _) => expr.position(),
@@ -1584,6 +1598,85 @@ fn parse_array_literal<'a>(
     }
 }
 
+/// Parse a hashmap literal.
+#[cfg(all(feature = "experimental_hashmap", not(feature = "no_index")))]
+fn parse_hashmap_literal<'a>(
+    input: &mut Peekable<TokenIterator<'a>>,
+    begin: Position,
+    allow_stmt_expr: bool,
+) -> Result<Expr, ParseError> {
+    let mut map = HashMap::new();
+
+    assert_eq!(input.next().unwrap().0, Token::Colon);
+
+    while input.peek().is_some() {
+        let current_key;
+
+        match input.next().ok_or_else(|| {
+            PERR::MissingRightBracket("separating items in hashmap literal".into()).into_err_eof()
+        })? {
+            (Token::Identifier(ident), pos) => {
+                if map.contains_key(&ident) {
+                    return Err(
+                        PERR::IdentDuplicated(format!("duplicate ident '{}'", ident))
+                            .into_err(pos),
+                    )
+                }
+                current_key = ident;
+            }
+            (_, pos) => {
+                return Err(
+                    PERR::IdentExpected("parsing items in hashmap literal".into())
+                        .into_err(pos),
+                )
+            }
+        }
+
+        match input.next().ok_or_else(|| {
+            PERR::MissingRightBracket("separating items in hashmap literal".into()).into_err_eof()
+        })? {
+            (Token::Colon, _) => {}
+            (_, pos) => {
+                return Err(
+                    PERR::ColonExpected("parsing items in hashmap literal".into())
+                        .into_err(pos),
+                )
+            }
+        }
+
+        let current_value = parse_expr(input, allow_stmt_expr)?;
+
+        map.insert(current_key.clone(), current_value);
+
+        match input.peek().ok_or_else(|| {
+            PERR::MissingRightBracket("separating items in hashmap literal".into()).into_err_eof()
+        })? {
+            (Token::Comma, _) => { }
+            (Token::RightBracket, _) => break,
+            (_, pos) => {
+                return Err(
+                    PERR::MissingComma("separating items in hashmap literal".into())
+                        .into_err(*pos),
+                )
+            }
+        }
+        assert_eq!(input.next().unwrap().0, Token::Comma);
+    }
+
+    match input.peek().ok_or_else(|| {
+        PERR::MissingRightBracket("separating items in hashmap literal".into()).into_err_eof()
+    })? {
+        (Token::RightBracket, _) => {
+            input.next();
+            Ok(Expr::Map(map, begin))
+        }
+        (_, pos) => Err(
+                PERR::MissingRightBracket("the end of hashmap literal".into())
+                    .into_err(*pos),
+        ),
+    }
+}
+
 /// Parse a primary expression.
 fn parse_primary<'a>(
     input: &mut Peekable<TokenIterator<'a>>,
@@ -1625,7 +1718,22 @@ fn parse_primary<'a>(
         #[cfg(not(feature = "no_index"))]
         (Token::LeftBracket, pos) => {
             can_be_indexed = true;
-            parse_array_literal(input, pos, allow_stmt_expr)
+            #[cfg(feature = "experimental_hashmap")] {
+                let (next_token, _) = input.peek().ok_or_else(|| {
+                    ParseError(
+                        PERR::MissingRightBracket("separating items in hashmap literal".into()),
+                        Position::eof(),
+                    )
+                })?;
+                if next_token == &Token::Colon {
+                    parse_hashmap_literal(input, pos, allow_stmt_expr)
+                } else {
+                    parse_array_literal(input, pos, allow_stmt_expr)
+                }
+            }
+            #[cfg(not(feature = "experimental_hashmap"))] {
+                parse_array_literal(input, pos, allow_stmt_expr)
+            }
         }
         (Token::True, pos) => Ok(Expr::True(pos)),
         (Token::False, pos) => Ok(Expr::False(pos)),

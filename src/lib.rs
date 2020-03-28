@@ -62,6 +62,8 @@ pub use engine::Engine;
 pub use error::{ParseError, ParseErrorType};
 pub use fn_register::{RegisterDynamicFn, RegisterFn, RegisterResultFn};
 pub use parser::{Position, AST, INT};
+#[cfg(feature = "experimental_hashmap")]
+pub use parser::MAP;
 pub use result::EvalAltResult;
 pub use scope::Scope;
 

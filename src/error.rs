@@ -65,6 +65,15 @@ pub enum ParseErrorType {
     /// An expression in indexing brackets `[]` has syntax error.
     #[cfg(not(feature = "no_index"))]
     MalformedIndexExpr(String),
+    /// An identifier was expected while parsing a map.
+    #[cfg(feature = "experimental_hashmap")]
+    IdentExpected(String),
+    /// A colon was expected while parsing a map.
+    #[cfg(feature = "experimental_hashmap")]
+    ColonExpected(String),
+    /// A duplicate key was found while parsing a map.
+    #[cfg(feature = "experimental_hashmap")]
+    IdentDuplicated(String),
     /// Invalid expression assigned to constant.
     ForbiddenConstantExpr(String),
     /// Missing a variable name after the `let`, `const` or `for` keywords.
@@ -140,6 +149,12 @@ impl ParseError {
             ParseErrorType::MalformedCallExpr(_) => "Invalid expression in function call arguments",
             #[cfg(not(feature = "no_index"))]
             ParseErrorType::MalformedIndexExpr(_) => "Invalid index in indexing expression",
+            #[cfg(feature = "experimental_hashmap")]
+            ParseErrorType::IdentExpected(_) => "Expected identifier",
+            #[cfg(feature = "experimental_hashmap")]
+            ParseErrorType::ColonExpected(_) => "Expected ':'",
+            #[cfg(feature = "experimental_hashmap")]
+            ParseErrorType::IdentDuplicated(_) => "Duplicate identifier",
             ParseErrorType::ForbiddenConstantExpr(_) => "Expecting a constant",
             ParseErrorType::MissingIn => "Expecting 'in'",
             ParseErrorType::VariableExpected => "Expecting name of a variable",

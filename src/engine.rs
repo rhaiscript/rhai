@@ -5,6 +5,9 @@ use crate::parser::{Expr, FnDef, Position, ReturnType, Stmt, INT};
 use crate::result::EvalAltResult;
 use crate::scope::{EntryRef as ScopeSource, EntryType as ScopeEntryType, Scope};
 
+#[cfg(feature = "experimental_hashmap")]
+use crate::parser::MAP;
+
 #[cfg(not(feature = "no_optimize"))]
 use crate::optimize::OptimizationLevel;
 
@@ -1052,6 +1055,17 @@ impl Engine<'_> {
                 })?;
 
                 Ok(Box::new(arr))
+            }
+
+            #[cfg(feature = "experimental_hashmap")]
+            Expr::Map(contents, _) => {
+                let mut map: MAP = HashMap::new();
+
+                contents.into_iter().try_for_each(|(key, value)| {
+                    self.eval_expr(scope, &value, level).map(|val| { map.insert(key.clone(), val); })
+                })?;
+
+                Ok(Box::new(map))
             }
 
             Expr::FunctionCall(fn_name, args_expr_list, def_val, pos) => {

@@ -27,6 +27,7 @@ no_stdlib = []      # no standard library of utility functions
 no_index = []       # no arrays and indexing
 no_float = []       # no floating-point
 no_function = []    # no script-defined functions
+experimental_hashmap = []    # new hash map type
 no_optimize = []    # no script optimizer
 optimize_full = []  # set optimization level to Full (default is Simple) - this is a feature used only to simplify testing
 only_i32 = []       # set INT=i32 (useful for 32-bit systems)
