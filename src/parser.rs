@@ -931,6 +931,11 @@ impl<'a> TokenIterator<'a> {
                     escape.clear();
                     result.push('\r');
                 }
+                // \"
+                '"' if !escape.is_empty() => {
+                    escape.clear();
+                    result.push('"');
+                }
                 // \x??, \u????, \U????????
                 ch @ 'x' | ch @ 'u' | ch @ 'U' if !escape.is_empty() => {
                     let mut seq = escape.clone();
