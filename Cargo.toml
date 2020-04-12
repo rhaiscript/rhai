@@ -62,3 +62,18 @@ optional = true
 version = "*"
 default-features = false
 optional = true
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "primes"
+harness = false
+
+[[bench]]
+name = "speedtest"
+harness = false
+
+[[bench]]
+name = "compile"
+harness = false
