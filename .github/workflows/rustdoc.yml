@@ -1,0 +1,37 @@
+name: Deploy Docs to GitHub Pages
+
+on:
+    push:
+        branches:
+            - master
+
+jobs:
+    release:
+        name: GitHub Pages
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v1
+
+            - name: Install Rust toolchain
+              uses: actions-rs/toolchain@v1
+              with:
+                toolchain: stable
+                profile: minimal
+                override: true
+                components: rustfmt, rust-src
+
+            - name: Build Documentation
+              uses: actions-rs/cargo@v1
+              with:
+                command: doc
+                args: --all --no-deps
+
+            - name: Deploy Documentation
+              uses: peaceiris/actions-gh-pages@v3
+              with:
+                deploy_key: ${{ secrets.ACTIONS_DEPLOY_KEY }}
+                publish_branch: gh-pages
+                publish_dir: ./target/doc
+                keep_files: true
