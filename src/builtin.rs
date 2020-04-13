@@ -1025,6 +1025,9 @@ impl Engine<'_> {
             s.clear();
             s.push_str(&new_str);
         });
+        self.register_fn("reverse", |s: &mut String| {
+            s.chars().rev().collect::<String>()
+        });
         self.register_fn("trim", |s: &mut String| {
             let trimmed = s.trim();
 
