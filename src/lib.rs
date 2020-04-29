@@ -83,6 +83,7 @@ mod result;
 mod scope;
 mod stdlib;
 mod token;
+pub mod bytecode;
 
 pub use any::Dynamic;
 pub use engine::{calc_fn_spec as calc_fn_hash, Engine};
