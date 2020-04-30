@@ -9,6 +9,7 @@ use crate::stdlib::{
 };
 
 use crate::{
+    any::Variant,
     calc_fn_hash,
     engine::{
         calc_fn_def,
@@ -17,6 +18,7 @@ use crate::{
         KEYWORD_PRINT,
         KEYWORD_TYPE_OF,
         Engine,
+        IteratorFn,
         FunctionsLib,
         FnAny,
     },
@@ -62,7 +64,9 @@ pub enum Instruction {
     BranchIf{ target: u32 },
     /// Stack [.., v] -> [..], v must be a bool
     BranchIfNot{ target: u32 },
-    /// Stack [.., arr] -> if let Some(v) = iter_fn::<arr>(arr) { [.., arr, v] } else { [..] }
+    /// Stack [.., arr] -> [.., iter]
+    CreateIterFn,
+    /// Stack [.., iter] -> if let Some(v) = iter.next() { [.., iter, v] } else { [..] }
     CallIterFn{ end_target: u32 },
     // TODO: Consider making functions first class?
     // TODO: The default_value option here... seems suspicious. Possibly always None?
@@ -193,7 +197,7 @@ impl Engine {
     /// let engine = Engine::new();
     /// 
     /// let ast = engine.compile("40 + 2").unwrap();
-    /// let bytecode = Bytecode::from_ast(&ast).unwrap();
+    /// let bytecode = Bytecode::from_ast(&engine, &ast).unwrap();
     /// let res = engine.eval_bytecode(&bytecode).unwrap();
     /// 
     /// assert_eq!(res.as_int().unwrap(), 42);
@@ -202,11 +206,14 @@ impl Engine {
     /// ```
     pub fn eval_bytecode(&self, bytecode: &Bytecode) -> Result<Dynamic, Box<EvalAltResult>> {
         let mut stack: Vec<Dynamic> = vec![];
-        // (fn_ptr, stack_size)
-        let mut call_stack: Vec<(u32, u32)> = vec![];
         let mut scope = Scope::new();
         let mut scope_ends = vec![];
+        let mut iter_stack = vec![];
         let mut instr_ptr: u32 = 0;
+
+
+        // (ret_ptr, stack_size, scope, scope_ends, iter_stack)
+        let mut call_stack: Vec<(u32, usize, usize, usize, usize)> = vec![];
 
         // TODO: Dummy position for now
         let pos = Position::new(1, 0);
@@ -257,9 +264,8 @@ impl Engine {
                         Err(_) => return Err(Box::new(EvalAltResult::ErrorLogicGuard(pos)))
                     }
                 }
-                Instruction::CallIterFn{ end_target } => {
 
-                    /*
+                Instruction::CreateIterFn => {
                     let arr = stack.pop().unwrap();
                     let tid = arr.type_id();
 
@@ -273,15 +279,35 @@ impl Engine {
                             .find(|pkg| pkg.type_iterators.contains_key(&tid))
                             .and_then(|pkg| pkg.type_iterators.get(&tid))
                     }) {
-                        stack.push(iter_fn(arr))
+                        iter_stack.push(iter_fn(arr));
                     }
-                    */
+                    else {
+                        unimplemented!("Iter fn error");
+                    }
+                }
 
-                    unimplemented!()
+                Instruction::CallIterFn{ end_target } => {
+                    let iter = iter_stack.last_mut().unwrap();
+                    let next = iter.next();
+                    if let Some(next) = next {
+                        stack.push(next);
+                    }
+                    else {
+                        iter_stack.pop();
+                        instr_ptr = end_target;
+                        continue;
+                    }
                 }
 
                 Instruction::CallBytecode{ instr, ref params } => {
-                    call_stack.push((instr_ptr, stack.len() as u32));
+                    // (ret_ptr, stack_size, scope, scope_ends, iter_stack)
+                    call_stack.push((
+                        instr_ptr + 1, 
+                        stack.len(),
+                        scope.len(),
+                        scope_ends.len(),
+                        iter_stack.len(),
+                    ));
                     instr_ptr = instr;
                     scope.extend(
                         params.iter().rev().map(|name| 
@@ -324,11 +350,21 @@ impl Engine {
                 }
 
                 Instruction::Return => {
-                    if let Some((ret_instr, stack_ptr)) = call_stack.pop() {
+                    // (ret_ptr, stack_size, scope, scope_ends, iter_stack)
+                    if let Some((
+                        ret_instr, 
+                        stack_ptr, 
+                        scope_ptr, 
+                        scope_ends_ptr, 
+                        iter_stack_ptr,
+                    )) = call_stack.pop() {
                         instr_ptr = ret_instr + 1;
                         let last = stack.pop().unwrap();
                         stack.truncate(stack_ptr as usize);
                         stack.push(last);
+                        scope.rewind(scope_ptr);
+                        scope_ends.truncate(scope_ends_ptr);
+                        iter_stack.truncate(iter_stack_ptr);
                     } else {
                         let val = stack.pop().unwrap();
                         return Ok(val);
@@ -669,13 +705,13 @@ impl BytecodeBuilder {
 
                     // idx_lhs[idx_expr] = rhs
                     #[cfg(not(feature = "no_index"))]
-                    Expr::Index(idx_lhs, idx_expr, op_pos) => {
+                    Expr::Index(..) => {
                         unimplemented!()
                     }
 
                     // idx_lhs.dot_rhs = rhs
                     #[cfg(not(feature = "no_object"))]
-                    Expr::Dot(dot_lhs, dot_rhs, _) => {
+                    Expr::Dot(..) => {
                         unimplemented!()
                     }
 
