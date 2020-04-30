@@ -3,13 +3,10 @@ use crate::stdlib::{
     collections::HashMap,
     mem::replace,
     num::NonZeroUsize,
-    rc::Rc,
-    sync::Arc,
     iter::once,
 };
 
 use crate::{
-    any::Variant,
     calc_fn_hash,
     engine::{
         calc_fn_def,
@@ -18,9 +15,6 @@ use crate::{
         KEYWORD_PRINT,
         KEYWORD_TYPE_OF,
         Engine,
-        IteratorFn,
-        FunctionsLib,
-        FnAny,
     },
     token::Position,
     parser::{Expr, Stmt, FnDef, AST, ReturnType},
@@ -31,7 +25,7 @@ use crate::{
 
 use self::Instruction::*;
 
-// #[derive(Debug)]
+#[derive(Debug)]
 pub enum Instruction {
     /// Stack [.., v] -> [..]
     Pop,
@@ -76,7 +70,7 @@ pub enum Instruction {
     /// Stack [.., arg1, ..., argn] -> [.., ret]
 
     // Foreign functions are dynamically dispatched based on the type of the arguments,
-    CallForeign{ fn_name: String, args_len: u8 },
+    CallForeign{ fn_name: String, args_len: u8, default_value: Option<Box<Dynamic>> },
     Return,
 
     Panic,
@@ -105,6 +99,7 @@ struct FnCall {
     name: String,
     param_len: usize,
     instr: usize,
+    default_value: Option<Box<Dynamic>>,
 }
 
 struct BytecodeBuilder {
@@ -129,7 +124,7 @@ impl BytecodeBuilder {
         let hash = calc_fn_def(fn_name, params);
         self.fn_lib.get(&hash)
     }
-    
+
     fn has_override(&self, engine: &Engine, name: &str) -> bool {
         let fn_hash = calc_fn_hash(name, once(TypeId::of::<String>()));
         let fn_def_hash = calc_fn_def(name, 1);
@@ -143,11 +138,11 @@ impl BytecodeBuilder {
     }
 
     fn resolve_fn_calls(&mut self, engine: &Engine) {
-        for &FnCall{ref name, param_len, instr} in &self.fn_calls {
+        for &FnCall{ref name, param_len, instr, ref default_value} in &self.fn_calls {
             // Step 1: Check for eval (from Engine::eval_expr)
             if name == KEYWORD_EVAL
                 && param_len == 1
-                && !self.has_override(engine, KEYWORD_EVAL) 
+                && !self.has_override(engine, KEYWORD_EVAL)
             {
                 unimplemented!("Eval not implemented in bytecode");
             }
@@ -167,44 +162,44 @@ impl BytecodeBuilder {
 
             // Step 3.1 First search in script-defined functions (can override built-in)
             if let Some(&(ref fn_def, fn_instr)) = self.get_function(name, param_len) {
+                // Default value is only used if this function we already found doesn't exist, so not a problem.
                 self.instructions[instr] = CallBytecode{ instr: fn_instr, params: fn_def.params.clone().into_boxed_slice() };
                 continue;
             }
 
             // Step 3.2 Search built-in's and external functions
-            
+
             // Deferred until execution time because foreign functions are dispatched
             // based on the type of the arguments.
-            self.instructions[instr] = CallForeign{ fn_name: name.clone(), args_len: param_len as u8 };
+            self.instructions[instr] = CallForeign{ fn_name: name.clone(), args_len: param_len as u8, default_value: default_value.clone() };
             continue;
             // TODO: Handle PRINT and DEBUG
-
-            // NOTE: `def_val` filtered out at an earlier stage.
         }
     }
 }
 
 impl Engine {
     /// Evaluate bytecode
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// # fn main() -> Result<(), rhai::EvalAltResult> {
     /// use rhai::Engine;
     /// use rhai::bytecode::Bytecode;
-    /// 
+    ///
     /// let engine = Engine::new();
-    /// 
+    ///
     /// let ast = engine.compile("40 + 2").unwrap();
     /// let bytecode = Bytecode::from_ast(&engine, &ast).unwrap();
     /// let res = engine.eval_bytecode(&bytecode).unwrap();
-    /// 
+    ///
     /// assert_eq!(res.as_int().unwrap(), 42);
     /// # Ok(())
     /// # }
     /// ```
     pub fn eval_bytecode(&self, bytecode: &Bytecode) -> Result<Dynamic, Box<EvalAltResult>> {
+        println!("eval: {:#?}", bytecode.instructions);
         let mut stack: Vec<Dynamic> = vec![];
         let mut scope = Scope::new();
         let mut scope_ends = vec![];
@@ -219,8 +214,9 @@ impl Engine {
         let pos = Position::new(1, 0);
 
         loop {
+            println!("\t{}: {:?} - {:?}", instr_ptr, bytecode.instructions[instr_ptr as usize], stack);
             match bytecode.instructions[instr_ptr as usize] {
-                Instruction::Pop => { 
+                Instruction::Pop => {
                     let p = stack.pop();
                     debug_assert!(p.is_some());
                 },
@@ -302,23 +298,26 @@ impl Engine {
                 Instruction::CallBytecode{ instr, ref params } => {
                     // (ret_ptr, stack_size, scope, scope_ends, iter_stack)
                     call_stack.push((
-                        instr_ptr + 1, 
+                        instr_ptr + 1,
                         stack.len(),
                         scope.len(),
                         scope_ends.len(),
                         iter_stack.len(),
                     ));
                     instr_ptr = instr;
-                    scope.extend(
-                        params.iter().rev().map(|name| 
-                            (name.clone(), scope::EntryType::Normal, stack.pop().unwrap()))
-                    );
+
+                    let new_vars = params
+                        .iter()
+                        .rev()
+                        .map(|name| (name.clone(), scope::EntryType::Normal, stack.pop().unwrap()))
+                        .collect::<Vec<_>>();
+
+                    scope.extend(new_vars.into_iter().rev());
+                    continue;
                 }
 
-                Instruction::CallForeign{ ref fn_name, args_len } => {
+                Instruction::CallForeign{ ref fn_name, args_len, ref default_value  } => {
                     let mut args = stack.split_off(stack.len() - args_len as usize);
-                    // TODO: Remove once I confirm this is how split_off works
-                    assert_eq!(args.len(), args_len as usize);
 
                     // TODO: This seems to be an entirely pointless allocation, but it's needed to fit the API.
                     // The AST execution implementation does the same thing. Despite passing mut pointers
@@ -327,9 +326,10 @@ impl Engine {
                     if let Some(func) = self.get_foreign_function(fn_name, args.iter().map(|a| a.type_id())) {
                         // Run external function
                         let result = func(&mut args, pos)?;
-            
+
+                        // TODO: This looks very wrong.
                         // See if the function match print/debug (which requires special processing)
-                        return Ok(match fn_name.as_str() {
+                        let result = match fn_name.as_str() {
                             KEYWORD_PRINT => (self.print)(result.as_str().map_err(|type_name| {
                                 Box::new(EvalAltResult::ErrorMismatchOutputType(
                                     type_name.into(),
@@ -345,26 +345,36 @@ impl Engine {
                             })?)
                             .into(),
                             _ => result,
-                        });
+                        };
+
+                        stack.push(result);
+                    }
+                    else if let Some(default_value) = default_value {
+                        stack.push(default_value.as_ref().clone())
+                    }
+                    else {
+                        // TODO: Proper error handling
+                        panic!("Didn't find function");
                     }
                 }
 
                 Instruction::Return => {
                     // (ret_ptr, stack_size, scope, scope_ends, iter_stack)
                     if let Some((
-                        ret_instr, 
-                        stack_ptr, 
-                        scope_ptr, 
-                        scope_ends_ptr, 
+                        ret_instr,
+                        stack_ptr,
+                        scope_ptr,
+                        scope_ends_ptr,
                         iter_stack_ptr,
                     )) = call_stack.pop() {
-                        instr_ptr = ret_instr + 1;
+                        instr_ptr = ret_instr;
                         let last = stack.pop().unwrap();
                         stack.truncate(stack_ptr as usize);
                         stack.push(last);
                         scope.rewind(scope_ptr);
                         scope_ends.truncate(scope_ends_ptr);
                         iter_stack.truncate(iter_stack_ptr);
+                        continue;
                     } else {
                         let val = stack.pop().unwrap();
                         return Ok(val);
@@ -449,6 +459,16 @@ impl Instruction {
         }
     }
 
+    fn set_target_branch_if(&mut self, new_target: u32) {
+        match self {
+            &mut BranchIf{ ref mut target } => {
+                debug_assert_eq!(*target, !0);
+                *target = new_target;
+            }
+            _ => unreachable!()
+        }
+    }
+
     fn set_end_target_call_iter_fn(&mut self, new_target: u32) {
         match self {
             &mut CallIterFn{ ref mut end_target } => {
@@ -498,7 +518,7 @@ impl BytecodeBuilder {
             .iter()
             .try_for_each(|stmt| self.build_stmt(stmt))?;
         self.instructions.push(Return);
-        
+
         for (&hash, fn_def) in ast.1.iter() {
             let fn_entry = self.instructions.len() as u32;
             self.build_stmt(&fn_def.body)?;
@@ -523,12 +543,6 @@ impl BytecodeBuilder {
 
             Stmt::Expr(expr) => {
                 self.build_expr(expr)?;
-                
-                if let Expr::Assignment(_, _, _) = *expr.as_ref() {
-                    // If it is an assignment, erase the result at the root
-                    self.instructions.push(Pop);
-                    self.instructions.push(PushUnit);
-                }
             }
 
             Stmt::Block(block, _) => {
@@ -544,15 +558,15 @@ impl BytecodeBuilder {
 
                 let else_branch_instr = self.instructions.len();
                 self.instructions.push(BranchIfNot{ target: !0 });
-                
+
                 self.build_stmt(if_body)?;
-                
+
                 let end_branch_instr = self.instructions.len();
                 self.instructions.push(Branch{ target: !0 });
-                
+
                 let else_target = self.instructions.len() as u32;
                 self.instructions[else_branch_instr].set_target_branch_if_not(else_target);
-                
+
                 if let Some(else_body) = else_body {
                     self.build_stmt(else_body)?;
                 }
@@ -574,7 +588,7 @@ impl BytecodeBuilder {
                 let old_cont_break = self.save_continue_break(cond_target);
 
                 self.build_expr(guard)?;
-                
+
                 let end_branch_instr = self.instructions.len();
                 self.instructions.push(BranchIfNot{ target: !0 });
 
@@ -600,18 +614,18 @@ impl BytecodeBuilder {
 
             Stmt::For(name, expr, body) => {
                 self.build_expr(expr)?;
-                
+
                 self.instructions.push(PushScope);
                 self.instructions.push(PushUnit);
                 self.instructions.push(CreateVariable{ name: name.clone() });
-                
-                let call_iter_instr = self.instructions.len(); 
+
+                let call_iter_instr = self.instructions.len();
                 let cond_target =  call_iter_instr as u32;
                 let old_cont_break = self.save_continue_break(cond_target);
 
                 self.instructions.push(CallIterFn{ end_target: !0 });
                 self.instructions.push(SetVariable{ name: name.clone() });
-                
+
                 // TODO: Deal with break...
                 self.build_stmt(body)?;
                 self.instructions.push(Branch{ target: cond_target });
@@ -630,7 +644,7 @@ impl BytecodeBuilder {
                 self.instructions.push(Branch{ target: !0 });
             }
             Stmt::ReturnWithVal(expr, ReturnType::Return, _) => {
-                if let Some(expr) = expr { 
+                if let Some(expr) = expr {
                     self.build_expr(expr)?
                 };
                 self.instructions.push(Return);
@@ -675,7 +689,7 @@ impl BytecodeBuilder {
             Expr::True(_) => self.instructions.push(TrueConstant),
             Expr::False(_) => self.instructions.push(FalseConstant),
             Expr::Unit(_) => self.instructions.push(PushUnit),
-            Expr::IntegerConstant(i, _ ) => 
+            Expr::IntegerConstant(i, _ ) =>
                 self.instructions.push(IntegerConstant(i)),
             Expr::FloatConstant(f, _) =>
                 self.instructions.push(FloatConstant(f)),
@@ -699,9 +713,11 @@ impl BytecodeBuilder {
 
                 match lhs.as_ref() {
                     // name = rhs
-                    Expr::Variable(name, _, _) =>
-                        // TODO: Losing out on the error reporting here.    
-                        self.instructions.push(SetVariable{ name: name.clone() }),
+                    Expr::Variable(name, _, _) => {
+                        // TODO: Losing out on the error reporting here.
+                        self.instructions.push(SetVariable{ name: name.clone() });
+                        self.instructions.push(PushUnit);
+                    }
 
                     // idx_lhs[idx_expr] = rhs
                     #[cfg(not(feature = "no_index"))]
@@ -726,28 +742,19 @@ impl BytecodeBuilder {
                 }
             }
 
-            #[cfg(not(feature = "no_index"))]
             Expr::Index(..) =>
                 unimplemented!(),
-            
-            #[cfg(not(feature = "no_object"))]
-            Expr::Dot(..) => 
+
+            Expr::Dot(..) =>
                 unimplemented!(),
 
-            #[cfg(not(feature = "no_index"))]
             Expr::Array(..) =>
                 unimplemented!(),
 
-            #[cfg(not(feature = "no_object"))]
             Expr::Map(..) =>
                 unimplemented!(),
-            
+
             Expr::FunctionCall(ref fn_name, ref arg_exprs, ref def_val, _) => {
-                assert!(
-                    def_val.is_none(), 
-                    "The only time default value is (currently) used is in `In` expressions, which shouldn't go through this code path"
-                );
-                
                 for arg in arg_exprs.iter() {
                     self.build_expr(arg)?;
                 }
@@ -757,6 +764,7 @@ impl BytecodeBuilder {
                     instr,
                     name: fn_name.to_string(),
                     param_len: arg_exprs.len(),
+                    default_value: def_val.clone(),
                 });
                 // Dummy instruction, to be replaced
                 self.instructions.push(Branch{ target: !0 });
@@ -770,15 +778,17 @@ impl BytecodeBuilder {
 
             Expr::And(ref lhs, ref rhs, _) => {
                 self.build_expr(lhs)?;
-                let short_circuit_instr = self.instructions.len();
 
+                let short_circuit_instr = self.instructions.len();
                 self.instructions.push(BranchIfNot{ target: !0 });
+
                 self.build_expr(rhs)?;
-                
+
                 let skip_true_instr = self.instructions.len();
+                self.instructions.push(Branch{ target: !0 });
+
                 let short_circuit_target = self.instructions.len() as u32;
                 self.instructions[short_circuit_instr].set_target_branch_if_not(short_circuit_target);
-
                 self.instructions.push(FalseConstant);
 
                 let skip_true_target = self.instructions.len() as u32;
@@ -787,15 +797,17 @@ impl BytecodeBuilder {
 
             Expr::Or(ref lhs, ref rhs, _) => {
                 self.build_expr(lhs)?;
+
                 let short_circuit_instr = self.instructions.len();
-
                 self.instructions.push(BranchIf{ target: !0 });
-                self.build_expr(rhs)?;
-                
-                let skip_true_instr = self.instructions.len();
-                let short_circuit_target = self.instructions.len() as u32;
-                self.instructions[short_circuit_instr].set_target_branch_if_not(short_circuit_target);
 
+                self.build_expr(rhs)?;
+
+                let skip_true_instr = self.instructions.len();
+                self.instructions.push(Branch{ target: !0 });
+
+                let short_circuit_target = self.instructions.len() as u32;
+                self.instructions[short_circuit_instr].set_target_branch_if(short_circuit_target);
                 self.instructions.push(TrueConstant);
 
                 let skip_true_target = self.instructions.len() as u32;

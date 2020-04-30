@@ -675,7 +675,7 @@ impl Engine {
     }
 
     // Has a system function an override?
-    pub(crate) fn has_override(&self, fn_lib: &FunctionsLib, name: &str) -> bool {
+    fn has_override(&self, fn_lib: &FunctionsLib, name: &str) -> bool {
         let hash = calc_fn_hash(name, once(TypeId::of::<String>()));
 
         // First check registered functions
@@ -687,7 +687,7 @@ impl Engine {
     }
 
     // Perform an actual function call, taking care of special functions
-    pub(crate) fn exec_fn_call(
+    fn exec_fn_call(
         &self,
         fn_lib: &FunctionsLib,
         fn_name: &str,

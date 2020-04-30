@@ -780,6 +780,15 @@ impl Engine {
     ) -> Result<T, Box<EvalAltResult>> {
         let result = self.eval_ast_with_scope_raw(scope, ast)?;
 
+        // *********** TODO: Make sure to remove this before merging **************
+        // In tests, make sure that the bytecode version gets the same result.
+        // Compare the display strings since dynamics aren't PartialEq.
+        if scope.len() == 0 {
+            let bytecode = crate::bytecode::Bytecode::from_ast(self, &ast).unwrap();
+            let bytecode_r = self.eval_bytecode(&bytecode).unwrap();
+            assert_eq!(format!("{}", bytecode_r), format!("{}", result));
+        }
+
         let return_type = self.map_type_name(result.type_name());
 
         return result.try_cast::<T>().ok_or_else(|| {
