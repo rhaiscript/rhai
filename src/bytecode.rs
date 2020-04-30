@@ -87,6 +87,8 @@ pub struct Bytecode {
 
 struct BytecodeBuilder {
     instructions: Vec<Instruction>,
+    continue_target: u32,
+    break_instrs: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +318,23 @@ impl BytecodeBuilder {
     fn new() -> BytecodeBuilder {
         BytecodeBuilder {
             instructions: vec![],
+            continue_target: !0,
+            break_instrs: vec![],
+        }
+    }
+
+    fn save_continue_break(&mut self, new_continue_target: u32) -> (u32, Vec<usize>) {
+        let old_continue_target = self.continue_target;
+        let old_break_instrs = replace(&mut self.break_instrs, vec![]);
+        self.continue_target = new_continue_target;
+        (old_continue_target, old_break_instrs)
+    }
+
+    fn restore_continue_break(&mut self, (old_continue, old_break): (u32, Vec<usize>), end_target: u32) {
+        self.continue_target = old_continue;
+        let break_instrs = replace(&mut self.break_instrs, old_break);
+        for instr in break_instrs {
+            self.instructions[instr].set_target_branch(end_target);
         }
     }
 
@@ -384,14 +403,18 @@ impl BytecodeBuilder {
 
             Stmt::While(guard, body) => {
                 // NOTE: Error handling might differ here.
-
                 let cond_target = self.instructions.len() as u32;
+
+                // NOTE: I can't seem to put break/continue statements in the condition right now, but
+                // if that ever becomes possible, I need to be careful that they are handled the same here
+                // as in the ast evaluation.
+                let old_cont_break = self.save_continue_break(cond_target);
+
                 self.build_expr(guard)?;
                 
                 let end_branch_instr = self.instructions.len();
                 self.instructions.push(BranchIfNot{ target: !0 });
 
-                // TODO: Deal with break...
                 self.build_stmt(body)?;
                 self.instructions.push(Pop);
 
@@ -399,13 +422,17 @@ impl BytecodeBuilder {
 
                 let end_target = self.instructions.len() as u32;
                 self.instructions[end_branch_instr].set_target_branch(end_target);
+                self.restore_continue_break(old_cont_break, end_target)
             }
 
             Stmt::Loop(body) => {
                 // TODO: Deal with break...
                 let start_target = self.instructions.len() as u32;
+                let old_cont_break = self.save_continue_break(start_target);
                 self.build_stmt(body)?;
                 self.instructions.push(Branch{ target: start_target });
+                let end_target = self.instructions.len() as u32;
+                self.restore_continue_break(old_cont_break, end_target);
             }
 
             Stmt::For(name, expr, body) => {
@@ -417,6 +444,8 @@ impl BytecodeBuilder {
                 
                 let call_iter_instr = self.instructions.len(); 
                 let cond_target =  call_iter_instr as u32;
+                let old_cont_break = self.save_continue_break(cond_target);
+
                 self.instructions.push(CallIterFn{ end_target: !0 });
                 self.instructions.push(SetVariable{ name: name.clone() });
                 
@@ -426,11 +455,17 @@ impl BytecodeBuilder {
 
                 let end_target = self.instructions.len() as u32;
                 self.instructions[call_iter_instr].set_end_target_call_iter_fn(end_target);
+                self.restore_continue_break(old_cont_break, end_target);
                 self.instructions.push(PopScope);
             }
 
-            Stmt::Continue(..) => unimplemented!(),
-            Stmt::Break(..) => unimplemented!(),
+            Stmt::Continue(_) => {
+                self.instructions.push(Branch{ target: self.continue_target });
+            },
+            Stmt::Break(_) => {
+                self.break_instrs.push(self.instructions.len());
+                self.instructions.push(Branch{ target: !0 });
+            }
             Stmt::ReturnWithVal(..) => unimplemented!(),
 
             Stmt::Let(name, Some(expr), _) => {
