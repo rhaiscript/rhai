@@ -450,7 +450,7 @@ impl BytecodeBuilder {
                 self.instructions.push(SetVariable{ name: name.clone() });
                 
                 // TODO: Deal with break...
-                self.build_stmt(stmt)?;
+                self.build_stmt(body)?;
                 self.instructions.push(Branch{ target: cond_target });
 
                 let end_target = self.instructions.len() as u32;
