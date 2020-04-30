@@ -210,7 +210,7 @@ impl Engine {
                         Some((index, scope::EntryType::Normal)) => {
                             *scope.get_mut(index).0 = v;
                         }
-                        Some((index, scope::EntryType::Constant)) => {
+                        Some((_, scope::EntryType::Constant)) => {
                             return Err(EvalAltResult::ErrorAssignmentToConstant(name.clone(), pos));
                         }
                     }
@@ -510,13 +510,13 @@ impl BytecodeBuilder {
             Expr::Variable(_, Some(index), _) =>
                 self.instructions.push(GetVariable{ index }),
             // TODO: Is this ever used without eval?
-            Expr::Variable(ref id, _, pos) =>
+            Expr::Variable(ref id, _, _) =>
                 self.instructions.push(SearchVariable{ name: id.clone() }),
             Expr::Property(_, _) => panic!("unexpected property."),
 
             Expr::Stmt(ref stmt, _) => self.build_stmt(stmt)?,
 
-            Expr::Assignment(ref lhs, ref rhs, op_pos) => {
+            Expr::Assignment(ref lhs, ref rhs, _) => {
                 self.build_expr(rhs)?;
 
                 match lhs.as_ref() {
@@ -564,7 +564,7 @@ impl BytecodeBuilder {
             Expr::Map(..) =>
                 unimplemented!(),
             
-            Expr::FunctionCall(ref fn_name, ref arg_exprs, ref def_val, pos) => {
+            Expr::FunctionCall(ref fn_name, ref arg_exprs, ref def_val, _) => {
                 for arg in arg_exprs.iter() {
                     self.build_expr(arg)?;
                 }
