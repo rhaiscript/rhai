@@ -519,6 +519,17 @@ impl Engine {
         self.max_call_stack_depth = levels
     }
 
+    pub(crate) fn get_foreign_function(&self, name: &str, params: impl Iterator<Item=TypeId>) -> Option<&Box<FnAny>> {
+        let fn_spec = calc_fn_hash(name, params);
+
+        self.functions.get(&fn_spec).or_else(|| {
+            self.packages
+                .iter()
+                .find(|pkg| pkg.functions.contains_key(&fn_spec))
+                .and_then(|pkg| pkg.functions.get(&fn_spec))
+        })
+    }
+
     /// Universal method for calling functions either registered with the `Engine` or written in Rhai
     pub(crate) fn call_fn_raw(
         &self,
@@ -541,14 +552,7 @@ impl Engine {
         }
 
         // Search built-in's and external functions
-        let fn_spec = calc_fn_hash(fn_name, args.iter().map(|a| a.type_id()));
-
-        if let Some(func) = self.functions.get(&fn_spec).or_else(|| {
-            self.packages
-                .iter()
-                .find(|pkg| pkg.functions.contains_key(&fn_spec))
-                .and_then(|pkg| pkg.functions.get(&fn_spec))
-        }) {
+        if let Some(func) = self.get_foreign_function(fn_name, args.iter().map(|a| a.type_id())) {
             // Run external function
             let result = func(args, pos)?;
 

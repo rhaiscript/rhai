@@ -1,19 +1,27 @@
 use crate::stdlib::{
+    any::TypeId,
+    collections::HashMap,
     mem::replace,
     num::NonZeroUsize,
     rc::Rc,
     sync::Arc,
+    iter::once,
 };
 
 use crate::{
+    calc_fn_hash,
     engine::{
+        calc_fn_def,
+        KEYWORD_DEBUG,
         KEYWORD_EVAL,
+        KEYWORD_PRINT,
         KEYWORD_TYPE_OF,
         Engine,
         FunctionsLib,
+        FnAny,
     },
     token::Position,
-    parser::{Expr, Stmt, AST},
+    parser::{Expr, Stmt, FnDef, AST},
     Dynamic,
     scope::{self, Scope},
     result::EvalAltResult,
@@ -21,7 +29,7 @@ use crate::{
 
 use self::Instruction::*;
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub enum Instruction {
     /// Stack [.., v] -> [..]
     Pop,
@@ -48,7 +56,6 @@ pub enum Instruction {
     CharConstant(char),
 
     Branch{ target: u32 },
-
     // TODO: At present the only use of the BranchIf bytecode is in short
     // circuiting Or statements. Consider if it is/isn't worth keeping around.
     /// Stack [.., v] -> [..], v must be a bool
@@ -57,6 +64,16 @@ pub enum Instruction {
     BranchIfNot{ target: u32 },
     /// Stack [.., arr] -> if let Some(v) = iter_fn::<arr>(arr) { [.., arr, v] } else { [..] }
     CallIterFn{ end_target: u32 },
+    // TODO: Consider making functions first class?
+    // TODO: The default_value option here... seems suspicious. Possibly always None?
+    /// Stack [.., arg1, ..., argn] -> [.., ret]
+    // Call{ fn_name: String, args_len: u8, default_value: Option<Box<Dynamic>> },
+    CallBytecode{ instr: u32, params: Box<[String]> },
+    /// Stack [.., arg1, ..., argn] -> [.., ret]
+
+    // Foreign functions are dynamically dispatched based on the type of the arguments,
+    CallForeign{ fn_name: String, args_len: u8 },
+    Return,
 
     // TODO: Intern strings somewhere and use indicies instead of String.
     /// Stack [.., v] -> [..]
@@ -70,31 +87,95 @@ pub enum Instruction {
     /// Stack [..] -> [.., Scopes[scopes.len() - index]]
     GetVariable{ index: NonZeroUsize },
 
-    // TODO: Consider making functions first class?
-    // TODO: The default_value option here... seems suspicious. Possibly always None?
-    /// Stack [.., arg1, ..., argn] -> [.., ret]
-    Call{ fn_name: String, args_len: u8, default_value: Option<Box<Dynamic>> },
-
     /// Stack [..., lhs, rhs] -> [.., lhs in rhs]
     In,
 }
 
 pub struct Bytecode {
     instructions: Vec<Instruction>,
-    #[cfg(feature = "sync")] pub(crate) fn_lib: Arc<FunctionsLib>,
-    #[cfg(not(feature = "sync"))] pub(crate) fn_lib: Rc<FunctionsLib>,
+}
+
+struct FnCall {
+    name: String,
+    param_len: usize,
+    instr: usize,
 }
 
 struct BytecodeBuilder {
     instructions: Vec<Instruction>,
     continue_target: u32,
     break_instrs: Vec<usize>,
+
+    fn_calls: Vec<FnCall>,
+
+    // Map fn_def hash to FnDef and instruction offset.
+    fn_lib: HashMap<u64, (FnDef, u32)>,
 }
 
 #[derive(Debug, Clone)]
 pub enum BuildError {
     AssignmentToConstant(String, Position),
     AssignmentToUnknownLHS(Position),
+}
+
+impl BytecodeBuilder {
+    fn get_function(&self, fn_name: &str, params: usize) -> Option<&(FnDef, u32)> {
+        let hash = calc_fn_def(fn_name, params);
+        self.fn_lib.get(&hash)
+    }
+    
+    fn has_override(&self, engine: &Engine, name: &str) -> bool {
+        let fn_hash = calc_fn_hash(name, once(TypeId::of::<String>()));
+        let fn_def_hash = calc_fn_def(name, 1);
+
+        // First check registered functions
+        engine.functions.contains_key(&fn_hash)
+            // Then check packages
+            || engine.packages.iter().any(|p| p.functions.contains_key(&fn_hash))
+            // Then check script-defined functions
+            || self.fn_lib.contains_key(&fn_def_hash)
+    }
+
+    fn resolve_fn_calls(&mut self, engine: &Engine) {
+        for &FnCall{ref name, param_len, instr} in &self.fn_calls {
+            // Step 1: Check for eval (from Engine::eval_expr)
+            if name == KEYWORD_EVAL
+                && param_len == 1
+                && !self.has_override(engine, KEYWORD_EVAL) 
+            {
+                unimplemented!("Eval not implemented in bytecode");
+            }
+
+            // Step 2: exec_fn_call
+            match name.as_str() {
+                KEYWORD_TYPE_OF if param_len == 1 && !self.has_override(engine, KEYWORD_TYPE_OF) => {
+                    // let _type_name = engine.map_type_name(args[0].type_name());
+                    unimplemented!("Need to pop value and push type_name... in one instr... probably a call");
+                }
+                // exec_fn_call also matches KEYWORD_EVAL here with the exact same set of
+                // conditions as above. Since we handle it above it should never reach here.
+                _ => { /* continue to call_fn_raw below */ }
+            }
+
+            // Step 3: call_fn_raw
+
+            // Step 3.1 First search in script-defined functions (can override built-in)
+            if let Some(&(ref fn_def, fn_instr)) = self.get_function(name, param_len) {
+                self.instructions[instr] = CallBytecode{ instr: fn_instr, params: fn_def.params.clone().into_boxed_slice() };
+                continue;
+            }
+
+            // Step 3.2 Search built-in's and external functions
+            
+            // Deferred until execution time because foreign functions are dispatched
+            // based on the type of the arguments.
+            self.instructions[instr] = CallForeign{ fn_name: name.clone(), args_len: param_len as u8 };
+            continue;
+            // TODO: Handle PRINT and DEBUG
+
+            // NOTE: `def_val` filtered out at an earlier stage.
+        }
+    }
 }
 
 impl Engine {
@@ -117,17 +198,16 @@ impl Engine {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn eval_bytecode(&self, bytecode: &Bytecode) -> Result<Dynamic, EvalAltResult> {
+    pub fn eval_bytecode(&self, bytecode: &Bytecode) -> Result<Dynamic, Box<EvalAltResult>> {
         let mut stack: Vec<Dynamic> = vec![];
+        // (fn_ptr, stack_size)
+        let mut call_stack: Vec<(u32, u32)> = vec![];
         let mut scope = Scope::new();
         let mut scope_ends = vec![];
         let mut instr_ptr: u32 = 0;
 
-        // Dummy position and level for now
+        // TODO: Dummy position for now
         let pos = Position::new(1, 0);
-        let level = 0;
-
-        println!("{:?}", bytecode.instructions);
 
         loop {
             match bytecode.instructions[instr_ptr as usize] {
@@ -160,7 +240,7 @@ impl Engine {
                             continue
                         }
                         Ok(false) => {}
-                        Err(_) => return Err(EvalAltResult::ErrorLogicGuard(pos))
+                        Err(_) => return Err(Box::new(EvalAltResult::ErrorLogicGuard(pos)))
                     }
                 }
                 Instruction::BranchIfNot{ target } => {
@@ -172,7 +252,7 @@ impl Engine {
                             continue
                         }
                         Ok(true) => {}
-                        Err(_) => return Err(EvalAltResult::ErrorLogicGuard(pos))
+                        Err(_) => return Err(Box::new(EvalAltResult::ErrorLogicGuard(pos)))
                     }
                 }
                 Instruction::CallIterFn{ end_target } => {
@@ -198,6 +278,53 @@ impl Engine {
                     unimplemented!()
                 }
 
+                Instruction::CallBytecode{ instr, ref params } => {
+                    call_stack.push((instr_ptr, stack.len() as u32));
+                    instr_ptr = instr;
+                    scope.extend(
+                        params.iter().rev().map(|name| 
+                            (name.clone(), scope::EntryType::Normal, stack.pop().unwrap()))
+                    );
+                }
+
+                Instruction::CallForeign{ ref fn_name, args_len } => {
+                    let mut args = stack.split_off(stack.len() - args_len as usize);
+                    // TODO: Remove once I confirm this is how split_off works
+                    assert_eq!(args.len(), args_len as usize);
+
+                    // TODO: This seems to be an entirely pointless allocation, but it's needed to fit the API.
+                    // The AST execution implementation does the same thing. Despite passing mut pointers
+                    // instead of just the value nothing but the Drop fn ever looks at the value again.
+                    let mut args: Vec<_> = args.iter_mut().collect();
+                    if let Some(func) = self.get_foreign_function(fn_name, args.iter().map(|a| a.type_id())) {
+                        // Run external function
+                        let result = func(&mut args, pos)?;
+            
+                        // See if the function match print/debug (which requires special processing)
+                        return Ok(match fn_name.as_str() {
+                            KEYWORD_PRINT => (self.print)(result.as_str().map_err(|type_name| {
+                                Box::new(EvalAltResult::ErrorMismatchOutputType(
+                                    type_name.into(),
+                                    pos,
+                                ))
+                            })?)
+                            .into(),
+                            KEYWORD_DEBUG => (self.debug)(result.as_str().map_err(|type_name| {
+                                Box::new(EvalAltResult::ErrorMismatchOutputType(
+                                    type_name.into(),
+                                    pos,
+                                ))
+                            })?)
+                            .into(),
+                            _ => result,
+                        });
+                    }
+                }
+
+                Instruction::Return => {
+
+                }
+
                 CreateVariable{ ref name } => {
                     let v = stack.pop().unwrap();
                     scope.push_dynamic(name.clone(), v);
@@ -206,12 +333,12 @@ impl Engine {
                 SetVariable{ ref name } => {
                     let v = stack.pop().unwrap();
                     match scope.get(name) {
-                        None => return Err(EvalAltResult::ErrorVariableNotFound(name.clone(), pos)),
+                        None => return Err(Box::new(EvalAltResult::ErrorVariableNotFound(name.clone(), pos))),
                         Some((index, scope::EntryType::Normal)) => {
                             *scope.get_mut(index).0 = v;
                         }
                         Some((_, scope::EntryType::Constant)) => {
-                            return Err(EvalAltResult::ErrorAssignmentToConstant(name.clone(), pos));
+                            return Err(Box::new(EvalAltResult::ErrorAssignmentToConstant(name.clone(), pos)));
                         }
                     }
                 }
@@ -219,7 +346,7 @@ impl Engine {
                 SearchVariable{ref name } => {
                     match scope.get_dynamic(name) {
                         Some(value) => stack.push(value),
-                        None => return Err(EvalAltResult::ErrorVariableNotFound(name.clone(), pos)),
+                        None => return Err(Box::new(EvalAltResult::ErrorVariableNotFound(name.clone(), pos))),
                     }
                 }
 
@@ -227,46 +354,20 @@ impl Engine {
                     stack.push(scope.get_mut(scope.len() - index.get()).0.clone())
                 }
 
-                Call{ ref fn_name, args_len, ref default_value } => {
-                    let mut args = stack.split_off(stack.len() - args_len as usize);
-                    // TODO: Remove before commit
-                    assert_eq!(args.len(), args_len as usize);
-                    
-                    // TODO: This seems to be an entirely pointless allocation, but it's needed to fit the API.
-                    // The AST execution implementation does the same thing. Despite passing mut pointers
-                    // instead of just the value nothing but the Drop fn ever looks at the value again.
-                    let mut args: Vec<_> = args.iter_mut().collect();
-
-                    // TODO:
-                    // - There is way too much computation done in this fn call for my taste
-                    // - I'm not qutie sure what happens, but I don't think this ends up calling more bytecode
-                    let v = self.exec_fn_call (
-                        &bytecode.fn_lib,
-                        fn_name,
-                        &mut args,
-                        default_value.as_ref().map(|val| &**val),
-                        pos,
-                        level
-                    );
-
-                    match v {
-                        Ok(v) => stack.push(v),
-                        Err(err) => return Err(*err)
-                    }
-                }
-
                 Instruction::In => {
-                    let rhs = stack.pop().unwrap();
-                    let lhs = stack.pop().unwrap();
-                    let v = self.eval_in_expr(
-                        &bytecode.fn_lib,
-                        lhs,
-                        pos,
-                        rhs,
-                        pos,
-                        level
-                    ).map_err(|err| *err)?;
-                    stack.push(v);
+                    // Deal with in calling == properly
+                    unimplemented!();
+                    // let rhs = stack.pop().unwrap();
+                    // let lhs = stack.pop().unwrap();
+                    // let v = self.eval_in_expr(
+                    //     &bytecode.fn_lib,
+                    //     lhs,
+                    //     pos,
+                    //     rhs,
+                    //     pos,
+                    //     level
+                    // ).map_err(|err| *err)?;
+                    // stack.push(v);
                 }
             }
 
@@ -308,9 +409,9 @@ impl Instruction {
 }
 
 impl Bytecode {
-    pub fn from_ast(ast: &AST) -> Result<Self, BuildError> {
+    pub fn from_ast(engine: &Engine, ast: &AST) -> Result<Self, BuildError> {
         let mut builder = BytecodeBuilder::new();
-        builder.build_ast(ast)
+        builder.build_ast(engine, ast)
     }
 }
 
@@ -320,6 +421,8 @@ impl BytecodeBuilder {
             instructions: vec![],
             continue_target: !0,
             break_instrs: vec![],
+            fn_lib: HashMap::new(),
+            fn_calls: vec![],
         }
     }
 
@@ -338,18 +441,26 @@ impl BytecodeBuilder {
         }
     }
 
-    fn build_ast(&mut self, ast: &AST) -> Result<Bytecode, BuildError>{
+    fn build_ast(&mut self, engine: &Engine, ast: &AST) -> Result<Bytecode, BuildError>{
         ast.0
             .iter()
-            .try_for_each(|stmt| {
-                self.build_stmt(stmt)
-            })
-            .map(|_success| {
-                Bytecode {
-                    instructions: replace(&mut self.instructions, vec![]),
-                    fn_lib: ast.1.clone(),
-                }
-            })
+            .try_for_each(|stmt| self.build_stmt(stmt))?;
+        self.instructions.push(Return);
+        
+        for (&hash, fn_def) in ast.1.iter() {
+            let fn_entry = self.instructions.len() as u32;
+            self.build_stmt(&fn_def.body)?;
+            self.instructions.push(Return);
+            // TODO: Only store the parts of fn_def I need... or take advantage of the Rc/Arc.
+            self.fn_lib.insert(hash, ((**fn_def).clone(), fn_entry));
+        }
+
+        self.resolve_fn_calls(engine);
+
+        Ok(Bytecode {
+            instructions: replace(&mut self.instructions, vec![]),
+            // fn_lib: ast.1.clone(),
+        })
     }
 
     fn build_stmt(&mut self, stmt: &Stmt) -> Result<(), BuildError> {
@@ -565,23 +676,23 @@ impl BytecodeBuilder {
                 unimplemented!(),
             
             Expr::FunctionCall(ref fn_name, ref arg_exprs, ref def_val, _) => {
+                assert!(
+                    def_val.is_none(), 
+                    "The only time default value is (currently) used is in `In` expressions, which shouldn't go through this code path"
+                );
+                
                 for arg in arg_exprs.iter() {
                     self.build_expr(arg)?;
                 }
 
-                if fn_name == KEYWORD_EVAL 
-                    && arg_exprs.len() == 1
-                    // TODO: Overrides
-                    // && !self.has_override(fn_lib, KEYWORD_EVAL)
-                {
-                    unimplemented!()
-                }
-
-                self.instructions.push(Call{ 
-                    fn_name: fn_name.to_string(), 
-                    args_len: arg_exprs.len() as u8,
-                    default_value: def_val.clone()
+                let instr = self.instructions.len();
+                self.fn_calls.push(FnCall {
+                    instr,
+                    name: fn_name.to_string(),
+                    param_len: arg_exprs.len(),
                 });
+                // Dummy instruction, to be replaced
+                self.instructions.push(Branch{ target: !0 });
             }
 
             Expr::In(ref lhs, ref rhs, _) => {
