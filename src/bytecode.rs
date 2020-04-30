@@ -21,7 +21,7 @@ use crate::{
         FnAny,
     },
     token::Position,
-    parser::{Expr, Stmt, FnDef, AST},
+    parser::{Expr, Stmt, FnDef, AST, ReturnType},
     Dynamic,
     scope::{self, Scope},
     result::EvalAltResult,
@@ -74,6 +74,8 @@ pub enum Instruction {
     // Foreign functions are dynamically dispatched based on the type of the arguments,
     CallForeign{ fn_name: String, args_len: u8 },
     Return,
+
+    Panic,
 
     // TODO: Intern strings somewhere and use indicies instead of String.
     /// Stack [.., v] -> [..]
@@ -322,7 +324,21 @@ impl Engine {
                 }
 
                 Instruction::Return => {
+                    if let Some((ret_instr, stack_ptr)) = call_stack.pop() {
+                        instr_ptr = ret_instr + 1;
+                        let last = stack.pop().unwrap();
+                        stack.truncate(stack_ptr as usize);
+                        stack.push(last);
+                    } else {
+                        let val = stack.pop().unwrap();
+                        return Ok(val);
+                    }
+                }
 
+                Instruction::Panic => {
+                    let val = stack.pop().unwrap();
+                    let err = val.take_string().unwrap_or_else(|_| "".to_string());
+                    return Err(Box::new(EvalAltResult::ErrorRuntime(err, pos)));
                 }
 
                 CreateVariable{ ref name } => {
@@ -577,7 +593,22 @@ impl BytecodeBuilder {
                 self.break_instrs.push(self.instructions.len());
                 self.instructions.push(Branch{ target: !0 });
             }
-            Stmt::ReturnWithVal(..) => unimplemented!(),
+            Stmt::ReturnWithVal(expr, ReturnType::Return, _) => {
+                if let Some(expr) = expr { 
+                    self.build_expr(expr)?
+                };
+                self.instructions.push(Return);
+            }
+            Stmt::ReturnWithVal(expr, ReturnType::Exception, _) => {
+                if let Some(expr) = expr {
+                    self.build_expr(expr)?;
+                }
+                else {
+                    self.instructions.push(StringConstant("".into()));
+                }
+
+                self.instructions.push(Panic);
+            }
 
             Stmt::Let(name, Some(expr), _) => {
                 self.build_expr(expr)?;
