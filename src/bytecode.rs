@@ -1,13 +1,27 @@
-use std::mem::replace;
-use std::num::NonZeroUsize;
+use crate::stdlib::{
+    mem::replace,
+    num::NonZeroUsize,
+    rc::Rc,
+    sync::Arc,
+};
 
-use crate::engine::KEYWORD_EVAL;
-use crate::token::Position;
-use crate::parser::{Expr, Stmt, AST};
-use crate::Dynamic;
+use crate::{
+    engine::{
+        KEYWORD_EVAL,
+        KEYWORD_TYPE_OF,
+        Engine,
+        FunctionsLib,
+    },
+    token::Position,
+    parser::{Expr, Stmt, AST},
+    Dynamic,
+    scope::{self, Scope},
+    result::EvalAltResult,
+};
 
 use self::Instruction::*;
 
+#[derive(Debug)]
 pub enum Instruction {
     /// Stack [.., v] -> [..]
     Pop,
@@ -41,7 +55,7 @@ pub enum Instruction {
     BranchIf{ target: u32 },
     /// Stack [.., v] -> [..], v must be a bool
     BranchIfNot{ target: u32 },
-    /// Stack [.., f] -> if let Some(v) = f() { [.., f, v] } else { [..] }
+    /// Stack [.., arr] -> if let Some(v) = iter_fn::<arr>(arr) { [.., arr, v] } else { [..] }
     CallIterFn{ end_target: u32 },
 
     // TODO: Intern strings somewhere and use indicies instead of String.
@@ -52,47 +66,211 @@ pub enum Instruction {
     /// Scopes[name] = v
     SetVariable{ name: String },
     /// Stack [..] -> [.., Scopes[name]]
-    SearchVariable{ name: String, begin: Position },
+    SearchVariable{ name: String },
     /// Stack [..] -> [.., Scopes[scopes.len() - index]]
     GetVariable{ index: NonZeroUsize },
 
     // TODO: Consider making functions first class?
     // TODO: The default_value option here... seems suspicious. Possibly always None?
     /// Stack [.., arg1, ..., argn] -> [.., ret]
-    Call{ fn_name: String, default_value: Option<Box<Dynamic>> },
+    Call{ fn_name: String, args_len: u8, default_value: Option<Box<Dynamic>> },
 
     /// Stack [..., lhs, rhs] -> [.., lhs in rhs]
     In,
-    And,
-    Or,
-}
-
-pub struct BytecodeExecution {
-    stack: Vec<Dynamic>,
 }
 
 pub struct Bytecode {
     instructions: Vec<Instruction>,
+    #[cfg(feature = "sync")] pub(crate) fn_lib: Arc<FunctionsLib>,
+    #[cfg(not(feature = "sync"))] pub(crate) fn_lib: Rc<FunctionsLib>,
 }
 
 struct BytecodeBuilder {
     instructions: Vec<Instruction>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct StorageIdx {
-    idx: u32
-}
-
+#[derive(Debug, Clone)]
 pub enum BuildError {
     AssignmentToConstant(String, Position),
     AssignmentToUnknownLHS(Position),
 }
 
-enum BuildAltResult {
-    Err(BuildError),
-    Return(StorageIdx),
-    // Yield(StorageIdx),
+impl Engine {
+    /// Evaluate bytecode
+    /// 
+    /// # Example
+    /// 
+    /// ```
+    /// # fn main() -> Result<(), rhai::EvalAltResult> {
+    /// use rhai::Engine;
+    /// use rhai::bytecode::Bytecode;
+    /// 
+    /// let engine = Engine::new();
+    /// 
+    /// let ast = engine.compile("40 + 2").unwrap();
+    /// let bytecode = Bytecode::from_ast(&ast).unwrap();
+    /// let res = engine.eval_bytecode(&bytecode).unwrap();
+    /// 
+    /// assert_eq!(res.as_int().unwrap(), 42);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn eval_bytecode(&self, bytecode: &Bytecode) -> Result<Dynamic, EvalAltResult> {
+        let mut stack: Vec<Dynamic> = vec![];
+        let mut scope = Scope::new();
+        let mut scope_ends = vec![];
+        let mut instr_ptr: u32 = 0;
+
+        // Dummy position and level for now
+        let pos = Position::new(1, 0);
+        let level = 0;
+
+        println!("{:?}", bytecode.instructions);
+
+        loop {
+            match bytecode.instructions[instr_ptr as usize] {
+                Instruction::Pop => { 
+                    let p = stack.pop();
+                    debug_assert!(p.is_some());
+                },
+                Instruction::PushUnit => stack.push(().into()),
+                Instruction::PushScope => scope_ends.push(scope.len()),
+                Instruction::PopScope => scope.rewind(scope_ends.pop().unwrap()),
+
+                Instruction::TrueConstant => stack.push(true.into()),
+                Instruction::FalseConstant => stack.push(false.into()),
+                Instruction::IntegerConstant(i) => stack.push(i.into()),
+                #[cfg(not(feature = "no_float"))]
+                Instruction::FloatConstant(f) => stack.push(f.into()),
+                Instruction::StringConstant(ref s) => stack.push(s.clone().into()),
+                Instruction::CharConstant(c) => stack.push(c.into()),
+
+                Instruction::Branch{ target } => {
+                    instr_ptr = target;
+                    continue
+                }
+                Instruction::BranchIf{ target } => {
+                    let guard = stack.pop().unwrap().as_bool();
+
+                    match guard {
+                        Ok(true) => {
+                            instr_ptr = target;
+                            continue
+                        }
+                        Ok(false) => {}
+                        Err(_) => return Err(EvalAltResult::ErrorLogicGuard(pos))
+                    }
+                }
+                Instruction::BranchIfNot{ target } => {
+                    let guard = stack.pop().unwrap().as_bool();
+
+                    match guard {
+                        Ok(false) => {
+                            instr_ptr = target;
+                            continue
+                        }
+                        Ok(true) => {}
+                        Err(_) => return Err(EvalAltResult::ErrorLogicGuard(pos))
+                    }
+                }
+                Instruction::CallIterFn{ end_target } => {
+
+                    /*
+                    let arr = stack.pop().unwrap();
+                    let tid = arr.type_id();
+
+                    // TODO: Really need to find this before now, or at least cache it somehow.
+                    // Apart from being slow, this is pushing the bounds of correctness... if somehow
+                    // the function this is referring to changed inside the iterator, the subsequent
+                    // iterations would change which function they where using as the iter function.
+                    if let Some(iter_fn) = self.type_iterators.get(&tid).or_else(|| {
+                        self.packages
+                            .iter()
+                            .find(|pkg| pkg.type_iterators.contains_key(&tid))
+                            .and_then(|pkg| pkg.type_iterators.get(&tid))
+                    }) {
+                        stack.push(iter_fn(arr))
+                    }
+                    */
+
+                    unimplemented!()
+                }
+
+                CreateVariable{ ref name } => {
+                    let v = stack.pop().unwrap();
+                    scope.push_dynamic(name.clone(), v);
+                }
+
+                SetVariable{ ref name } => {
+                    let v = stack.pop().unwrap();
+                    match scope.get(name) {
+                        None => return Err(EvalAltResult::ErrorVariableNotFound(name.clone(), pos)),
+                        Some((index, scope::EntryType::Normal)) => {
+                            *scope.get_mut(index).0 = v;
+                        }
+                        Some((index, scope::EntryType::Constant)) => {
+                            return Err(EvalAltResult::ErrorAssignmentToConstant(name.clone(), pos));
+                        }
+                    }
+                }
+
+                SearchVariable{ref name } => {
+                    match scope.get_dynamic(name) {
+                        Some(value) => stack.push(value),
+                        None => return Err(EvalAltResult::ErrorVariableNotFound(name.clone(), pos)),
+                    }
+                }
+
+                GetVariable{index} => {
+                    stack.push(scope.get_mut(scope.len() - index.get()).0.clone())
+                }
+
+                Call{ ref fn_name, args_len, ref default_value } => {
+                    let mut args = stack.split_off(stack.len() - args_len as usize);
+                    // TODO: Remove before commit
+                    assert_eq!(args.len(), args_len as usize);
+                    
+                    // TODO: This seems to be an entirely pointless allocation, but it's needed to fit the API.
+                    // The AST execution implementation does the same thing. Despite passing mut pointers
+                    // instead of just the value nothing but the Drop fn ever looks at the value again.
+                    let mut args: Vec<_> = args.iter_mut().collect();
+
+                    // TODO:
+                    // - There is way too much computation done in this fn call for my taste
+                    // - I'm not qutie sure what happens, but I don't think this ends up calling more bytecode
+                    let v = self.exec_fn_call (
+                        &bytecode.fn_lib,
+                        fn_name,
+                        &mut args,
+                        default_value.as_ref().map(|val| &**val),
+                        pos,
+                        level
+                    );
+
+                    match v {
+                        Ok(v) => stack.push(v),
+                        Err(err) => return Err(*err)
+                    }
+                }
+
+                Instruction::In => {
+                    let rhs = stack.pop().unwrap();
+                    let lhs = stack.pop().unwrap();
+                    let v = self.eval_in_expr(
+                        &bytecode.fn_lib,
+                        lhs,
+                        pos,
+                        rhs,
+                        pos,
+                        level
+                    ).map_err(|err| *err)?;
+                    stack.push(v);
+                }
+            }
+
+            instr_ptr += 1;
+        }
+    }
 }
 
 impl Instruction {
@@ -149,7 +327,8 @@ impl BytecodeBuilder {
             })
             .map(|_success| {
                 Bytecode {
-                    instructions: replace(&mut self.instructions, vec![])
+                    instructions: replace(&mut self.instructions, vec![]),
+                    fn_lib: ast.1.clone(),
                 }
             })
     }
@@ -232,6 +411,7 @@ impl BytecodeBuilder {
             Stmt::For(name, expr, body) => {
                 self.build_expr(expr)?;
                 
+                self.instructions.push(PushScope);
                 self.instructions.push(PushUnit);
                 self.instructions.push(CreateVariable{ name: name.clone() });
                 
@@ -246,6 +426,7 @@ impl BytecodeBuilder {
 
                 let end_target = self.instructions.len() as u32;
                 self.instructions[call_iter_instr].set_end_target_call_iter_fn(end_target);
+                self.instructions.push(PopScope);
             }
 
             Stmt::Continue(..) => unimplemented!(),
@@ -295,7 +476,7 @@ impl BytecodeBuilder {
                 self.instructions.push(GetVariable{ index }),
             // TODO: Is this ever used without eval?
             Expr::Variable(ref id, _, pos) =>
-                self.instructions.push(SearchVariable{ name: id.clone(), begin: pos }),
+                self.instructions.push(SearchVariable{ name: id.clone() }),
             Expr::Property(_, _) => panic!("unexpected property."),
 
             Expr::Stmt(ref stmt, _) => self.build_stmt(stmt)?,
@@ -361,7 +542,11 @@ impl BytecodeBuilder {
                     unimplemented!()
                 }
 
-                self.instructions.push(Call{ fn_name: fn_name.to_string(), default_value: def_val.clone()});
+                self.instructions.push(Call{ 
+                    fn_name: fn_name.to_string(), 
+                    args_len: arg_exprs.len() as u8,
+                    default_value: def_val.clone()
+                });
             }
 
             Expr::In(ref lhs, ref rhs, _) => {

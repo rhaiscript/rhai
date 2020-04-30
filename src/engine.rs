@@ -671,7 +671,7 @@ impl Engine {
     }
 
     // Has a system function an override?
-    fn has_override(&self, fn_lib: &FunctionsLib, name: &str) -> bool {
+    pub(crate) fn has_override(&self, fn_lib: &FunctionsLib, name: &str) -> bool {
         let hash = calc_fn_hash(name, once(TypeId::of::<String>()));
 
         // First check registered functions
@@ -683,7 +683,7 @@ impl Engine {
     }
 
     // Perform an actual function call, taking care of special functions
-    fn exec_fn_call(
+    pub(crate) fn exec_fn_call(
         &self,
         fn_lib: &FunctionsLib,
         fn_name: &str,
@@ -1088,18 +1088,15 @@ impl Engine {
     }
 
     // Evaluate an 'in' expression
-    fn eval_in_expr(
+    pub(crate) fn eval_in_expr(
         &self,
-        scope: &mut Scope,
-        state: &mut State,
         fn_lib: &FunctionsLib,
-        lhs: &Expr,
-        rhs: &Expr,
+        mut lhs_value: Dynamic,
+        lhs_pos: Position,
+        rhs_value: Dynamic,
+        rhs_pos: Position,
         level: usize,
     ) -> Result<Dynamic, Box<EvalAltResult>> {
-        let mut lhs_value = self.eval_expr(scope, state, fn_lib, lhs, level)?;
-        let rhs_value = self.eval_expr(scope, state, fn_lib, rhs, level)?;
-
         match rhs_value {
             Dynamic(Union::Array(mut rhs_value)) => {
                 let def_value = false.into();
@@ -1110,7 +1107,7 @@ impl Engine {
                     let args = &mut [&mut lhs_value, value];
                     let def_value = Some(&def_value);
                     if self
-                        .call_fn_raw(None, fn_lib, "==", args, def_value, rhs.position(), level)?
+                        .call_fn_raw(None, fn_lib, "==", args, def_value, rhs_pos, level)?
                         .as_bool()
                         .unwrap_or(false)
                     {
@@ -1126,7 +1123,7 @@ impl Engine {
                 match lhs_value {
                     Dynamic(Union::Str(s)) => Ok(rhs_value.contains_key(s.as_ref()).into()),
                     Dynamic(Union::Char(c)) => Ok(rhs_value.contains_key(&c.to_string()).into()),
-                    _ => Err(Box::new(EvalAltResult::ErrorInExpr(lhs.position()))),
+                    _ => Err(Box::new(EvalAltResult::ErrorInExpr(lhs_pos))),
                 }
             }
             Dynamic(Union::Str(rhs_value)) => {
@@ -1134,10 +1131,10 @@ impl Engine {
                 match lhs_value {
                     Dynamic(Union::Str(s)) => Ok(rhs_value.contains(s.as_ref()).into()),
                     Dynamic(Union::Char(c)) => Ok(rhs_value.contains(c).into()),
-                    _ => Err(Box::new(EvalAltResult::ErrorInExpr(lhs.position()))),
+                    _ => Err(Box::new(EvalAltResult::ErrorInExpr(lhs_pos))),
                 }
             }
-            _ => Err(Box::new(EvalAltResult::ErrorInExpr(rhs.position()))),
+            _ => Err(Box::new(EvalAltResult::ErrorInExpr(rhs_pos))),
         }
     }
 
@@ -1293,7 +1290,9 @@ impl Engine {
             }
 
             Expr::In(lhs, rhs, _) => {
-                self.eval_in_expr(scope, state, fn_lib, lhs.as_ref(), rhs.as_ref(), level)
+                let lhs_value = self.eval_expr(scope, state, fn_lib, lhs, level)?;
+                let rhs_value = self.eval_expr(scope, state, fn_lib, rhs, level)?;
+                self.eval_in_expr(fn_lib, lhs_value, lhs.position(), rhs_value, rhs.position(), level)
             }
 
             Expr::And(lhs, rhs, _) => Ok((self
@@ -1342,6 +1341,7 @@ impl Engine {
         fn_lib: &FunctionsLib,
         stmt: &Stmt,
         level: usize,
+        // TODO: Is the Box in the return type unecessary?
     ) -> Result<Dynamic, Box<EvalAltResult>> {
         match stmt {
             // No-op

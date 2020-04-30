@@ -297,6 +297,14 @@ impl<'a> Scope<'a> {
             })
     }
 
+    pub(crate) fn get_dynamic(&self, name: &str) -> Option<Dynamic> {
+        self.0
+            .iter()
+            .rev()
+            .find(|Entry { name: key, .. }| name == key)
+            .map(|Entry{ value, .. }| value.clone())
+    }
+
     /// Get the value of an entry in the Scope, starting from the last.
     ///
     /// # Examples
