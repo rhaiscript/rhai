@@ -265,10 +265,6 @@ impl Engine {
                     let arr = stack.pop().unwrap();
                     let tid = arr.type_id();
 
-                    // TODO: Really need to find this before now, or at least cache it somehow.
-                    // Apart from being slow, this is pushing the bounds of correctness... if somehow
-                    // the function this is referring to changed inside the iterator, the subsequent
-                    // iterations would change which function they where using as the iter function.
                     if let Some(iter_fn) = self.type_iterators.get(&tid).or_else(|| {
                         self.packages
                             .iter()
@@ -603,7 +599,6 @@ impl BytecodeBuilder {
             }
 
             Stmt::Loop(body) => {
-                // TODO: Deal with break...
                 let start_target = self.instructions.len() as u32;
                 let old_cont_break = self.save_continue_break(start_target);
                 self.build_stmt(body)?;
@@ -626,7 +621,6 @@ impl BytecodeBuilder {
                 self.instructions.push(CallIterFn{ end_target: !0 });
                 self.instructions.push(SetVariable{ name: name.clone() });
 
-                // TODO: Deal with break...
                 self.build_stmt(body)?;
                 self.instructions.push(Branch{ target: cond_target });
 
