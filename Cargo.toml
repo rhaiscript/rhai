@@ -32,6 +32,7 @@ only_i64 = []       # set INT=i64 (default) and disable support for all other in
 no_index = []       # no arrays and indexing
 no_object = []      # no custom objects
 no_function = []    # no script-defined functions
+no_closures = []    # no automatic read/write binding of anonymous function's local variables to it's external context
 no_module = []      # no modules
 internals = []      # expose internal data structures
 

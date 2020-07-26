@@ -190,3 +190,24 @@ fn test_fn_ptr_curry_call() -> Result<(), Box<EvalAltResult>> {
 
     Ok(())
 }
+
+#[test]
+fn test_fn_closures() -> Result<(), Box<EvalAltResult>> {
+    let mut engine = Engine::new();
+
+    let res = engine.eval::<INT>(
+        r#"
+            let x = 100;
+
+            let f = || x;
+
+            let x = 200;
+
+            f.call()
+        "#
+    ).unwrap();
+
+    panic!("{:#?}", res);
+
+    Ok(())
+}
