@@ -34,7 +34,7 @@ fn pad<T: Variant + Clone>(
     _: &Module,
     args: &mut [&mut Dynamic],
 ) -> FuncReturn<()> {
-    let len = *args[1].downcast_ref::<INT>().unwrap();
+    let len = *args[1].read_lock::<INT>().unwrap();
 
     // Check if array will be over max size limit
     #[cfg(not(feature = "unchecked"))]
@@ -52,7 +52,7 @@ fn pad<T: Variant + Clone>(
 
     if len > 0 {
         let item = args[2].clone();
-        let list = args[0].downcast_mut::<Array>().unwrap();
+        let mut list = args[0].write_lock::<Array>().unwrap();
 
         if len as usize > list.len() {
             list.resize(len as usize, item);

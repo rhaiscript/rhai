@@ -228,7 +228,7 @@ def_package!(crate:MoreStringPackage:"Additional string utilities, including str
         "pad",
         &[TypeId::of::<ImmutableString>(), TypeId::of::<INT>(), TypeId::of::<char>()],
         |_engine: &Engine, _: &Module, args: &mut [&mut Dynamic]| {
-            let len = *args[1].downcast_ref::< INT>().unwrap();
+            let len = *args[1].read_lock::< INT>().unwrap();
 
             // Check if string will be over max size limit
             #[cfg(not(feature = "unchecked"))]
@@ -242,8 +242,8 @@ def_package!(crate:MoreStringPackage:"Additional string utilities, including str
             }
 
             if len > 0 {
-                let ch = *args[2].downcast_ref::< char>().unwrap();
-                let s = args[0].downcast_mut::<ImmutableString>().unwrap();
+                let ch = *args[2].read_lock::< char>().unwrap();
+                let mut s = args[0].write_lock::<ImmutableString>().unwrap();
 
                 let orig_len = s.chars().count();
 

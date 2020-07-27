@@ -2,7 +2,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::any::{Dynamic, Variant};
+use crate::any::{Dynamic, Variant, DynamicWriteLock};
 use crate::engine::Engine;
 use crate::fn_native::{CallableFunction, FnAny, FnCallArgs, SendSync};
 use crate::module::Module;
@@ -97,11 +97,11 @@ pub trait RegisterResultFn<FN, ARGS> {
 pub struct Mut<T>(T);
 //pub struct Ref<T>(T);
 
-/// Dereference into &mut.
+/// Dereference into DynamicWriteLock
 #[inline(always)]
-pub fn by_ref<T: Variant + Clone>(data: &mut Dynamic) -> &mut T {
-    // Directly cast the &mut Dynamic into &mut T to access the underlying data.
-    data.downcast_mut::<T>().unwrap()
+pub fn by_ref<T: Variant + Clone>(data: &mut Dynamic) -> DynamicWriteLock<T> {
+    // Directly cast the &mut Dynamic into DynamicWriteLock to access the underlying data.
+    data.write_lock::<T>().unwrap()
 }
 
 /// Dereference into value.
@@ -124,24 +124,23 @@ pub fn by_value<T: Variant + Clone>(data: &mut Dynamic) -> T {
 
 /// This macro creates a closure wrapping a registered function.
 macro_rules! make_func {
-	($fn:ident : $map:expr ; $($par:ident => $convert:expr),*) => {
+	($fn:ident : $map:expr ; $($par:ident => $let:stmt => $convert:expr => $arg:expr),*) => {
 //   ^ function pointer
 //               ^ result mapping function
 //                           ^ function parameter generic type name (A, B, C etc.)
-//                                           ^ dereferencing function
+//                                          ^ argument let statement(e.g. let mut A ...)
+//                                                       ^ dereferencing function
+//                                                                         ^ argument reference expression(like A, *B, &mut C etc)
 
 		Box::new(move |_: &Engine, _: &Module, args: &mut FnCallArgs| {
             // The arguments are assumed to be of the correct number and types!
 
 			let mut _drain = args.iter_mut();
-			$(
-			// Downcast every element, panic in case of a type mismatch (which shouldn't happen).
-			// Call the user-supplied function using ($convert) to access it either by value or by reference.
-			let $par = ($convert)(_drain.next().unwrap());
-			)*
+			$($let)*
+			$($par = ($convert)(_drain.next().unwrap()); )*
 
             // Call the function with each parameter value
-			let r = $fn($($par),*);
+			let r = $fn($($arg),*);
 
             // Map the result
             $map(r)
@@ -181,12 +180,13 @@ macro_rules! def_register {
     () => {
         def_register!(imp from_pure :);
     };
-    (imp $abi:ident : $($par:ident => $mark:ty => $param:ty => $clone:expr),*) => {
+    (imp $abi:ident : $($par:ident => $arg:expr => $mark:ty => $param:ty => $let:stmt => $clone:expr),*) => {
     //   ^ function ABI type
     //                  ^ function parameter generic type name (A, B, C etc.)
-    //                                ^ function parameter marker type (T, Ref<T> or Mut<T>)
-    //                                            ^ function parameter actual type (T, &T or &mut T)
-    //                                                         ^ dereferencing function
+//                                    ^ call argument(like A, *B, &mut C etc)
+    //                                            ^ function parameter marker type (T, Ref<T> or Mut<T>)
+    //                                                         ^ function parameter actual type (T, &T or &mut T)
+    //                                                                      ^ argument let statement
         impl<
             $($par: Variant + Clone,)*
             FN: Fn($($param),*) -> RET + SendSync + 'static,
@@ -196,7 +196,7 @@ macro_rules! def_register {
             fn register_fn(&mut self, name: &str, f: FN) -> &mut Self {
                 self.global_module.set_fn(name, FnAccess::Public,
                     &[$(map_type_id::<$par>()),*],
-                    CallableFunction::$abi(make_func!(f : map_dynamic ; $($par => $clone),*))
+                    CallableFunction::$abi(make_func!(f : map_dynamic ; $($par => $let => $clone => $arg),*))
                 );
                 self
             }
@@ -210,7 +210,7 @@ macro_rules! def_register {
             fn register_result_fn(&mut self, name: &str, f: FN) -> &mut Self {
                 self.global_module.set_fn(name, FnAccess::Public,
                     &[$(map_type_id::<$par>()),*],
-                    CallableFunction::$abi(make_func!(f : map_result ; $($par => $clone),*))
+                    CallableFunction::$abi(make_func!(f : map_result ; $($par => $let => $clone => $arg),*))
                 );
                 self
             }
@@ -219,11 +219,11 @@ macro_rules! def_register {
         //def_register!(imp_pop $($par => $mark => $param),*);
     };
     ($p0:ident $(, $p:ident)*) => {
-        def_register!(imp from_pure   : $p0 => $p0      => $p0      => by_value $(, $p => $p => $p => by_value)*);
-        def_register!(imp from_method : $p0 => Mut<$p0> => &mut $p0 => by_ref   $(, $p => $p => $p => by_value)*);
+        def_register!(imp from_pure   : $p0 => $p0      => $p0      => $p0      => let $p0     => by_value $(, $p => $p => $p => $p => let $p => by_value)*);
+        def_register!(imp from_method : $p0 => &mut $p0  => Mut<$p0> => &mut $p0 => let mut $p0 => by_ref   $(, $p => $p => $p => $p => let $p => by_value)*);
         //                ^ CallableFunction
-        // handle the first parameter                                  ^ first parameter passed through
-        //                                                                                            ^ others passed by value (by_value)
+        // handle the first parameter                                              ^ first parameter passed through
+        //                                                                                                     ^ others passed by value (by_value)
 
         // Currently does not support first argument which is a reference, as there will be
         // conflicting implementations since &T: Any and T: Any cannot be distinguished

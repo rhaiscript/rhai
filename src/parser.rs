@@ -1814,10 +1814,10 @@ fn parse_unary(
         // | ...
         #[cfg(not(feature = "no_function"))]
         Token::Pipe | Token::Or => {
-            let mut _externals = Default::default();
-            let mut state = ParseState::new(
+            let mut externals = Default::default();
+            let mut anon_fn_state = ParseState::new(
                 state.engine,
-                &mut _externals,
+                &mut externals,
                 state.max_function_expr_depth,
                 #[cfg(not(feature = "unchecked"))]
                 state.max_function_expr_depth,
@@ -1834,7 +1834,13 @@ fn parse_unary(
                 pos: *token_pos,
             };
 
-            let (expr, func) = parse_anon_fn(input, &mut state, lib, settings)?;
+            let (expr, func) = parse_anon_fn(input, &mut anon_fn_state, lib, settings)?;
+
+            #[cfg(not(feature = "no_closures"))]
+            // registering closures in it's parent context
+            for closure in externals.iter() {
+                let _ = state.access_var(closure);
+            }
 
             // Qualifiers (none) + function name + number of arguments.
             let hash = calc_fn_hash(empty(), &func.name, func.params.len(), empty());

@@ -1,6 +1,6 @@
 //! Module defining interfaces to native-Rust functions.
 
-use crate::any::Dynamic;
+use crate::any::{Dynamic, Variant};
 use crate::engine::Engine;
 use crate::module::Module;
 use crate::result::EvalAltResult;
@@ -16,9 +16,9 @@ use crate::stdlib::{boxed::Box, convert::TryFrom, fmt, string::String, vec::Vec}
 use crate::stdlib::mem;
 
 #[cfg(not(feature = "sync"))]
-use crate::stdlib::rc::Rc;
+use crate::stdlib::{rc::Rc, cell::{RefCell, Ref, RefMut}};
 #[cfg(feature = "sync")]
-use crate::stdlib::sync::Arc;
+use crate::stdlib::sync::{Arc, RwLock};
 
 /// Trait that maps to `Send + Sync` only under the `sync` feature.
 #[cfg(feature = "sync")]
@@ -32,10 +32,17 @@ pub trait SendSync {}
 #[cfg(not(feature = "sync"))]
 impl<T> SendSync for T {}
 
+/// Immutable reference counting container
 #[cfg(not(feature = "sync"))]
 pub type Shared<T> = Rc<T>;
 #[cfg(feature = "sync")]
 pub type Shared<T> = Arc<T>;
+
+/// Mutable reference counting container(read-write lock)
+#[cfg(not(feature = "sync"))]
+pub type SharedMut<T> = Rc<RefCell<T>>;
+#[cfg(feature = "sync")]
+pub type SharedMut<T> = Arc<RwLock<T>>;
 
 /// Consume a `Shared` resource and return a mutable reference to the wrapped value.
 /// If the resource is shared (i.e. has other outstanding references), a cloned copy is used.

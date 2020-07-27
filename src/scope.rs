@@ -333,7 +333,7 @@ impl<'a> Scope<'a> {
             .iter()
             .rev()
             .find(|Entry { name: key, .. }| name == key)
-            .and_then(|Entry { value, .. }| value.downcast_ref::<T>().cloned())
+            .and_then(|Entry { value, .. }| value.read::<T>())
     }
 
     /// Update the value of the named entry.

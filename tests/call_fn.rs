@@ -197,13 +197,19 @@ fn test_fn_closures() -> Result<(), Box<EvalAltResult>> {
 
     let res = engine.eval::<INT>(
         r#"
-            let x = 100;
+            let z = shared(150);
 
-            let f = || x;
+            let f1 = || {
+                let res;
 
-            let x = 200;
+                for x in [1, 2, 3, 4, 5, 6] {
+                    res = (|| (|| x + z).call()).call();
+                }
 
-            f.call()
+                res;
+            };
+
+            f1.call()
         "#
     ).unwrap();
 
