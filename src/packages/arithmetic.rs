@@ -362,12 +362,7 @@ def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
         reg_sign!(lib, "sign", f64, f64);
     }
 
-    // Basic arithmetic for Decimal
     if cfg!(not(feature = "no_decimal")) {
-        reg_op!(lib, "+", add_u, Decimal);
-        reg_op!(lib, "-", sub_u, Decimal);
-        reg_op!(lib, "*", mul_u, Decimal);
-        reg_op!(lib, "/", div_u, Decimal);
         lib.set_fn_1("sign", |x: Decimal| {
             Ok(
                 if x.is_sign_positive() {

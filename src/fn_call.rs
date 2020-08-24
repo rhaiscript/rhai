@@ -27,6 +27,9 @@ use crate::{
 #[cfg(not(feature = "no_float"))]
 use crate::parser::FLOAT;
 
+#[cfg(not(feature = "no_decimal"))]
+use rust_decimal::Decimal;
+
 #[cfg(not(feature = "no_index"))]
 use crate::engine::{FN_IDX_GET, FN_IDX_SET};
 
@@ -1193,6 +1196,27 @@ pub fn run_builtin_binary_op(
             "/" => return Ok(Some((x / y).into())),
             "%" => return Ok(Some((x % y).into())),
             "~" => return pow_f_f(x, y).map(Into::into).map(Some),
+            "==" => return Ok(Some((x == y).into())),
+            "!=" => return Ok(Some((x != y).into())),
+            ">" => return Ok(Some((x > y).into())),
+            ">=" => return Ok(Some((x >= y).into())),
+            "<" => return Ok(Some((x < y).into())),
+            "<=" => return Ok(Some((x <= y).into())),
+            _ => (),
+        }
+    }
+
+    #[cfg(not(feature = "no_decimal"))]
+    if args_type == TypeId::of::<Decimal>() {
+        let x = x.clone().cast::<Decimal>();
+        let y = y.clone().cast::<Decimal>();
+
+        match op {
+            "+" => return Ok(Some((x + y).into())),
+            "-" => return Ok(Some((x - y).into())),
+            "*" => return Ok(Some((x * y).into())),
+            "/" => return Ok(Some((x / y).into())),
+            "%" => return Ok(Some((x % y).into())),
             "==" => return Ok(Some((x == y).into())),
             "!=" => return Ok(Some((x != y).into())),
             ">" => return Ok(Some((x > y).into())),

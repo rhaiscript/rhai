@@ -111,6 +111,51 @@ fn test_decimal() -> Result<(), Box<EvalAltResult>> {
 }
 
 #[test]
+fn test_decimal_array() -> Result<(), Box<EvalAltResult>> {
+    let engine = Engine::new();
+
+    assert_eq!(
+        engine.eval::<Decimal>(
+            r#"
+            let x = [1.0, 2.0, 3.0]; 
+            x[1]"#
+        )?,
+        Decimal::from_str("2.0").unwrap()
+    );
+
+    assert_eq!(
+        engine.eval::<Decimal>(
+            r#"
+            let y = [1.0, 2.0, 3.0]; 
+            y[1] = 5.0;
+            y[1]"#
+        )?, 
+        Decimal::from_str("5.0").unwrap()
+    );
+
+    #[cfg(not(feature = "no_object"))]
+    assert_eq!(
+        engine.eval::<Decimal>(
+            r#"
+                let x = [2.0, 9.0];
+                x.insert(-1, 1.0);
+                x.insert(999, 3.0);
+
+                let r = x.remove(2);
+
+                let y = [4.0, 5.0];
+                x.append(y);
+
+                x[0] + x[1] + x[2] + x[3] + x[4]
+           "#
+        )?,
+        Decimal::from_str("15.0").unwrap()
+    );
+
+    Ok(())
+}
+
+#[test]
 #[cfg(not(feature = "no_object"))]
 fn test_struct_with_decimal() -> Result<(), Box<EvalAltResult>> {
     #[derive(Clone)]

@@ -740,22 +740,6 @@ impl Hash for FloatWrapper {
     }
 }
 
-/// This type is volatile and may change.
-#[cfg(not(feature = "no_decimal"))]
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
-pub struct DecimalWrapper(pub Decimal, pub Position);
-
-#[cfg(not(feature = "no_decimal"))]
-impl Hash for DecimalWrapper {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        let dec = &self.0;
-        // TODO(BH): does this need to be to_le_bytes()?
-        let bytes = dec.serialize();
-        state.write(&bytes);
-        self.1.hash(state);
-    }
-}
-
 /// [INTERNALS] An expression sub-tree.
 /// Exported under the `internals` feature only.
 ///
@@ -774,7 +758,7 @@ pub enum Expr {
     FloatConstant(Box<FloatWrapper>),
     /// Decimal constant
     #[cfg(not(feature = "no_decimal"))]
-    DecimalConstant(Box<DecimalWrapper>),
+    DecimalConstant(Box<(Decimal, Position)>),
     /// Character constant.
     CharConstant(Box<(char, Position)>),
     /// String constant.
@@ -1699,7 +1683,7 @@ fn parse_primary(
         Token::FloatConstant(x) => Expr::FloatConstant(Box::new(FloatWrapper(x, settings.pos))),
         #[cfg(not(feature = "no_decimal"))]
         Token::DecimalConstant(x) => {
-            Expr::DecimalConstant(Box::new(DecimalWrapper(x, settings.pos)))
+            Expr::DecimalConstant(Box::new((x, settings.pos)))
         }
         Token::CharConstant(c) => Expr::CharConstant(Box::new((c, settings.pos))),
         Token::StringConstant(s) => Expr::StringConstant(Box::new((s.into(), settings.pos))),
@@ -1873,7 +1857,7 @@ fn parse_unary(
                             ))));
 
                             #[cfg(not(feature = "no_decimal"))]
-                            return Some(Expr::DecimalConstant(Box::new(DecimalWrapper(
+                            return Some(Expr::DecimalConstant(Box::new((
                                 Decimal::from_i64(-x.0).unwrap(),
                                 pos,
                             ))));
@@ -1894,7 +1878,7 @@ fn parse_unary(
                 // Negative Decimal
                 #[cfg(not(feature = "no_decimal"))]
                 Expr::DecimalConstant(x) => {
-                    Ok(Expr::DecimalConstant(Box::new(DecimalWrapper(-x.0, x.1))))
+                    Ok(Expr::DecimalConstant(Box::new((-x.0, x.1))))
                 }
 
                 // Call negative function
@@ -3563,7 +3547,7 @@ pub fn map_dynamic_to_expr(value: Dynamic, pos: Position) -> Option<Expr> {
         Union::Float(value) => Some(Expr::FloatConstant(Box::new(FloatWrapper(value, pos)))),
 
         #[cfg(not(feature = "no_decimal"))]
-        Union::Decimal(value) => Some(Expr::DecimalConstant(Box::new(DecimalWrapper(*value, pos)))),
+        Union::Decimal(value) => Some(Expr::DecimalConstant(Box::new((*value, pos)))),
 
         Union::Unit(_) => Some(Expr::Unit(pos)),
         Union::Int(value) => Some(Expr::IntegerConstant(Box::new((value, pos)))),

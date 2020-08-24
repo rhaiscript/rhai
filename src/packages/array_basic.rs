@@ -15,6 +15,9 @@ use crate::stdlib::{any::TypeId, boxed::Box};
 #[cfg(not(feature = "unchecked"))]
 use crate::stdlib::string::ToString;
 
+#[cfg(not(feature = "no_decimal"))]
+use rust_decimal::Decimal;
+
 // Register array utility functions
 fn push<T: Variant + Clone>(list: &mut Array, item: T) -> FuncReturn<()> {
     list.push(Dynamic::from(item));
@@ -122,6 +125,13 @@ def_package!(crate:BasicArrayPackage:"Basic array utilities.", lib, {
         reg_op!(lib, "push", push, f32, f64);
         reg_pad!(lib, "pad", pad, f32, f64);
         reg_tri!(lib, "insert", ins, f32, f64);
+    }
+
+    #[cfg(not(feature = "no_decimal"))]
+    {
+        reg_op!(lib, "push", push, Decimal);
+        reg_pad!(lib, "pad", pad, Decimal);
+        reg_tri!(lib, "insert", ins, Decimal);
     }
 
     lib.set_fn_1_mut(
