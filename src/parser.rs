@@ -1698,7 +1698,9 @@ fn parse_primary(
         #[cfg(not(feature = "no_float"))]
         Token::FloatConstant(x) => Expr::FloatConstant(Box::new(FloatWrapper(x, settings.pos))),
         #[cfg(not(feature = "no_decimal"))]
-        Token::DecimalConstant(x) => Expr::DecimalConstant(Box::new(DecimalWrapper(x, settings.pos))),
+        Token::DecimalConstant(x) => {
+            Expr::DecimalConstant(Box::new(DecimalWrapper(x, settings.pos)))
+        }
         Token::CharConstant(c) => Expr::CharConstant(Box::new((c, settings.pos))),
         Token::StringConstant(s) => Expr::StringConstant(Box::new((s.into(), settings.pos))),
 

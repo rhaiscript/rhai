@@ -368,7 +368,7 @@ def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
         reg_op!(lib, "-", sub_u, Decimal);
         reg_op!(lib, "*", mul_u, Decimal);
         reg_op!(lib, "/", div_u, Decimal);
-        lib.set_fn_1("sign", |x: Decimal| { 
+        lib.set_fn_1("sign", |x: Decimal| {
             Ok(
                 if x.is_sign_positive() {
                     Decimal::one();
