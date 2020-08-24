@@ -10,6 +10,9 @@ use crate::engine::Array;
 #[cfg(not(feature = "no_object"))]
 use crate::engine::Map;
 
+#[cfg(not(feature = "no_decimal"))]
+use rust_decimal::Decimal;
+
 use crate::stdlib::{
     fmt::{Debug, Display},
     format,
@@ -68,6 +71,13 @@ def_package!(crate:BasicStringPackage:"Basic string utilities, including printin
         reg_op!(lib, KEYWORD_PRINT, to_string, f32, f64);
         reg_op!(lib, FN_TO_STRING, to_string, f32, f64);
         reg_op!(lib, KEYWORD_DEBUG, to_debug, f32, f64);
+    }
+
+    #[cfg(not(feature = "no_decimal"))]
+    {
+        reg_op!(lib, KEYWORD_PRINT, to_string, Decimal);
+        reg_op!(lib, FN_TO_STRING, to_string, Decimal);
+        reg_op!(lib, KEYWORD_DEBUG, to_debug, Decimal);
     }
 
     #[cfg(not(feature = "no_index"))]

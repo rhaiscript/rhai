@@ -16,6 +16,9 @@ use crate::engine::Array;
 #[cfg(not(feature = "no_object"))]
 use crate::engine::Map;
 
+#[cfg(not(feature = "no_decimal"))]
+use rust_decimal::Decimal;
+
 use crate::stdlib::{
     any::{type_name, Any, TypeId},
     boxed::Box,
@@ -154,6 +157,8 @@ pub enum Union {
     Int(INT),
     #[cfg(not(feature = "no_float"))]
     Float(FLOAT),
+    #[cfg(not(feature = "no_decimal"))]
+    Decimal(Box<Decimal>),
     #[cfg(not(feature = "no_index"))]
     Array(Box<Array>),
     #[cfg(not(feature = "no_object"))]
@@ -308,6 +313,8 @@ impl Dynamic {
             Union::Int(_) => TypeId::of::<INT>(),
             #[cfg(not(feature = "no_float"))]
             Union::Float(_) => TypeId::of::<FLOAT>(),
+            #[cfg(not(feature = "no_decimal"))]
+            Union::Decimal(_) => TypeId::of::<Decimal>(),
             #[cfg(not(feature = "no_index"))]
             Union::Array(_) => TypeId::of::<Array>(),
             #[cfg(not(feature = "no_object"))]
@@ -345,6 +352,8 @@ impl Dynamic {
             #[cfg(not(feature = "no_object"))]
             Union::Map(_) => "map",
             Union::FnPtr(_) => "Fn",
+            #[cfg(not(feature = "no_decimal"))]
+            Union::Decimal(_) => "Decimal",
 
             #[cfg(not(feature = "no_std"))]
             Union::Variant(value) if value.is::<Instant>() => "timestamp",
@@ -402,6 +411,8 @@ impl fmt::Display for Dynamic {
             Union::Int(value) => fmt::Display::fmt(value, f),
             #[cfg(not(feature = "no_float"))]
             Union::Float(value) => fmt::Display::fmt(value, f),
+            #[cfg(not(feature = "no_decimal"))]
+            Union::Decimal(value) => fmt::Display::fmt(value, f),
             #[cfg(not(feature = "no_index"))]
             Union::Array(value) => fmt::Debug::fmt(value, f),
             #[cfg(not(feature = "no_object"))]
@@ -449,6 +460,8 @@ impl fmt::Debug for Dynamic {
                 fmt::Debug::fmt(value, f)
             }
             Union::FnPtr(value) => fmt::Debug::fmt(value, f),
+            #[cfg(not(feature = "no_decimal"))]
+            Union::Decimal(value) => fmt::Debug::fmt(value, f),
 
             #[cfg(not(feature = "no_std"))]
             Union::Variant(value) if value.is::<Instant>() => write!(f, "<timestamp>"),
@@ -480,6 +493,8 @@ impl Clone for Dynamic {
             Union::Int(value) => Self(Union::Int(value)),
             #[cfg(not(feature = "no_float"))]
             Union::Float(value) => Self(Union::Float(value)),
+            #[cfg(not(feature = "no_decimal"))]
+            Union::Decimal(ref value) => Self(Union::Decimal(value.clone())),
             #[cfg(not(feature = "no_index"))]
             Union::Array(ref value) => Self(Union::Array(value.clone())),
             #[cfg(not(feature = "no_object"))]
@@ -578,6 +593,15 @@ impl Dynamic {
             Ok(s) => return (*s).into(),
             Err(val) => val,
         };
+
+        #[cfg(not(feature = "no_decimal"))]
+        {
+            boxed = match unsafe_cast_box::<_, rust_decimal::Decimal>(boxed) {
+                Ok(map) => return (*map).into(),
+                Err(val) => val,
+            }
+        }
+
         #[cfg(not(feature = "no_index"))]
         {
             boxed = match unsafe_cast_box::<_, Array>(boxed) {
@@ -688,6 +712,14 @@ impl Dynamic {
         if type_id == TypeId::of::<FLOAT>() {
             return match self.0 {
                 Union::Float(value) => unsafe_try_cast(value),
+                _ => None,
+            };
+        }
+
+        #[cfg(not(feature = "no_decimal"))]
+        if type_id == TypeId::of::<Decimal>() {
+            return match self.0 {
+                Union::Decimal(value) => unsafe_cast_box::<_, T>(value).ok().map(|v| *v),
                 _ => None,
             };
         }
@@ -1207,6 +1239,13 @@ impl From<FLOAT> for Dynamic {
     #[inline(always)]
     fn from(value: FLOAT) -> Self {
         Self(Union::Float(value))
+    }
+}
+#[cfg(not(feature = "no_decimal"))]
+impl From<Decimal> for Dynamic {
+    #[inline(always)]
+    fn from(value: Decimal) -> Self {
+        Self(Union::Decimal(Box::new(value)))
     }
 }
 impl From<char> for Dynamic {

@@ -16,6 +16,12 @@ use num_traits::{
 #[cfg(not(feature = "no_float"))]
 use num_traits::float::Float;
 
+#[cfg(not(feature = "no_decimal"))]
+use rust_decimal::Decimal;
+
+#[cfg(not(feature = "no_decimal"))]
+use num_traits::One;
+
 use crate::stdlib::{
     fmt::Display,
     format,
@@ -356,6 +362,23 @@ def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
         reg_sign!(lib, "sign", f64, f64);
     }
 
+    // Basic arithmetic for Decimal
+    if cfg!(not(feature = "no_decimal")) {
+        reg_op!(lib, "+", add_u, Decimal);
+        reg_op!(lib, "-", sub_u, Decimal);
+        reg_op!(lib, "*", mul_u, Decimal);
+        reg_op!(lib, "/", div_u, Decimal);
+        lib.set_fn_1("sign", |x: Decimal| { 
+            Ok(
+                if x.is_sign_positive() {
+                    Decimal::one();
+                } else {
+                    Decimal::one().set_sign_negative(true);
+                }
+            )
+        });
+    }
+
     if cfg!(not(feature = "only_i32")) && cfg!(not(feature = "only_i64")) {
         reg_op!(lib, "|", binary_or, i8, u8, i16, u16, i32, u32, u64);
         reg_op!(lib, "&", binary_and, i8, u8, i16, u16, i32, u32, u64);
@@ -383,6 +406,13 @@ def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
         // Floating-point unary
         reg_unary!(lib, "-", neg_u, f32, f64);
         reg_unary!(lib, "abs", abs_u, f32, f64);
+    }
+
+    #[cfg(not(feature = "no_decimal"))]
+    {
+        reg_op!(lib, "%", modulo_u, Decimal);
+        reg_unary!(lib, "-", neg_u, Decimal, Decimal);
+        reg_unary!(lib, "abs", abs_u, Decimal, Decimal);
     }
 
     // Checked unary

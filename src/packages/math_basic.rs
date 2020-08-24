@@ -11,6 +11,9 @@ use crate::{result::EvalAltResult, token::Position};
 #[cfg(not(feature = "no_float"))]
 use num_traits::float::Float;
 
+#[cfg(not(feature = "no_decimal"))]
+use rust_decimal::Decimal;
+
 #[cfg(not(feature = "no_float"))]
 use crate::stdlib::format;
 
@@ -82,6 +85,18 @@ def_package!(crate:BasicMathPackage:"Basic mathematic functions.", lib, {
                 lib.set_fn_1("to_float", |x: u128| Ok(x as FLOAT));
             }
         }
+    }
+
+    #[cfg(not(feature = "no_decimal"))]
+    {
+        // Advanced math functions
+        lib.set_fn_1("floor", |x: Decimal| Ok(x.floor()));
+        lib.set_fn_1("ceiling", |x: Decimal| Ok(x.ceil()));
+        lib.set_fn_1("round", |x: Decimal| Ok(x.round()));
+        lib.set_fn_2("round_dp", |x: Decimal, dp: u32| Ok(x.round_dp(dp)));
+        lib.set_fn_1("int", |x: Decimal| Ok(x.trunc()));
+        lib.set_fn_1("fraction", |x: Decimal| Ok(x.fract()));
+        lib.set_fn_1("scale", |x: Decimal| Ok(x.scale()));
     }
 
     lib.set_fn_1("to_int", |ch: char| Ok(ch as INT));

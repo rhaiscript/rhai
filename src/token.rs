@@ -12,6 +12,9 @@ use crate::utils::StaticVec;
 #[cfg(not(feature = "no_float"))]
 use crate::parser::FLOAT;
 
+#[cfg(not(feature = "no_decimal"))]
+use rust_decimal::Decimal;
+
 use crate::stdlib::{
     borrow::Cow,
     boxed::Box,
@@ -159,6 +162,8 @@ pub enum Token {
     /// Reserved under the `no_float` feature.
     #[cfg(not(feature = "no_float"))]
     FloatConstant(FLOAT),
+    #[cfg(not(feature = "no_decimal"))]
+    DecimalConstant(rust_decimal::Decimal),
     /// An identifier.
     Identifier(String),
     /// A character constant.
@@ -1008,7 +1013,7 @@ fn get_next_token_inner(
                             result.push(next_char);
                             eat_next(stream, pos);
                         }
-                        #[cfg(not(feature = "no_float"))]
+                        #[cfg(any(not(feature = "no_float"), not(feature = "no_decimal")))]
                         '.' => {
                             result.push(next_char);
                             eat_next(stream, pos);
@@ -1082,6 +1087,9 @@ fn get_next_token_inner(
                     // If integer parsing is unnecessary, try float instead
                     #[cfg(not(feature = "no_float"))]
                     let num = num.or_else(|_| FLOAT::from_str(&out).map(Token::FloatConstant));
+
+                    #[cfg(not(feature = "no_decimal"))]
+                    let num = num.or_else(|_| Decimal::from_str(&out).map(Token::DecimalConstant));
 
                     return Some((
                         num.unwrap_or_else(|_| {

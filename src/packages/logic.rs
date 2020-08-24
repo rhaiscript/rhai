@@ -1,6 +1,9 @@
 use crate::def_package;
 use crate::module::FuncReturn;
 
+#[cfg(not(feature = "no_decimal"))]
+use rust_decimal::Decimal;
+
 // Comparison operators
 pub fn lt<T: PartialOrd>(x: T, y: T) -> FuncReturn<bool> {
     Ok(x < y)
@@ -59,6 +62,16 @@ def_package!(crate:LogicPackage:"Logical operators.", lib, {
         reg_op!(lib, ">=", gte, f32);
         reg_op!(lib, "==", eq, f32);
         reg_op!(lib, "!=", ne, f32);
+    }
+
+    #[cfg(not(feature = "no_decimal"))]
+    {
+        reg_op!(lib, "<", lt, Decimal);
+        reg_op!(lib, "<=", lte, Decimal);
+        reg_op!(lib, ">", gt, Decimal);
+        reg_op!(lib, ">=", gte, Decimal);
+        reg_op!(lib, "==", eq, Decimal);
+        reg_op!(lib, "!=", ne, Decimal);
     }
 
     lib.set_fn_1("!", not);
