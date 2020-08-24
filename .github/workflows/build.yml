@@ -22,7 +22,7 @@ jobs:
           - "--features sync"
           - "--features no_optimize"
           - "--features no_float"
-          - '--features no_decimal'
+          - '--features decimal'
           - "--tests --features only_i32"
           - "--features only_i64"
           - "--features no_index"

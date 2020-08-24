@@ -62,7 +62,7 @@ pub type INT = i32;
 #[cfg(not(feature = "no_float"))]
 pub type FLOAT = f64;
 
-#[cfg(not(feature = "no_decimal"))]
+#[cfg(feature = "decimal")]
 use rust_decimal::prelude::*;
 
 type PERR = ParseErrorType;
@@ -757,7 +757,7 @@ pub enum Expr {
     #[cfg(not(feature = "no_float"))]
     FloatConstant(Box<FloatWrapper>),
     /// Decimal constant
-    #[cfg(not(feature = "no_decimal"))]
+    #[cfg(feature = "decimal")]
     DecimalConstant(Box<(Decimal, Position)>),
     /// Character constant.
     CharConstant(Box<(char, Position)>),
@@ -839,7 +839,7 @@ impl Expr {
             #[cfg(not(feature = "no_float"))]
             Self::FloatConstant(x) => x.0.into(),
 
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Self::DecimalConstant(x) => x.0.into(),
 
             Self::CharConstant(x) => x.0.into(),
@@ -882,7 +882,7 @@ impl Expr {
             #[cfg(not(feature = "no_float"))]
             Self::FloatConstant(x) => x.0.to_string(),
 
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Self::DecimalConstant(x) => x.0.to_string(),
 
             Self::IntegerConstant(x) => x.0.to_string(),
@@ -906,7 +906,7 @@ impl Expr {
             #[cfg(not(feature = "no_float"))]
             Self::FloatConstant(x) => x.1,
 
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Self::DecimalConstant(x) => x.1,
 
             Self::IntegerConstant(x) => x.1,
@@ -941,7 +941,7 @@ impl Expr {
             #[cfg(not(feature = "no_float"))]
             Self::FloatConstant(x) => x.1 = new_pos,
 
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Self::DecimalConstant(x) => x.1 = new_pos,
 
             Self::IntegerConstant(x) => x.1 = new_pos,
@@ -999,7 +999,7 @@ impl Expr {
             #[cfg(not(feature = "no_float"))]
             Self::FloatConstant(_) => true,
 
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Self::DecimalConstant(_) => true,
 
             Self::IntegerConstant(_)
@@ -1035,7 +1035,7 @@ impl Expr {
             #[cfg(not(feature = "no_float"))]
             Self::FloatConstant(_) => false,
 
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Self::DecimalConstant(_) => false,
 
             Self::IntegerConstant(_)
@@ -1319,7 +1319,7 @@ fn parse_index_chain(
                 .into_err(lhs.position()))
             }
 
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Expr::DecimalConstant(_) => {
                 return Err(PERR::MalformedIndexExpr(
                     "Only arrays, object maps and strings can be indexed".into(),
@@ -1363,7 +1363,7 @@ fn parse_index_chain(
                 .into_err(lhs.position()))
             }
 
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Expr::DecimalConstant(_) => {
                 return Err(PERR::MalformedIndexExpr(
                     "Only arrays, object maps and strings can be indexed".into(),
@@ -1396,7 +1396,7 @@ fn parse_index_chain(
             )
             .into_err(x.position()))
         }
-        #[cfg(not(feature = "no_decimal"))]
+        #[cfg(feature = "decimal")]
         x @ Expr::DecimalConstant(_) => {
             return Err(PERR::MalformedIndexExpr(
                 "Array access expects integer index, not a decimal".into(),
@@ -1681,7 +1681,7 @@ fn parse_primary(
         Token::IntegerConstant(x) => Expr::IntegerConstant(Box::new((x, settings.pos))),
         #[cfg(not(feature = "no_float"))]
         Token::FloatConstant(x) => Expr::FloatConstant(Box::new(FloatWrapper(x, settings.pos))),
-        #[cfg(not(feature = "no_decimal"))]
+        #[cfg(feature = "decimal")]
         Token::DecimalConstant(x) => {
             Expr::DecimalConstant(Box::new((x, settings.pos)))
         }
@@ -1856,14 +1856,14 @@ fn parse_unary(
                                 pos,
                             ))));
 
-                            #[cfg(not(feature = "no_decimal"))]
+                            #[cfg(feature = "decimal")]
                             return Some(Expr::DecimalConstant(Box::new((
                                 Decimal::from_i64(-x.0).unwrap(),
                                 pos,
                             ))));
 
                             #[cfg(feature = "no_float")]
-                            #[cfg(feature = "no_decimal")]
+                            #[cfg(not(feature = "decimal"))]
                             return None;
                         })
                         .ok_or_else(|| LexError::MalformedNumber(format!("-{}", x.0)).into_err(pos))
@@ -1876,7 +1876,7 @@ fn parse_unary(
                 }
 
                 // Negative Decimal
-                #[cfg(not(feature = "no_decimal"))]
+                #[cfg(feature = "decimal")]
                 Expr::DecimalConstant(x) => {
                     Ok(Expr::DecimalConstant(Box::new((-x.0, x.1))))
                 }
@@ -2148,7 +2148,7 @@ fn make_in_expr(lhs: Expr, rhs: Expr, op_pos: Position) -> Result<Expr, ParseErr
             .into_err(x.position()))
         }
 
-        #[cfg(not(feature = "no_decimal"))]
+        #[cfg(feature = "decimal")]
         (_, x @ Expr::DecimalConstant(_)) => {
             return Err(PERR::MalformedInExpr(
                 "'in' expression expects a string, array or object map".into(),
@@ -2169,7 +2169,7 @@ fn make_in_expr(lhs: Expr, rhs: Expr, op_pos: Position) -> Result<Expr, ParseErr
             .into_err(x.position()))
         }
 
-        #[cfg(not(feature = "no_decimal"))]
+        #[cfg(feature = "decimal")]
         (x @ Expr::DecimalConstant(_), Expr::StringConstant(_)) => {
             return Err(PERR::MalformedInExpr(
                 "'in' expression for a string expects a string, not a decimal".into(),
@@ -2237,7 +2237,7 @@ fn make_in_expr(lhs: Expr, rhs: Expr, op_pos: Position) -> Result<Expr, ParseErr
             .into_err(x.position()))
         }
 
-        #[cfg(not(feature = "no_decimal"))]
+        #[cfg(feature = "decimal")]
         (x @ Expr::DecimalConstant(_), Expr::Map(_)) => {
             return Err(PERR::MalformedInExpr(
                 "'in' expression for an object map expects a string, not a float".into(),
@@ -3546,7 +3546,7 @@ pub fn map_dynamic_to_expr(value: Dynamic, pos: Position) -> Option<Expr> {
         #[cfg(not(feature = "no_float"))]
         Union::Float(value) => Some(Expr::FloatConstant(Box::new(FloatWrapper(value, pos)))),
 
-        #[cfg(not(feature = "no_decimal"))]
+        #[cfg(feature = "decimal")]
         Union::Decimal(value) => Some(Expr::DecimalConstant(Box::new((*value, pos)))),
 
         Union::Unit(_) => Some(Expr::Unit(pos)),

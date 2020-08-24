@@ -1307,6 +1307,7 @@ impl Engine {
             Expr::IntegerConstant(x) => Ok(x.0.into()),
             #[cfg(not(feature = "no_float"))]
             Expr::FloatConstant(x) => Ok(x.0.into()),
+            #[cfg(feature = "decimal")]
             Expr::DecimalConstant(x) => Ok(x.0.into()),
             Expr::StringConstant(x) => Ok(x.0.to_string().into()),
             Expr::CharConstant(x) => Ok(x.0.into()),

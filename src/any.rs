@@ -16,7 +16,7 @@ use crate::engine::Array;
 #[cfg(not(feature = "no_object"))]
 use crate::engine::Map;
 
-#[cfg(not(feature = "no_decimal"))]
+#[cfg(feature = "decimal")]
 use rust_decimal::Decimal;
 
 use crate::stdlib::{
@@ -157,7 +157,7 @@ pub enum Union {
     Int(INT),
     #[cfg(not(feature = "no_float"))]
     Float(FLOAT),
-    #[cfg(not(feature = "no_decimal"))]
+    #[cfg(feature = "decimal")]
     Decimal(Box<Decimal>),
     #[cfg(not(feature = "no_index"))]
     Array(Box<Array>),
@@ -313,7 +313,7 @@ impl Dynamic {
             Union::Int(_) => TypeId::of::<INT>(),
             #[cfg(not(feature = "no_float"))]
             Union::Float(_) => TypeId::of::<FLOAT>(),
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Union::Decimal(_) => TypeId::of::<Decimal>(),
             #[cfg(not(feature = "no_index"))]
             Union::Array(_) => TypeId::of::<Array>(),
@@ -352,7 +352,7 @@ impl Dynamic {
             #[cfg(not(feature = "no_object"))]
             Union::Map(_) => "map",
             Union::FnPtr(_) => "Fn",
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Union::Decimal(_) => "Decimal",
 
             #[cfg(not(feature = "no_std"))]
@@ -411,7 +411,7 @@ impl fmt::Display for Dynamic {
             Union::Int(value) => fmt::Display::fmt(value, f),
             #[cfg(not(feature = "no_float"))]
             Union::Float(value) => fmt::Display::fmt(value, f),
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Union::Decimal(value) => fmt::Display::fmt(value, f),
             #[cfg(not(feature = "no_index"))]
             Union::Array(value) => fmt::Debug::fmt(value, f),
@@ -460,7 +460,7 @@ impl fmt::Debug for Dynamic {
                 fmt::Debug::fmt(value, f)
             }
             Union::FnPtr(value) => fmt::Debug::fmt(value, f),
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Union::Decimal(value) => fmt::Debug::fmt(value, f),
 
             #[cfg(not(feature = "no_std"))]
@@ -493,7 +493,7 @@ impl Clone for Dynamic {
             Union::Int(value) => Self(Union::Int(value)),
             #[cfg(not(feature = "no_float"))]
             Union::Float(value) => Self(Union::Float(value)),
-            #[cfg(not(feature = "no_decimal"))]
+            #[cfg(feature = "decimal")]
             Union::Decimal(ref value) => Self(Union::Decimal(value.clone())),
             #[cfg(not(feature = "no_index"))]
             Union::Array(ref value) => Self(Union::Array(value.clone())),
@@ -594,7 +594,7 @@ impl Dynamic {
             Err(val) => val,
         };
 
-        #[cfg(not(feature = "no_decimal"))]
+        #[cfg(feature = "decimal")]
         {
             boxed = match unsafe_cast_box::<_, rust_decimal::Decimal>(boxed) {
                 Ok(map) => return (*map).into(),
@@ -716,7 +716,7 @@ impl Dynamic {
             };
         }
 
-        #[cfg(not(feature = "no_decimal"))]
+        #[cfg(feature = "decimal")]
         if type_id == TypeId::of::<Decimal>() {
             return match self.0 {
                 Union::Decimal(value) => unsafe_cast_box::<_, T>(value).ok().map(|v| *v),
@@ -1241,7 +1241,7 @@ impl From<FLOAT> for Dynamic {
         Self(Union::Float(value))
     }
 }
-#[cfg(not(feature = "no_decimal"))]
+#[cfg(feature = "decimal")]
 impl From<Decimal> for Dynamic {
     #[inline(always)]
     fn from(value: Decimal) -> Self {

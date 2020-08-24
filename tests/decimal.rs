@@ -1,4 +1,4 @@
-#![cfg(not(feature = "no_decimal"))]
+#![cfg(feature = "decimal")]
 use rhai::{Engine, EvalAltResult, RegisterFn};
 
 use rust_decimal::prelude::*;

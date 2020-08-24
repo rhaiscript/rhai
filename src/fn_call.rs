@@ -27,7 +27,7 @@ use crate::{
 #[cfg(not(feature = "no_float"))]
 use crate::parser::FLOAT;
 
-#[cfg(not(feature = "no_decimal"))]
+#[cfg(feature = "decimal")]
 use rust_decimal::Decimal;
 
 #[cfg(not(feature = "no_index"))]
@@ -1206,7 +1206,7 @@ pub fn run_builtin_binary_op(
         }
     }
 
-    #[cfg(not(feature = "no_decimal"))]
+    #[cfg(feature = "decimal")]
     if args_type == TypeId::of::<Decimal>() {
         let x = x.clone().cast::<Decimal>();
         let y = y.clone().cast::<Decimal>();

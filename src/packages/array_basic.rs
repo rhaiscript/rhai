@@ -15,7 +15,7 @@ use crate::stdlib::{any::TypeId, boxed::Box};
 #[cfg(not(feature = "unchecked"))]
 use crate::stdlib::string::ToString;
 
-#[cfg(not(feature = "no_decimal"))]
+#[cfg(feature = "decimal")]
 use rust_decimal::Decimal;
 
 // Register array utility functions
@@ -127,7 +127,7 @@ def_package!(crate:BasicArrayPackage:"Basic array utilities.", lib, {
         reg_tri!(lib, "insert", ins, f32, f64);
     }
 
-    #[cfg(not(feature = "no_decimal"))]
+    #[cfg(feature = "decimal")]
     {
         reg_op!(lib, "push", push, Decimal);
         reg_pad!(lib, "pad", pad, Decimal);

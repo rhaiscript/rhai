@@ -12,7 +12,7 @@ use crate::{result::EvalAltResult, token::Position};
 #[cfg(not(feature = "no_index"))]
 use crate::engine::Array;
 
-#[cfg(not(feature = "no_decimal"))]
+#[cfg(feature = "decimal")]
 use rust_decimal::Decimal;
 
 use crate::stdlib::{
@@ -114,7 +114,7 @@ def_package!(crate:MoreStringPackage:"Additional string utilities, including str
         reg_op!(lib, "+", prepend, f32, f64);
     }
 
-    #[cfg(not(feature = "no_decimal"))]
+    #[cfg(feature = "decimal")]
     {
         reg_op!(lib, "+", append, Decimal);
         reg_op!(lib, "+", prepend, Decimal);

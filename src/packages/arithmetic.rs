@@ -16,10 +16,10 @@ use num_traits::{
 #[cfg(not(feature = "no_float"))]
 use num_traits::float::Float;
 
-#[cfg(not(feature = "no_decimal"))]
+#[cfg(feature = "decimal")]
 use rust_decimal::Decimal;
 
-#[cfg(not(feature = "no_decimal"))]
+#[cfg(feature = "decimal")]
 use num_traits::One;
 
 use crate::stdlib::{
@@ -362,7 +362,8 @@ def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
         reg_sign!(lib, "sign", f64, f64);
     }
 
-    if cfg!(not(feature = "no_decimal")) {
+    #[cfg(feature = "decimal")]
+    {
         lib.set_fn_1("sign", |x: Decimal| {
             Ok(
                 if x.is_sign_positive() {
@@ -403,7 +404,7 @@ def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
         reg_unary!(lib, "abs", abs_u, f32, f64);
     }
 
-    #[cfg(not(feature = "no_decimal"))]
+    #[cfg(feature = "decimal")]
     {
         reg_op!(lib, "%", modulo_u, Decimal);
         reg_unary!(lib, "-", neg_u, Decimal);
