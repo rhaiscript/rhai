@@ -411,8 +411,8 @@ def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
     #[cfg(not(feature = "no_decimal"))]
     {
         reg_op!(lib, "%", modulo_u, Decimal);
-        reg_unary!(lib, "-", neg_u, Decimal, Decimal);
-        reg_unary!(lib, "abs", abs_u, Decimal, Decimal);
+        reg_unary!(lib, "-", neg_u, Decimal);
+        reg_unary!(lib, "abs", abs_u, Decimal);
     }
 
     // Checked unary

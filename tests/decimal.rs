@@ -54,7 +54,7 @@ fn test_decimal() -> Result<(), Box<EvalAltResult>> {
         engine.eval::<bool>(
             r#"
             let x = 0.0; 
-            let y = 1.0; 
+            let y = 1.0;
             x > y"#
         )?,
         false
@@ -70,9 +70,38 @@ fn test_decimal() -> Result<(), Box<EvalAltResult>> {
         true
     );
 
+    assert_eq!(
+        engine.eval::<Decimal>(
+            r#"
+            let x = 10.0;
+            let y = 4.0;
+            x % y"#
+        )?,
+        Decimal::from_str("2.0").unwrap()
+    );
+
+    assert_eq!(
+        engine.eval::<Decimal>(
+            r#"
+            let x = -1.0;
+            x.abs()"#
+        )?,
+        Decimal::from_str("1.0").unwrap()
+    );
+
+    assert_eq!(
+        engine.eval::<Decimal>(
+            r#"
+            let x = 1.0;
+            let a = -x;
+            a"#
+        )?,
+        Decimal::from_str("-1.0").unwrap()
+    );
+
     let res = engine.eval::<Decimal>(
         r#"
-        let x = 9.9999; 
+        let x = 9.9999;
         x"#,
     )?;
 
