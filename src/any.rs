@@ -1139,6 +1139,19 @@ impl Dynamic {
         }
     }
 
+    /// Cast the `Dynamic` as a Decimal and return it.
+    /// Returns the name of the actual type if the cast fails.
+    #[cfg(feature = "decimal")]
+    #[inline(always)]
+    pub fn as_decimal(&self) -> Result<Decimal, &'static str> {
+        match self.0 {
+            Union::Decimal(ref n) => Ok(**n),
+            #[cfg(not(feature = "no_closure"))]
+            Union::Shared(_) => self.read_lock().map(|v| *v).ok_or_else(|| self.type_name()),
+            _ => Err(self.type_name()),
+        }
+    }
+
     /// Cast the `Dynamic` as a `bool` and return it.
     /// Returns the name of the actual type if the cast fails.
     #[inline(always)]
