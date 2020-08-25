@@ -157,7 +157,7 @@ fn test_decimal_array() -> Result<(), Box<EvalAltResult>> {
 
 #[test]
 #[cfg(not(feature = "no_object"))]
-fn test_struct_with_decimal() -> Result<(), Box<EvalAltResult>> {
+fn test_decimal_in_struct() -> Result<(), Box<EvalAltResult>> {
     #[derive(Clone)]
     struct TestStruct {
         x: Decimal,
@@ -219,6 +219,26 @@ fn test_decimal_func() -> Result<(), Box<EvalAltResult>> {
         engine.eval::<Decimal>("sum(1.0, 2.0, 3.0, 4.0)")?,
         Decimal::from_str("10.0").unwrap()
     );
+
+    Ok(())
+}
+
+#[test]
+fn test_decimal_parse_json() -> Result<(), Box<EvalAltResult>> {
+    let engine = Engine::new();
+
+    let json = r#"{
+            "a": 1,
+            "b": true,
+            "c": 123.0,     
+            "$d e f!": "hello",
+            "^^^!!!": [1.5 , 42, "999"], // <- value can be array or another hash
+        }
+    "#;
+
+    let map = engine.parse_json(json, true)?;
+
+    assert_eq!(map["c"].as_decimal().unwrap(), Decimal::from_str("123.0").unwrap());
 
     Ok(())
 }
