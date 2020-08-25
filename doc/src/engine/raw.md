@@ -18,12 +18,12 @@ To add more functionalities to a _raw_ `Engine`, load [packages] into it.
 Built-in Operators
 ------------------
 
-| Operators                | Assignment operators         | Supported for types (see [standard types])                                    |
-| ------------------------ | ---------------------------- | ----------------------------------------------------------------------------- |
-| `+`,                     | `+=`                         | `INT`, `FLOAT` (if not [`no_float`]), `ImmutableString`                       |
-| `-`, `*`, `/`, `%`, `~`, | `-=`, `*=`, `/=`, `%=`, `~=` | `INT`, `FLOAT` (if not [`no_float`])                                          |
-| `<<`, `>>`, `^`,         | `<<=`, `>>=`, `^=`           | `INT`                                                                         |
-| `&`, <code>\|</code>,    | `&=`, <code>\|=</code>       | `INT`, `bool`                                                                 |
-| `&&`, <code>\|\|</code>  |                              | `bool`                                                                        |
-| `==`, `!=`               |                              | `INT`, `FLOAT` (if not [`no_float`]), `bool`, `char`, `()`, `ImmutableString` |
-| `>`, `>=`, `<`, `<=`     |                              | `INT`, `FLOAT` (if not [`no_float`]), `char`, `()`, `ImmutableString`         |
+| Operators                | Assignment operators         | Supported for types (see [standard types])                                                                      |
+| ------------------------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `+`,                     | `+=`                         | `INT`, `FLOAT` (if not [`no_float`]), `Decimal` (if [`decimal`]) ,`ImmutableString`                      |
+| `-`, `*`, `/`, `%`, `~`, | `-=`, `*=`, `/=`, `%=`, `~=` | `INT`, `FLOAT` (if not [`no_float`]), `Decimal` (if [`decimal`])                                          |
+| `<<`, `>>`, `^`,         | `<<=`, `>>=`, `^=`           | `INT`                                                                                                           |
+| `&`, <code>\|</code>,    | `&=`, <code>\|=</code>       | `INT`, `bool`                                                                                                   |
+| `&&`, <code>\|\|</code>  |                              | `bool`                                                                                                          |
+| `==`, `!=`               |                              | `INT`, `FLOAT` (if not [`no_float`]),`Decimal` (if [`decimal`]), `bool`, `char`, `()`, `ImmutableString` |
+| `>`, `>=`, `<`, `<=`     |                              | `INT`, `FLOAT` (if not [`no_float`]),`Decimal` (if [`decimal`]), `char`, `()`, `ImmutableString`         |

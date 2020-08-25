@@ -17,6 +17,7 @@ more control over what a script can (or cannot) do.
 | `sync`              | Restrict all values types to those that are `Send + Sync`. Under this feature, all Rhai types, including [`Engine`], [`Scope`] and [`AST`], are all `Send + Sync`.                                         |
 | `no_optimize`       | Disable [script optimization].                                                                                                                                                                             |
 | `no_float`          | Disable floating-point numbers and math.                                                                                                                                                                   |
+| `decimal`           | Enable decimal number support (through the 'rust_decimal' create). This will disable floating point support.
 | `only_i32`          | Set the system integer type to `i32` and disable all other integer types. `INT` is set to `i32`.                                                                                                           |
 | `only_i64`          | Set the system integer type to `i64` and disable all other integer types. `INT` is set to `i64`.                                                                                                           |
 | `no_index`          | Disable [arrays] and indexing features.                                                                                                                                                                    |

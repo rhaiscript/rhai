@@ -10,6 +10,9 @@ The default system integer type (also aliased to `INT`) is `i64`. It can be turn
 Floating-point numbers are also supported if not disabled with [`no_float`]. The default system floating-point type is `i64`
 (also aliased to `FLOAT`).
 
+Decimal numbers are also supported if explicitly enabled with ['decimal'].
+Be aware that Decimal support replaces float support, the two features cannot be enabled at the same time.
+
 '`_`' separators can be added freely and are ignored within a number.
 
 | Format           | Type             |

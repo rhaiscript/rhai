@@ -15,7 +15,7 @@ Use the `Engine::parse_json` method to parse a piece of JSON into an object map:
 let json = r#"{
                 "a": 1,                 // <- this is an integer number
                 "b": true,
-                "c": 123.0,             // <- this is a floating-point number
+                "c": 123.0,             // <- this is a floating-point (not(feature = 'no_float')) or decimal (feature = 'decimal') number
                 "$d e f!": "hello",     // <- any text can be a property name
                 "^^^!!!": [1,42,"999"], // <- value can be array or another hash
                 "z": null               // <- JSON 'null' value
@@ -40,8 +40,9 @@ result == 3;                            // the object map is successfully used i
 Representation of Numbers
 ------------------------
 
-JSON numbers are all floating-point while Rhai supports integers (`INT`) and floating-point (`FLOAT`) if
-the [`no_float`] feature is not used.  Most common generators of JSON data distinguish between
+JSON numbers are all floating-point while Rhai supports integers (`INT`) floating-point (`FLOAT`) if
+the [`no_float`] feature is not used and decimal is the [`decimal`] feature is used.  
+Most common generators of JSON data distinguish between
 integer and floating-point values by always serializing a floating-point number with a decimal point
 (i.e. `123.0` instead of `123` which is assumed to be an integer).  This style can be used successfully
 with Rhai [object maps].

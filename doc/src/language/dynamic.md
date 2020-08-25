@@ -95,6 +95,7 @@ The following conversion traits are implemented for `Dynamic`:
 
 * `From<i64>` (`i32` if [`only_i32`])
 * `From<f64>` (if not [`no_float`])
+* `From<Decimal>` (if [`decimal`])
 * `From<bool>`
 * `From<rhai::ImmutableString>`
 * `From<String>`

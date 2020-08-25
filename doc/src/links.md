@@ -3,6 +3,7 @@
 [`sync`]: {{rootUrl}}/start/features.md
 [`no_optimize`]: {{rootUrl}}/start/features.md
 [`no_float`]: {{rootUrl}}/start/features.md
+[`decimal`]: {{rootUrl}}/start/features.md
 [`only_i32`]: {{rootUrl}}/start/features.md
 [`only_i64`]: {{rootUrl}}/start/features.md
 [`no_index`]: {{rootUrl}}/start/features.md
