@@ -565,6 +565,15 @@ impl Dynamic {
                 .clone()
                 .into();
         }
+
+        #[cfg(feature = "decimal")]
+        if type_id == TypeId::of::<Decimal>() {
+            return <dyn Any>::downcast_ref::<Decimal>(&value)
+                .unwrap()
+                .clone()
+                .into();
+        }
+
         if type_id == TypeId::of::<bool>() {
             return <dyn Any>::downcast_ref::<bool>(&value)
                 .unwrap()
@@ -593,14 +602,6 @@ impl Dynamic {
             Ok(s) => return (*s).into(),
             Err(val) => val,
         };
-
-        #[cfg(feature = "decimal")]
-        {
-            boxed = match unsafe_cast_box::<_, rust_decimal::Decimal>(boxed) {
-                Ok(map) => return (*map).into(),
-                Err(val) => val,
-            }
-        }
 
         #[cfg(not(feature = "no_index"))]
         {
