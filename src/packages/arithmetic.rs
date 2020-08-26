@@ -19,9 +19,6 @@ use num_traits::float::Float;
 #[cfg(feature = "decimal")]
 use rust_decimal::Decimal;
 
-#[cfg(feature = "decimal")]
-use num_traits::One;
-
 use crate::stdlib::{
     fmt::Display,
     format,
@@ -365,13 +362,7 @@ def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
     #[cfg(feature = "decimal")]
     {
         lib.set_fn_1("sign", |x: Decimal| {
-            Ok(
-                if x.is_sign_positive() {
-                    Decimal::one();
-                } else {
-                    Decimal::one().set_sign_negative(true);
-                }
-            )
+            Ok(if x.is_sign_positive() { 1 } else { -1})
         });
     }
 
