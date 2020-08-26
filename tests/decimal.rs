@@ -129,7 +129,7 @@ fn test_decimal_array() -> Result<(), Box<EvalAltResult>> {
             let y = [1.0, 2.0, 3.0]; 
             y[1] = 5.0;
             y[1]"#
-        )?, 
+        )?,
         Decimal::from_str("5.0").unwrap()
     );
 
@@ -238,7 +238,10 @@ fn test_decimal_parse_json() -> Result<(), Box<EvalAltResult>> {
 
     let map = engine.parse_json(json, true)?;
 
-    assert_eq!(map["c"].as_decimal().unwrap(), Decimal::from_str("123.0").unwrap());
+    assert_eq!(
+        map["c"].as_decimal().unwrap(),
+        Decimal::from_str("123.0").unwrap()
+    );
 
     Ok(())
 }
