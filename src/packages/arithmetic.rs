@@ -362,7 +362,13 @@ def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
     #[cfg(feature = "decimal")]
     {
         lib.set_fn_1("sign", |x: Decimal| {
-            Ok(if x.is_sign_positive() { 1 } else { -1})
+            Ok(if x == Decimal::zero() {
+                0
+            } else if x.is_sign_positive() {
+                1
+            } else {
+                -1
+            })
         });
     }
 
