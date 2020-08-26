@@ -720,7 +720,7 @@ impl Dynamic {
         #[cfg(feature = "decimal")]
         if type_id == TypeId::of::<Decimal>() {
             return match self.0 {
-                Union::Decimal(value) => unsafe_cast_box::<_, T>(value).ok().map(|v| *v),
+                Union::Decimal(value) => unsafe_try_cast(*value),
                 _ => None,
             };
         }
