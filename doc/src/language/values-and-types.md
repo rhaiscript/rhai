@@ -33,7 +33,7 @@ If only 32-bit integers are needed, enabling the [`only_i32`] feature will remov
 This is useful on some 32-bit targets where using 64-bit integers incur a performance penalty.
 
 If no floating-point is needed or supported, use the [`no_float`] feature to remove it.
-If decimal support is necessary, use the [`decimal`] feature, but be aware that decimal and float support cannot cco-exist in the same build.
+If decimal support is necessary, use the [`decimal`] feature, but be aware that decimal and float support cannot co-exist in the same build.
 This is dues to a lack of typed literals in Rhai. The Decimal support Hijacks the float parser and has no way to distinguish a literal float from a literal decimal.
 
 [Strings] in Rhai are _immutable_, meaning that they can be shared but not modified.  In actual, the `ImmutableString` type

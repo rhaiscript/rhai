@@ -41,7 +41,7 @@ Representation of Numbers
 ------------------------
 
 JSON numbers are all floating-point while Rhai supports integers (`INT`) floating-point (`FLOAT`) if
-the [`no_float`] feature is not used and decimal is the [`decimal`] feature is used.  
+the [`no_float`] feature is not used and decimal if the [`decimal`] feature is used.  
 Most common generators of JSON data distinguish between
 integer and floating-point values by always serializing a floating-point number with a decimal point
 (i.e. `123.0` instead of `123` which is assumed to be an integer).  This style can be used successfully

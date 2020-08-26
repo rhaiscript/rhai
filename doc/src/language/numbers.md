@@ -11,7 +11,8 @@ Floating-point numbers are also supported if not disabled with [`no_float`]. The
 (also aliased to `FLOAT`).
 
 Decimal numbers are also supported if explicitly enabled with ['decimal'].
-Be aware that Decimal support replaces float support, the two features cannot be enabled at the same time.
+Be aware that Decimal support replaces float support, meaning that ['decimla'] implies ['no_float']. 
+The two features cannot be enabled at the same time.
 
 '`_`' separators can be added freely and are ignored within a number.
 
