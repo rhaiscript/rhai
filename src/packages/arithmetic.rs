@@ -363,11 +363,11 @@ def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
     {
         lib.set_fn_1("sign", |x: Decimal| {
             Ok(if x == Decimal::zero() {
-                0
+                0 as INT
             } else if x.is_sign_positive() {
-                1
+                1 as INT
             } else {
-                -1
+                -1 as INT
             })
         });
     }
