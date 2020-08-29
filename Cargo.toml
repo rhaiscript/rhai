@@ -18,7 +18,7 @@ categories = [ "no-std", "embedded", "wasm", "parser-implementations" ]
 
 [dependencies]
 num-traits = { version = "0.2.11", default-features = false }
-smallvec = { version = "1.4.1", default-features = false }
+smallvec = { version = "^1.4.1", default-features = false }
 
 [features]
 #default = ["unchecked", "sync", "no_optimize", "no_float", "only_i32", "no_index", "no_object", "no_function", "no_module"]
@@ -70,7 +70,7 @@ features = ["compile-time-rng"]
 optional = true
 
 [dependencies.serde]
-version = "1.0.111"
+version = "^1.0.111"
 default_features = false
 features = ["derive", "alloc"]
 optional = true
