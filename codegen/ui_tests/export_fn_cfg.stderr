@@ -1,0 +1,11 @@
+error: cfg attributes not allowed on this item
+ --> $DIR/export_fn_cfg.rs:9:1
+  |
+9 | #[cfg(not(feature = "foo"))]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> $DIR/export_fn_cfg.rs:20:8
+   |
+20 |     if test_fn(n) {
+   |        ^^^^^^^ not found in this scope

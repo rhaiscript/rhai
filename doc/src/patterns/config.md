@@ -46,7 +46,7 @@ struct Config {
 ### Make Shared Object
 
 ```rust
-let config: Rc<RefCell<Config>> = Rc::new(RefCell::(Default::default()));
+let config: Rc<RefCell<Config>> = Rc::new(RefCell::new(Default::default()));
 ```
 
 ### Register Config API
@@ -76,7 +76,17 @@ engine.register_fn("config_add", move |values: &mut Array|
 
 let cfg = config.clone();
 engine.register_fn("config_add", move |key: String, value: bool|
-        cfg.borrow_mut().som_map.insert(key, value)
+        cfg.borrow_mut().some_map.insert(key, value)
+);
+
+let cfg = config.clone();
+engine.register_fn("config_contains", move |value: String|
+        cfg.borrow().some_list.contains(&value)
+);
+
+let cfg = config.clone();
+engine.register_fn("config_is_set", move |value: String|
+        cfg.borrow().some_map.get(&value).cloned().unwrap_or(false)
 );
 ```
 
@@ -91,7 +101,10 @@ config_set_id("hello");
 
 config_add("foo");          // add to list
 config_add("bar", true);    // add to map
-config_add("baz", false);   // add to map
+
+if config_contains("hey") || config_is_set("hey") {
+    config_add("baz", false);   // add to map
+}
 ```
 
 ### Load the Configuration
@@ -103,3 +116,35 @@ let id = config_get_id();
 
 id == "hello";
 ```
+
+
+Consider a Custom Syntax
+------------------------
+
+This is probably one of the few scenarios where a [custom syntax] can be recommended.
+
+A properly-designed [custom syntax] can make the configuration file clean, simple to write,
+easy to understand and quick to modify.
+
+For example, the above configuration example may be expressed by this custom syntax:
+
+```rust
+------------------
+| my_config.rhai |
+------------------
+
+// Configure ID
+id "hello";
+
+// Add to list
+list +"foo"
+
+// Add to map
+map "bar" => true;
+
+if config contains "hey" || config is_set "hey" {
+    map "baz" => false;
+}
+```
+
+Notice that `contains` and `is_set` may be implemented as a [custom operator].

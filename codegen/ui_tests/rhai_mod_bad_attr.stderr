@@ -1,0 +1,11 @@
+error: unknown attribute 'unknown'
+  --> $DIR/rhai_mod_bad_attr.rs:11:12
+   |
+11 | #[rhai_mod(unknown = "thing")]
+   |            ^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_module`
+  --> $DIR/rhai_mod_bad_attr.rs:24:8
+   |
+24 |     if test_module::test_fn(n) {
+   |        ^^^^^^^^^^^ use of undeclared type or module `test_module`

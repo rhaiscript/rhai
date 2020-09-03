@@ -1,0 +1,11 @@
+error: extraneous value
+ --> $DIR/export_fn_extra_value.rs:9:26
+  |
+9 | #[export_fn(return_raw = "yes")]
+  |                          ^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> $DIR/export_fn_extra_value.rs:19:8
+   |
+19 |     if test_fn(n) {
+   |        ^^^^^^^ not found in this scope

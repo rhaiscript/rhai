@@ -120,6 +120,20 @@ fn test_fn_ptr_raw() -> Result<(), Box<EvalAltResult>> {
         42
     );
 
+    assert_eq!(
+        engine.eval::<INT>(
+            r#"
+                fn foo(x, y) { this += x + y; }
+
+                let x = 40;
+                let v = 1;
+                x.bar(Fn("foo").curry(v), 1);
+                x
+            "#
+        )?,
+        42
+    );
+
     assert!(matches!(
         *engine.eval::<INT>(
             r#"

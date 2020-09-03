@@ -17,6 +17,7 @@ use crate::stdlib::boxed::Box;
 
 impl Engine {
     /// Load a new package into the `Engine`.
+    /// Anything that can be converted into a `PackageLibrary` is accepted, including a simple `Module`.
     ///
     /// When searching for functions, packages loaded later are preferred.
     /// In other words, loaded packages are searched in reverse order.

@@ -1,0 +1,11 @@
+error: this type in this position passes from Rhai by value
+  --> $DIR/second_shared_ref.rs:12:41
+   |
+12 | pub fn test_fn(input: Clonable, factor: &bool) -> bool {
+   |                                         ^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> $DIR/second_shared_ref.rs:23:8
+   |
+23 |     if test_fn(n, &true) {
+   |        ^^^^^^^ not found in this scope

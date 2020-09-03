@@ -6,15 +6,16 @@ Serialization and Deserialization of `Dynamic` with `serde`
 Rhai's [`Dynamic`] type supports serialization and deserialization by [`serde`](https://crates.io/crates/serde)
 via the [`serde`][features] feature.
 
-A [`Dynamic`] can be seamlessly converted to and from a type that implements `serde::Serialize` and/or
-`serde::Deserialize`.
+A [`Dynamic`] can be seamlessly converted to and from a type that implements
+[`serde::Serialize`](https://docs.serde.rs/serde/trait.Serialize.html) and/or
+[`serde::Deserialize`](https://docs.serde.rs/serde/trait.Deserialize.html).
 
 
 Serialization
 -------------
 
-The function `rhai::ser::to_dynamic` automatically converts any Rust type that implements `serde::Serialize`
-into a [`Dynamic`].
+The function `rhai::ser::to_dynamic` automatically converts any Rust type that implements
+[`serde::Serialize`](https://docs.serde.rs/serde/trait.Serialize.html) into a [`Dynamic`].
 
 This is usually not necessary because using [`Dynamic::from`][`Dynamic`] is much easier and is essentially
 the same thing.  The only difference is treatment for integer values.  `Dynamic::from` will keep the different
@@ -64,7 +65,7 @@ Deserialization
 ---------------
 
 The function `rhai::de::from_dynamic` automatically converts a [`Dynamic`] value into any Rust type
-that implements `serde::Deserialize`.
+that implements [`serde::Deserialize`](https://docs.serde.rs/serde/trait.Deserialize.html).
 
 In particular, [object maps] are converted into Rust `struct`'s (or any type that is marked as
 a `serde` map) while [arrays] are converted into Rust `Vec`'s (or any type that is marked
@@ -102,3 +103,13 @@ let result: Dynamic = engine.eval(r#"
 // Convert the 'Dynamic' object map into 'MyStruct'
 let x: MyStruct = from_dynamic(&result)?;
 ```
+
+
+Lighter Alternative
+-------------------
+
+The [`serde`](https://crates.io/crates/serde) crate is quite heavy.
+
+If only _simple_ JSON parsing (i.e. only deserialization) of a hash object into a Rhai [object map] is required,
+the [`Engine::parse_json`]({{rootUrl}}/language/json.md}}) method is available as a _cheap_ alternative,
+but it does not provide the same level of correctness, nor are there any configurable options.

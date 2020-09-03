@@ -4,6 +4,7 @@ use crate::any::Dynamic;
 use crate::engine::Engine;
 use crate::module::Module;
 use crate::parser::{FnAccess, ScriptFnDef};
+use crate::plugin::PluginFunction;
 use crate::result::EvalAltResult;
 use crate::token::{is_valid_identifier, Position};
 use crate::utils::ImmutableString;
@@ -198,6 +199,11 @@ pub type FnAny =
 /// A standard function that gets an iterator from a type.
 pub type IteratorFn = fn(Dynamic) -> Box<dyn Iterator<Item = Dynamic>>;
 
+#[cfg(feature = "sync")]
+pub type SharedPluginFunction = Arc<dyn PluginFunction + Send + Sync>;
+#[cfg(not(feature = "sync"))]
+pub type SharedPluginFunction = Rc<dyn PluginFunction>;
+
 /// A standard callback function.
 #[cfg(not(feature = "sync"))]
 pub type Callback<T, R> = Box<dyn Fn(&T) -> R + 'static>;
@@ -215,6 +221,8 @@ pub enum CallableFunction {
     Method(Shared<FnAny>),
     /// An iterator function.
     Iterator(IteratorFn),
+    /// A plugin-defined function,
+    Plugin(SharedPluginFunction),
     /// A script-defined function.
     #[cfg(not(feature = "no_function"))]
     Script(Shared<ScriptFnDef>),
@@ -226,6 +234,7 @@ impl fmt::Debug for CallableFunction {
             Self::Pure(_) => write!(f, "NativePureFunction"),
             Self::Method(_) => write!(f, "NativeMethod"),
             Self::Iterator(_) => write!(f, "NativeIterator"),
+            Self::Plugin(_) => write!(f, "PluginFunction"),
 
             #[cfg(not(feature = "no_function"))]
             Self::Script(fn_def) => fmt::Debug::fmt(fn_def, f),
@@ -239,6 +248,7 @@ impl fmt::Display for CallableFunction {
             Self::Pure(_) => write!(f, "NativePureFunction"),
             Self::Method(_) => write!(f, "NativeMethod"),
             Self::Iterator(_) => write!(f, "NativeIterator"),
+            Self::Plugin(_) => write!(f, "PluginFunction"),
 
             #[cfg(not(feature = "no_function"))]
             CallableFunction::Script(s) => fmt::Display::fmt(s, f),
@@ -253,6 +263,8 @@ impl CallableFunction {
             Self::Pure(_) => true,
             Self::Method(_) | Self::Iterator(_) => false,
 
+            Self::Plugin(p) => !p.is_method_call(),
+
             #[cfg(not(feature = "no_function"))]
             Self::Script(_) => false,
         }
@@ -263,6 +275,8 @@ impl CallableFunction {
             Self::Method(_) => true,
             Self::Pure(_) | Self::Iterator(_) => false,
 
+            Self::Plugin(p) => p.is_method_call(),
+
             #[cfg(not(feature = "no_function"))]
             Self::Script(_) => false,
         }
@@ -271,7 +285,7 @@ impl CallableFunction {
     pub fn is_iter(&self) -> bool {
         match self {
             Self::Iterator(_) => true,
-            Self::Pure(_) | Self::Method(_) => false,
+            Self::Pure(_) | Self::Method(_) | Self::Plugin(_) => false,
 
             #[cfg(not(feature = "no_function"))]
             Self::Script(_) => false,
@@ -283,13 +297,24 @@ impl CallableFunction {
             #[cfg(not(feature = "no_function"))]
             Self::Script(_) => true,
 
+            Self::Pure(_) | Self::Method(_) | Self::Iterator(_) | Self::Plugin(_) => false,
+        }
+    }
+    /// Is this a plugin-defined function?
+    pub fn is_plugin_fn(&self) -> bool {
+        match self {
+            Self::Plugin(_) => true,
             Self::Pure(_) | Self::Method(_) | Self::Iterator(_) => false,
+
+            #[cfg(not(feature = "no_function"))]
+            Self::Script(_) => false,
         }
     }
     /// Is this a native Rust function?
     pub fn is_native(&self) -> bool {
         match self {
             Self::Pure(_) | Self::Method(_) => true,
+            Self::Plugin(_) => true,
             Self::Iterator(_) => true,
 
             #[cfg(not(feature = "no_function"))]
@@ -299,6 +324,7 @@ impl CallableFunction {
     /// Get the access mode.
     pub fn access(&self) -> FnAccess {
         match self {
+            Self::Plugin(_) => FnAccess::Public,
             Self::Pure(_) | Self::Method(_) | Self::Iterator(_) => FnAccess::Public,
 
             #[cfg(not(feature = "no_function"))]
@@ -313,7 +339,7 @@ impl CallableFunction {
     pub fn get_native_fn(&self) -> &FnAny {
         match self {
             Self::Pure(f) | Self::Method(f) => f.as_ref(),
-            Self::Iterator(_) => unreachable!(),
+            Self::Iterator(_) | Self::Plugin(_) => unreachable!(),
 
             #[cfg(not(feature = "no_function"))]
             Self::Script(_) => unreachable!(),
@@ -327,7 +353,7 @@ impl CallableFunction {
     #[cfg(not(feature = "no_function"))]
     pub fn get_shared_fn_def(&self) -> Shared<ScriptFnDef> {
         match self {
-            Self::Pure(_) | Self::Method(_) | Self::Iterator(_) => unreachable!(),
+            Self::Pure(_) | Self::Method(_) | Self::Iterator(_) | Self::Plugin(_) => unreachable!(),
             Self::Script(f) => f.clone(),
         }
     }
@@ -338,7 +364,7 @@ impl CallableFunction {
     /// Panics if the `CallableFunction` is not `Script`.
     pub fn get_fn_def(&self) -> &ScriptFnDef {
         match self {
-            Self::Pure(_) | Self::Method(_) | Self::Iterator(_) => unreachable!(),
+            Self::Pure(_) | Self::Method(_) | Self::Iterator(_) | Self::Plugin(_) => unreachable!(),
 
             #[cfg(not(feature = "no_function"))]
             Self::Script(f) => f,
@@ -352,7 +378,21 @@ impl CallableFunction {
     pub fn get_iter_fn(&self) -> IteratorFn {
         match self {
             Self::Iterator(f) => *f,
-            Self::Pure(_) | Self::Method(_) => unreachable!(),
+            Self::Pure(_) | Self::Method(_) | Self::Plugin(_) => unreachable!(),
+
+            #[cfg(not(feature = "no_function"))]
+            Self::Script(_) => unreachable!(),
+        }
+    }
+    /// Get a reference to a plugin function.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `CallableFunction` is not `Plugin`.
+    pub fn get_plugin_fn<'s>(&'s self) -> SharedPluginFunction {
+        match self {
+            Self::Plugin(f) => f.clone(),
+            Self::Pure(_) | Self::Method(_) | Self::Iterator(_) => unreachable!(),
 
             #[cfg(not(feature = "no_function"))]
             Self::Script(_) => unreachable!(),
@@ -365,6 +405,18 @@ impl CallableFunction {
     /// Create a new `CallableFunction::Method`.
     pub fn from_method(func: Box<FnAny>) -> Self {
         Self::Method(func.into())
+    }
+
+    #[cfg(feature = "sync")]
+    /// Create a new `CallableFunction::Plugin`.
+    pub fn from_plugin(plugin: impl PluginFunction + 'static + Send + Sync) -> Self {
+        Self::Plugin(Arc::new(plugin))
+    }
+
+    #[cfg(not(feature = "sync"))]
+    /// Create a new `CallableFunction::Plugin`.
+    pub fn from_plugin(plugin: impl PluginFunction + 'static) -> Self {
+        Self::Plugin(Rc::new(plugin))
     }
 }
 

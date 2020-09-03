@@ -1,0 +1,11 @@
+error: expecting string literal
+ --> $DIR/export_fn_bad_value.rs:9:20
+  |
+9 | #[export_fn(name = true)]
+  |                    ^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> $DIR/export_fn_bad_value.rs:19:8
+   |
+19 |     if test_fn(n) {
+   |        ^^^^^^^ not found in this scope

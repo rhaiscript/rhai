@@ -1,0 +1,11 @@
+error: references from Rhai in this position must be mutable
+  --> $DIR/first_shared_ref.rs:11:23
+   |
+11 | pub fn test_fn(input: &NonClonable) -> bool {
+   |                       ^^^^^^^^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> $DIR/first_shared_ref.rs:22:8
+   |
+22 |     if test_fn(n) {
+   |        ^^^^^^^ not found in this scope

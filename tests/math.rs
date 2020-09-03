@@ -1,5 +1,8 @@
 use rhai::{Engine, EvalAltResult, INT};
 
+#[cfg(not(feature = "no_float"))]
+use rhai::FLOAT;
+
 #[test]
 fn test_math() -> Result<(), Box<EvalAltResult>> {
     let engine = Engine::new();
@@ -9,6 +12,12 @@ fn test_math() -> Result<(), Box<EvalAltResult>> {
     assert_eq!(engine.eval::<INT>("2 * 3")?, 6);
     assert_eq!(engine.eval::<INT>("1 / 2")?, 0);
     assert_eq!(engine.eval::<INT>("3 % 2")?, 1);
+
+    #[cfg(not(feature = "no_float"))]
+    assert!((engine.eval::<FLOAT>("sin(30.0)")? - 0.5).abs() < 0.001);
+
+    #[cfg(not(feature = "no_float"))]
+    assert!(engine.eval::<FLOAT>("cos(90.0)")?.abs() < 0.001);
 
     #[cfg(not(feature = "only_i32"))]
     assert_eq!(

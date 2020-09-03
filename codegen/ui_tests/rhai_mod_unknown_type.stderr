@@ -1,0 +1,23 @@
+error[E0412]: cannot find type `Pointer` in this scope
+  --> $DIR/rhai_mod_unknown_type.rs:12:27
+   |
+4  | pub struct Point {
+   | ---------------- similarly named struct `Point` defined here
+...
+12 |     pub fn test_fn(input: Pointer) -> bool {
+   |                           ^^^^^^^
+   |
+help: a struct with a similar name exists
+   |
+12 |     pub fn test_fn(input: Point) -> bool {
+   |                           ^^^^^
+help: consider importing one of these items
+   |
+11 |     use core::fmt::Pointer;
+   |
+11 |     use crate::mem::fmt::Pointer;
+   |
+11 |     use std::fmt::Pointer;
+   |
+11 |     use syn::export::fmt::Pointer;
+   |

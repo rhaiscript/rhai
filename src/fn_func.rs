@@ -12,11 +12,11 @@ use crate::scope::Scope;
 
 use crate::stdlib::{boxed::Box, string::ToString};
 
-/// Trait to create a Rust anonymous function from a script.
+/// Trait to create a Rust closure from a script.
 pub trait Func<ARGS, RET> {
     type Output;
 
-    /// Create a Rust anonymous function from an `AST`.
+    /// Create a Rust closure from an `AST`.
     /// The `Engine` and `AST` are consumed and basically embedded into the closure.
     ///
     /// # Examples
@@ -47,7 +47,7 @@ pub trait Func<ARGS, RET> {
     /// # }
     fn create_from_ast(self, ast: AST, entry_point: &str) -> Self::Output;
 
-    /// Create a Rust anonymous function from a script.
+    /// Create a Rust closure from a script.
     /// The `Engine` is consumed and basically embedded into the closure.
     ///
     /// # Examples

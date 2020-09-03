@@ -136,7 +136,7 @@ impl AST {
         filter: impl Fn(FnAccess, &str, usize) -> bool,
     ) -> Self {
         let mut functions: Module = Default::default();
-        functions.merge_filtered(&self.1, filter);
+        functions.merge_filtered(&self.1, &filter);
         Self(Default::default(), functions)
     }
 
@@ -269,7 +269,7 @@ impl AST {
         };
 
         let mut functions = functions.clone();
-        functions.merge_filtered(&other.1, filter);
+        functions.merge_filtered(&other.1, &filter);
 
         Self::new(ast, functions)
     }
@@ -417,7 +417,8 @@ struct ParseState<'e> {
     /// Tracks a list of external variables (variables that are not explicitly declared in the scope).
     #[cfg(not(feature = "no_closure"))]
     externals: HashMap<String, Position>,
-    /// An indicator that disables variable capturing into externals one single time.
+    /// An indicator that disables variable capturing into externals one single time
+    /// up until the nearest consumed Identifier token.
     /// If set to false the next call to `access_var` will not capture the variable.
     /// All consequent calls to `access_var` will not be affected
     #[cfg(not(feature = "no_closure"))]
@@ -1688,6 +1689,21 @@ fn parse_primary(
 
         // Function call
         Token::Identifier(s) if *next_token == Token::LeftParen || *next_token == Token::Bang => {
+            // Once the identifier consumed we must enable next variables capturing
+            #[cfg(not(feature = "no_closure"))]
+            {
+                state.allow_capture = true;
+            }
+            Expr::Variable(Box::new(((s, settings.pos), None, 0, None)))
+        }
+        // Module qualification
+        #[cfg(not(feature = "no_module"))]
+        Token::Identifier(s) if *next_token == Token::DoubleColon => {
+            // Once the identifier consumed we must enable next variables capturing
+            #[cfg(not(feature = "no_closure"))]
+            {
+                state.allow_capture = true;
+            }
             Expr::Variable(Box::new(((s, settings.pos), None, 0, None)))
         }
         // Normal variable access
@@ -1695,6 +1711,7 @@ fn parse_primary(
             let index = state.access_var(&s, settings.pos);
             Expr::Variable(Box::new(((s, settings.pos), None, 0, index)))
         }
+
         // Function call is allowed to have reserved keyword
         Token::Reserved(s) if *next_token == Token::LeftParen || *next_token == Token::Bang => {
             if is_keyword_function(&s) {
@@ -1703,6 +1720,7 @@ fn parse_primary(
                 return Err(PERR::Reserved(s).into_err(settings.pos));
             }
         }
+
         // Access to `this` as a variable is OK
         Token::Reserved(s) if s == KEYWORD_THIS && *next_token != Token::LeftParen => {
             if !settings.is_function_scope {
@@ -1714,9 +1732,11 @@ fn parse_primary(
                 Expr::Variable(Box::new(((s, settings.pos), None, 0, None)))
             }
         }
+
         Token::Reserved(s) if is_valid_identifier(s.chars()) => {
             return Err(PERR::Reserved(s).into_err(settings.pos));
         }
+
         Token::LeftParen => parse_paren_expr(input, state, lib, settings.level_up())?,
         #[cfg(not(feature = "no_index"))]
         Token::LeftBracket => parse_array_literal(input, state, lib, settings.level_up())?,
@@ -1725,6 +1745,7 @@ fn parse_primary(
         Token::True => Expr::True(settings.pos),
         Token::False => Expr::False(settings.pos),
         Token::LexError(err) => return Err(err.into_err(settings.pos)),
+
         _ => {
             return Err(
                 PERR::BadInput(format!("Unexpected '{}'", token.syntax())).into_err(settings.pos)
@@ -1919,7 +1940,7 @@ fn parse_unary(
         }
         // | ...
         #[cfg(not(feature = "no_function"))]
-        Token::Pipe | Token::Or => {
+        Token::Pipe | Token::Or if settings.allow_anonymous_fn => {
             let mut new_state = ParseState::new(
                 state.engine,
                 #[cfg(not(feature = "unchecked"))]
@@ -3235,6 +3256,8 @@ fn make_curry_from_externals(
     let num_externals = externals.len();
     let mut args: StaticVec<_> = Default::default();
 
+    args.push(fn_expr);
+
     #[cfg(not(feature = "no_closure"))]
     externals.iter().for_each(|(var_name, pos)| {
         args.push(Expr::Variable(Box::new((
@@ -3250,17 +3273,15 @@ fn make_curry_from_externals(
         args.push(Expr::Variable(Box::new(((var_name, pos), None, 0, None))));
     });
 
-    let hash = calc_fn_hash(empty(), KEYWORD_FN_PTR_CURRY, num_externals, empty());
+    let hash = calc_fn_hash(empty(), KEYWORD_FN_PTR_CURRY, num_externals + 1, empty());
 
-    let fn_call = Expr::FnCall(Box::new((
+    let expr = Expr::FnCall(Box::new((
         (KEYWORD_FN_PTR_CURRY.into(), false, false, pos),
         None,
         hash,
         args,
         None,
     )));
-
-    let expr = Expr::Dot(Box::new((fn_expr, fn_call, pos)));
 
     // If there are captured variables, convert the entire expression into a statement block,
     // then insert the relevant `Share` statements.
@@ -3435,6 +3456,8 @@ impl Engine {
             pos: Position::none(),
         };
         let expr = parse_expr(input, &mut state, &mut functions, settings)?;
+
+        assert!(functions.is_empty());
 
         match input.peek().unwrap() {
             (Token::EOF, _) => (),

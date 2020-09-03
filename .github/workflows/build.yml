@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - plugins
   pull_request: {}
 
 jobs:
@@ -77,3 +78,25 @@ jobs:
       with:
         command: build
         args: --manifest-path=no_std/no_std_test/Cargo.toml ${{matrix.flags}}
+  codegen_build:
+    name: Codegen Build
+    runs-on: ${{matrix.os}}
+    continue-on-error: ${{matrix.experimental}}
+    strategy:
+      matrix:
+        include:
+          - {toolchain: nightly, os: ubuntu-latest, experimental: false, flags: ""}
+          - {toolchain: nightly, os: windows-latest, experimental: false, flags: ""}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Setup Toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: ${{matrix.toolchain}}
+        override: true
+    - name: Build Project
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --manifest-path=codegen/Cargo.toml ${{matrix.flags}}

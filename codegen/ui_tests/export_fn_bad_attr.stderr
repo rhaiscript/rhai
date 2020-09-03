@@ -1,0 +1,11 @@
+error: unknown attribute 'unknown'
+ --> $DIR/export_fn_bad_attr.rs:9:13
+  |
+9 | #[export_fn(unknown = "thing")]
+  |             ^^^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> $DIR/export_fn_bad_attr.rs:19:8
+   |
+19 |     if test_fn(n) {
+   |        ^^^^^^^ not found in this scope

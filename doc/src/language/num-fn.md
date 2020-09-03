@@ -9,11 +9,11 @@ Integer Functions
 The following standard functions (defined in the [`BasicMathPackage`][packages] but excluded if using a [raw `Engine`])
 operate on `i8`, `i16`, `i32`, `i64`, `f32` and `f64` only:
 
-| Function     | Description                                                     |
-| ------------ | --------------------------------------------------------------- |
-| `abs`        | absolute value                                                  |
-| `sign`       | returns -1 if the number is negative, +1 if positive, 0 if zero |
-| [`to_float`] | converts an integer type to `f64`                               |
+| Function     | Description                                                             |
+| ------------ | ----------------------------------------------------------------------- |
+| `abs`        | absolute value                                                          |
+| `sign`       | returns -1 (`INT`) if the number is negative, +1 if positive, 0 if zero |
+| [`to_float`] | converts an integer type to `FLOAT`                                     |
 
 Floating-Point Functions
 -----------------------

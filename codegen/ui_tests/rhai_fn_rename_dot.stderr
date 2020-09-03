@@ -1,0 +1,11 @@
+error: Rhai function names may not contain dot
+  --> $DIR/rhai_fn_rename_dot.rs:12:22
+   |
+12 |     #[rhai_fn(name = "foo.bar")]
+   |                      ^^^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_module`
+  --> $DIR/rhai_fn_rename_dot.rs:23:8
+   |
+23 |     if test_module::test_fn(n) {
+   |        ^^^^^^^^^^^ use of undeclared type or module `test_module`

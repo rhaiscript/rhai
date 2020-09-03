@@ -14,7 +14,7 @@ Easy
 
 * Easily [call a script-defined function]({{rootUrl}}/engine/call-fn.md) from Rust.
 
-* Very few additional dependencies (right now only [`num-traits`](https://crates.io/crates/num-traits/) to do checked arithmetic operations, and [`smallvec`](https://crates.io/crates/smallvec/));
+* Very few additional dependencies (right now only [`smallvec`](https://crates.io/crates/smallvec/));
   for [`no-std`] builds, a number of additional dependencies are pulled in to provide for functionalities that used to be in `std`.
 
 Fast
@@ -65,6 +65,8 @@ Flexible
 * Support for [minimal builds] by excluding unneeded language [features].
 
 * Supports [most build targets](targets.md) including `no-std` and [WASM].
+
+* [Plugins] system powered by procedural macros simplifies custom API development.
 
 * Surgically [disable keywords and operators] to restrict the language.
 

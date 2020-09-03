@@ -1,11 +1,11 @@
-Create a Rust Anonymous Function from a Rhai Function
-===================================================
+Create a Rust Closure from a Rhai Function
+=========================================
 
 {{#include ../links.md}}
 
 It is possible to further encapsulate a script in Rust such that it becomes a normal Rust function.
 
-Such an _anonymous function_ is basically a boxed closure, very useful as call-back functions.
+Such a _closure_ is very useful as call-back functions.
 
 Creating them is accomplished via the `Func` trait which contains `create_from_script`
 (as well as its companion method `create_from_ast`):
@@ -30,7 +30,7 @@ let func = Func::<(i64, String), bool>::create_from_script(
                 "calc"                          // the entry-point function name
 )?;
 
-func(123, "hello".to_string())? == false;       // call the anonymous function
+func(123, "hello".to_string())? == false;       // call the closure
 
 schedule_callback(func);                        // pass it as a callback to another function
 

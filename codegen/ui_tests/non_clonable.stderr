@@ -1,0 +1,5 @@
+error[E0277]: the trait bound `NonClonable: std::clone::Clone` is not satisfied
+  --> $DIR/non_clonable.rs:11:23
+   |
+11 | pub fn test_fn(input: NonClonable) -> bool {
+   |                       ^^^^^^^^^^^ the trait `std::clone::Clone` is not implemented for `NonClonable`

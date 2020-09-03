@@ -1,0 +1,11 @@
+error: expecting identifier
+  --> $DIR/rhai_mod_junk_arg.rs:11:12
+   |
+11 | #[rhai_mod("wheeeee")]
+   |            ^^^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_module`
+  --> $DIR/rhai_mod_junk_arg.rs:24:8
+   |
+24 |     if test_module::test_fn(n) {
+   |        ^^^^^^^^^^^ use of undeclared type or module `test_module`

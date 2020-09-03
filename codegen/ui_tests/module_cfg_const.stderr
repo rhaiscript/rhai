@@ -1,0 +1,11 @@
+error: cfg attributes not allowed on this item
+  --> $DIR/module_cfg_const.rs:13:5
+   |
+13 |     #[cfg(feature = "foo")]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_module`
+  --> $DIR/module_cfg_const.rs:26:8
+   |
+26 |     if test_module::test_fn(n) {
+   |        ^^^^^^^^^^^ use of undeclared type or module `test_module`

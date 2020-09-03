@@ -1,0 +1,11 @@
+error: extraneous value
+  --> $DIR/export_mod_extra_value.rs:11:24
+   |
+11 | #[rhai_fn(return_raw = "yes")]
+   |                        ^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_mod`
+  --> $DIR/export_mod_extra_value.rs:22:8
+   |
+22 |     if test_mod::test_fn(n) {
+   |        ^^^^^^^^ use of undeclared type or module `test_mod`

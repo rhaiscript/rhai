@@ -70,6 +70,7 @@ mod module;
 mod optimize;
 pub mod packages;
 mod parser;
+pub mod plugin;
 mod result;
 mod scope;
 #[cfg(feature = "serde")]
@@ -85,7 +86,7 @@ pub use any::Dynamic;
 pub use engine::Engine;
 pub use error::{ParseError, ParseErrorType};
 pub use fn_native::{FnPtr, IteratorFn};
-pub use fn_register::{RegisterFn, RegisterResultFn};
+pub use fn_register::{RegisterFn, RegisterPlugin, RegisterResultFn};
 pub use module::Module;
 pub use parser::{ImmutableString, AST, INT};
 pub use result::EvalAltResult;
@@ -94,7 +95,11 @@ pub use syntax::{EvalContext, Expression};
 pub use token::Position;
 pub use utils::calc_fn_spec as calc_fn_hash;
 
+pub use rhai_codegen::*;
+
 #[cfg(not(feature = "no_function"))]
+pub use parser::FnAccess;
+#[cfg(feature = "no_function")]
 pub use parser::FnAccess;
 
 #[cfg(not(feature = "no_function"))]

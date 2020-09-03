@@ -1,0 +1,17 @@
+error: duplicate function 'test_fn'
+  --> $DIR/rhai_mod_name_collisions.rs:16:12
+   |
+16 |     pub fn test_fn(input: Point) -> bool {
+   |            ^^^^^^^
+
+error: duplicated function 'test_fn'
+  --> $DIR/rhai_mod_name_collisions.rs:12:12
+   |
+12 |     pub fn test_fn(input: Point) -> bool {
+   |            ^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_module`
+  --> $DIR/rhai_mod_name_collisions.rs:26:8
+   |
+26 |     if test_module::test_fn(n) {
+   |        ^^^^^^^^^^^ use of undeclared type or module `test_module`

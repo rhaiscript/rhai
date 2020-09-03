@@ -340,6 +340,7 @@ pub fn get_script_function_by_signature<'a>(
 ///
 /// This type is volatile and may change.
 #[cfg(not(feature = "unchecked"))]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Limits {
     /// Maximum levels of call-stack to prevent infinite recursion.
     ///

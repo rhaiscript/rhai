@@ -1,0 +1,11 @@
+error: return_raw functions must return Result<T>
+  --> $DIR/export_mod_raw_noreturn.rs:12:5
+   |
+12 | pub fn test_fn(input: &mut Point) {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_mod`
+  --> $DIR/export_mod_raw_noreturn.rs:22:5
+   |
+22 |     test_mod::test_fn(&mut n);
+   |     ^^^^^^^^ use of undeclared type or module `test_mod`

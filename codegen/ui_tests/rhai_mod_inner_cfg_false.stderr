@@ -1,0 +1,5 @@
+error[E0433]: failed to resolve: could not find `test_mod` in `test_module`
+  --> $DIR/rhai_mod_inner_cfg_false.rs:24:21
+   |
+24 |     if test_module::test_mod::test_fn(n) {
+   |                     ^^^^^^^^ could not find `test_mod` in `test_module`

@@ -1,6 +1,6 @@
 #![cfg(not(feature = "no_object"))]
 
-use rhai::{Engine, EvalAltResult, Map, Scope, INT};
+use rhai::{Engine, EvalAltResult, Map, ParseErrorType, Scope, INT};
 
 #[test]
 fn test_map_indexing() -> Result<(), Box<EvalAltResult>> {
@@ -181,6 +181,14 @@ fn test_map_json() -> Result<(), Box<EvalAltResult>> {
             11
         );
     }
+
+    engine.parse_json(&format!("#{}", json), true)?;
+
+    assert!(matches!(
+        *engine.parse_json("   123", true).expect_err("should error"),
+        EvalAltResult::ErrorParsing(ParseErrorType::MissingToken(token, _), pos)
+            if token == "{" && pos.position() == Some(4)
+    ));
 
     Ok(())
 }

@@ -1,0 +1,11 @@
+error: cannot return a reference to Rhai
+  --> $DIR/return_shared_ref.rs:12:33
+   |
+12 | pub fn test_fn(input: Clonable) -> &'static str {
+   |                                 ^^^^^^^^^^^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> $DIR/return_shared_ref.rs:23:20
+   |
+23 |     println!("{}", test_fn(n));
+   |                    ^^^^^^^ not found in this scope

@@ -45,16 +45,16 @@ fn test_divide_equals() -> Result<(), Box<EvalAltResult>> {
 }
 
 #[test]
-fn test_left_shift_equals() -> Result<(), Box<EvalAltResult>> {
+fn test_right_shift_equals() -> Result<(), Box<EvalAltResult>> {
     let engine = Engine::new();
     assert_eq!(engine.eval::<INT>("let x = 9; x >>=1; x")?, 4);
     Ok(())
 }
 
 #[test]
-fn test_right_shift_equals() -> Result<(), Box<EvalAltResult>> {
+fn test_left_shift_equals() -> Result<(), Box<EvalAltResult>> {
     let engine = Engine::new();
-    assert_eq!(engine.eval::<INT>("let x = 4; x<<= 2; x")?, 16);
+    assert_eq!(engine.eval::<INT>("let x = 4; x <<= 2; x")?, 16);
     Ok(())
 }
 

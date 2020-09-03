@@ -41,25 +41,3 @@ let len = engine.eval::<i64>("x.len1()")?;                  // 'x' is cloned, ve
 let len = engine.eval::<i64>("x.len2()")?;                  // 'x' is shared
 let len = engine.eval::<i64>("x.len3()")?;                  // 'x' is shared
 ```
-
-
-Avoid `&mut ImmutableString`
----------------------------
-
-Rhai functions can take a first `&mut` parameter.  Usually this is a good idea because it avoids
-cloning of the argument (except for primary types where cloning is cheap), so its use is encouraged
-even though there is no intention to ever mutate that argument.
-
-[`ImmutableString`][string] is an exception to this rule.
-
-While `ImmutableString` is cheap to clone (only incrementing a reference count), taking a mutable
-reference to it involves making a private clone of the underlying string because Rhai has no way
-to find out whether that parameter will be mutated.
-
-If the `ImmutableString` is not shared by any other variables, then Rhai just returns a mutable
-reference to it since nobody else is watching! Otherwise a private copy is made first,
-because other reference holders will not expect the `ImmutableString` to ever change
-(it is supposed to be _immutable_).
-
-Therefore, avoid using `&mut ImmutableString` as the first parameter of a function unless you really
-intend to mutate that string.  Use `ImmutableString` instead.

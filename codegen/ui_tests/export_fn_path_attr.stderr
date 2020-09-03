@@ -1,0 +1,11 @@
+error: expecting attribute name
+ --> $DIR/export_fn_path_attr.rs:9:13
+  |
+9 | #[export_fn(rhai::name = "thing")]
+  |             ^^^^^^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> $DIR/export_fn_path_attr.rs:19:8
+   |
+19 |     if test_fn(n) {
+   |        ^^^^^^^ not found in this scope

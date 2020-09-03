@@ -1,0 +1,11 @@
+error: cfg attributes not allowed on this item
+  --> $DIR/export_mod_cfg.rs:11:1
+   |
+11 | #[cfg(not(feature = "foo"))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_mod`
+  --> $DIR/export_mod_cfg.rs:23:8
+   |
+23 |     if test_mod::test_fn(n) {
+   |        ^^^^^^^^ use of undeclared type or module `test_mod`

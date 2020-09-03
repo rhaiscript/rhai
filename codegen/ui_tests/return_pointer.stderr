@@ -1,0 +1,11 @@
+error: cannot return a pointer to Rhai
+  --> $DIR/return_pointer.rs:12:33
+   |
+12 | pub fn test_fn(input: Clonable) -> *const str {
+   |                                 ^^^^^^^^^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> $DIR/return_pointer.rs:24:19
+   |
+24 |         let ptr = test_fn(n);
+   |                   ^^^^^^^ not found in this scope

@@ -35,7 +35,8 @@ The actual implementation de-sugars to:
 
 1. Keeping track of what variables are accessed inside the anonymous function,
 
-2. If a variable is not defined within the anonymous function's scope, it is looked up _outside_ the function and in the current execution scope - where the anonymous function is created.
+2. If a variable is not defined within the anonymous function's scope, it is looked up _outside_ the function and
+   in the current execution scope - where the anonymous function is created.
 
 3. The variable is added to the parameters list of the anonymous function, at the front.
 
@@ -43,7 +44,8 @@ The actual implementation de-sugars to:
 
    An [anonymous function] which captures an external variable is the only way to create a reference-counted shared value in Rhai.
 
-5. The shared value is then [curried][currying] into the [function pointer] itself, essentially carrying a reference to that shared value and inserting it into future calls of the function.
+5. The shared value is then [curried][currying] into the [function pointer] itself, essentially carrying a reference to that shared value
+   and inserting it into future calls of the function.
 
    This process is called _Automatic Currying_, and is the mechanism through which Rhai simulates normal closures.
 

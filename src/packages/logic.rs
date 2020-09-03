@@ -1,65 +1,85 @@
 use crate::def_package;
-use crate::module::FuncReturn;
+use crate::plugin::*;
 
-// Comparison operators
-pub fn lt<T: PartialOrd>(x: T, y: T) -> FuncReturn<bool> {
-    Ok(x < y)
-}
-pub fn lte<T: PartialOrd>(x: T, y: T) -> FuncReturn<bool> {
-    Ok(x <= y)
-}
-pub fn gt<T: PartialOrd>(x: T, y: T) -> FuncReturn<bool> {
-    Ok(x > y)
-}
-pub fn gte<T: PartialOrd>(x: T, y: T) -> FuncReturn<bool> {
-    Ok(x >= y)
-}
-pub fn eq<T: PartialEq>(x: T, y: T) -> FuncReturn<bool> {
-    Ok(x == y)
-}
-pub fn ne<T: PartialEq>(x: T, y: T) -> FuncReturn<bool> {
-    Ok(x != y)
-}
+macro_rules! gen_cmp_functions {
+    ($root:ident => $($arg_type:ident),+) => {
+        mod $root { $(pub mod $arg_type {
+            use super::super::*;
 
-// Logic operators
-fn not(x: bool) -> FuncReturn<bool> {
-    Ok(!x)
-}
-
-macro_rules! reg_op {
-    ($lib:expr, $op:expr, $func:ident, $($par:ty),*) => {
-        $( $lib.set_fn_2($op, $func::<$par>); )*
+            #[export_module]
+            pub mod functions {
+                #[rhai_fn(name = "<")]
+                #[inline(always)]
+                pub fn lt(x: $arg_type, y: $arg_type) -> bool {
+                    x < y
+                }
+                #[rhai_fn(name = "<=")]
+                #[inline(always)]
+                pub fn lte(x: $arg_type, y: $arg_type) -> bool {
+                    x <= y
+                }
+                #[rhai_fn(name = ">")]
+                #[inline(always)]
+                pub fn gt(x: $arg_type, y: $arg_type) -> bool {
+                    x > y
+                }
+                #[rhai_fn(name = ">=")]
+                #[inline(always)]
+                pub fn gte(x: $arg_type, y: $arg_type) -> bool {
+                    x >= y
+                }
+                #[rhai_fn(name = "==")]
+                #[inline(always)]
+                pub fn eq(x: $arg_type, y: $arg_type) -> bool {
+                    x == y
+                }
+                #[rhai_fn(name = "!=")]
+                #[inline(always)]
+                pub fn ne(x: $arg_type, y: $arg_type) -> bool {
+                    x != y
+                }
+            }
+        })* }
     };
 }
 
-def_package!(crate:LogicPackage:"Logical operators.", lib, {
-    if cfg!(not(feature = "only_i32")) && cfg!(not(feature = "only_i64")) {
-        reg_op!(lib, "<", lt, i8, u8, i16, u16, i32, u32, u64);
-        reg_op!(lib, "<=", lte, i8, u8, i16, u16, i32, u32, u64);
-        reg_op!(lib, ">", gt, i8, u8, i16, u16, i32, u32, u64);
-        reg_op!(lib, ">=", gte, i8, u8, i16, u16, i32, u32, u64);
-        reg_op!(lib, "==", eq, i8, u8, i16, u16, i32, u32, u64);
-        reg_op!(lib, "!=", ne, i8, u8, i16, u16, i32, u32, u64);
+macro_rules! reg_functions {
+    ($mod_name:ident += $root:ident ; $($arg_type:ident),+) => { $(
+        $mod_name.combine_flatten(exported_module!($root::$arg_type::functions));
+    )* }
+}
 
-        if cfg!(not(target_arch = "wasm32")) {
-            reg_op!(lib, "<", lt, i128, u128);
-            reg_op!(lib, "<=", lte, i128, u128);
-            reg_op!(lib, ">", gt, i128, u128);
-            reg_op!(lib, ">=", gte, i128, u128);
-            reg_op!(lib, "==", eq, i128, u128);
-            reg_op!(lib, "!=", ne, i128, u128);
-        }
+def_package!(crate:LogicPackage:"Logical operators.", lib, {
+    #[cfg(not(feature = "only_i32"))]
+    #[cfg(not(feature = "only_i64"))]
+    {
+        reg_functions!(lib += numbers; i8, u8, i16, u16, i32, u32, u64);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        reg_functions!(lib += num_128; i128, u128);
     }
 
     #[cfg(not(feature = "no_float"))]
-    {
-        reg_op!(lib, "<", lt, f32);
-        reg_op!(lib, "<=", lte, f32);
-        reg_op!(lib, ">", gt, f32);
-        reg_op!(lib, ">=", gte, f32);
-        reg_op!(lib, "==", eq, f32);
-        reg_op!(lib, "!=", ne, f32);
-    }
+    reg_functions!(lib += float; f32);
 
-    lib.set_fn_1("!", not);
+    set_exported_fn!(lib, "!", not);
 });
+
+// Logic operators
+#[export_fn]
+#[inline(always)]
+fn not(x: bool) -> bool {
+    !x
+}
+
+#[cfg(not(feature = "only_i32"))]
+#[cfg(not(feature = "only_i64"))]
+gen_cmp_functions!(numbers => i8, u8, i16, u16, i32, u32, u64);
+
+#[cfg(not(feature = "only_i32"))]
+#[cfg(not(feature = "only_i64"))]
+#[cfg(not(target_arch = "wasm32"))]
+gen_cmp_functions!(num_128 => i128, u128);
+
+#[cfg(not(feature = "no_float"))]
+gen_cmp_functions!(float => f32);

@@ -11,7 +11,7 @@ packages to be used.
 Packages typically contain Rust functions that are callable within a Rhai script.
 All functions registered in a package is loaded under the _global namespace_ (i.e. they're available without module qualifiers).
 
-Once a package is created (e.g. via `new`), it can be _shared_ (via `get`) among multiple instances of [`Engine`],
+Once a package is created (e.g. via `Package::new`), it can be _shared_ (via `Package::get`) among multiple instances of [`Engine`],
 even across threads (under [`sync`]). Therefore, a package only has to be created _once_.
 
 ```rust
@@ -36,3 +36,21 @@ namespace alias specified in an [`import`] statement (see also [modules]).
 
 A package is _static_ (i.e. pre-loaded into an [`Engine`]), while a module is _dynamic_ (i.e. loaded with
 the `import` statement).
+
+
+Load a Module as a Package
+--------------------------
+
+Stand-alone [modules] can be loaded directly into an [`Engine`] as a package via the same `Engine::load_package` API.
+
+```rust
+let mut module = Module::new();
+        :
+    // add functions into module
+        :
+
+engine.load_package(module);
+```
+
+[Modules], however, are not _shared_, so use a [custom package] if it must be shared among multiple
+instances of [`Engine`].

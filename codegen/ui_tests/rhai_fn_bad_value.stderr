@@ -1,0 +1,11 @@
+error: expecting string literal
+  --> $DIR/rhai_fn_bad_value.rs:11:18
+   |
+11 | #[rhai_fn(name = true)]
+   |                  ^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_module`
+  --> $DIR/rhai_fn_bad_value.rs:22:8
+   |
+22 |     if test_module::test_fn(n) {
+   |        ^^^^^^^^^^^ use of undeclared type or module `test_module`

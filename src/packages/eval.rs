@@ -1,12 +1,14 @@
+use crate::any::Dynamic;
 use crate::def_package;
-use crate::module::FuncReturn;
 use crate::parser::ImmutableString;
+use crate::plugin::*;
+use crate::result::EvalAltResult;
 
 def_package!(crate:EvalPackage:"Disable 'eval'.", lib, {
-    lib.set_fn_1(
-        "eval",
-        |_: ImmutableString| -> FuncReturn<()> {
-            Err("eval is evil!".into())
-        },
-    );
+    set_exported_fn!(lib, "eval", eval_override);
 });
+
+#[export_fn(return_raw)]
+fn eval_override(_script: ImmutableString) -> Result<Dynamic, Box<EvalAltResult>> {
+    Err("eval is evil!".into())
+}

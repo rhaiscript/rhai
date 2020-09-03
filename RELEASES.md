@@ -7,7 +7,44 @@ Version 0.19.0
 New features
 ------------
 
+* Plugins support via procedural macros.
+
+
+Version 0.18.3
+==============
+
+Bug fixes
+---------
+
+* `Engine::compile_expression`, `Engine::eval_expression` etc. no longer parse anonymous functions and closures.
+* Imported modules now work inside closures.
+* Closures that capture now work under `no_object`.
+
+
+Version 0.18.2
+==============
+
+New features
+------------
+
+* Adds `Module::combine_flatten` to combine two modules while flattening to the root level.
+
+
+Version 0.18.2
+==============
+
+Bug fixes
+---------
+
+* Fixes bug that prevents calling functions in closures.
+* Fixes bug that erroneously consumes the first argument to a module-qualified function call.
+
+New features
+------------
+
 * Adds `Engine::register_get_result`, `Engine::register_set_result`, `Engine::register_indexer_get_result`, `Engine::register_indexer_set_result` API.
+* Adds `Module::combine` to combine two modules.
+* `Engine::parse_json` now also accepts a JSON object starting with `#{`.
 
 
 Version 0.18.1

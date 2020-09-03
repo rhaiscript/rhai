@@ -53,3 +53,15 @@ no floating-point, is `Send + Sync` (so it can be safely used across threads), a
 nor loading external [modules].
 
 This configuration is perfect for an expression parser in a 32-bit embedded system without floating-point hardware.
+
+
+Caveat - Features Are Not Additive
+---------------------------------
+
+Rhai features are not strictly _additive_ - i.e. they do not only add optional functionalities.
+
+In fact, most features are _subtractive_ - i.e. they _remove_ functionalities.
+
+There is a reason for this design, because the _lack_ of a language feature by itself is a feature.
+
+See [here]({{rootUrl}}/patterns/multiple.md) for more details.

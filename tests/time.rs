@@ -39,5 +39,14 @@ fn test_timestamp() -> Result<(), Box<EvalAltResult>> {
         )? < 10
     );
 
+    assert!(engine.eval::<bool>(
+        r"
+            let time1 = timestamp();
+            for x in range(0, 10000) {}
+            let time2 = timestamp();
+            time1 <= time2
+        "
+    )?);
+
     Ok(())
 }

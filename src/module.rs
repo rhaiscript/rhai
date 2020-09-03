@@ -611,9 +611,9 @@ impl Module {
     ) -> u64 {
         let f = move |_: &Engine, _: &Module, args: &mut FnCallArgs| {
             let b = mem::take(args[1]).cast::<B>();
-            let mut a = args[0].write_lock::<A>().unwrap();
+            let a = &mut args[0].write_lock::<A>().unwrap();
 
-            func(&mut a, b).map(Dynamic::from)
+            func(a, b).map(Dynamic::from)
         };
         let arg_types = [TypeId::of::<A>(), TypeId::of::<B>()];
         self.set_fn(name, Public, &arg_types, Func::from_method(Box::new(f)))
@@ -735,9 +735,9 @@ impl Module {
         let f = move |_: &Engine, _: &Module, args: &mut FnCallArgs| {
             let b = mem::take(args[1]).cast::<B>();
             let c = mem::take(args[2]).cast::<C>();
-            let mut a = args[0].write_lock::<A>().unwrap();
+            let a = &mut args[0].write_lock::<A>().unwrap();
 
-            func(&mut a, b, c).map(Dynamic::from)
+            func(a, b, c).map(Dynamic::from)
         };
         let arg_types = [TypeId::of::<A>(), TypeId::of::<B>(), TypeId::of::<C>()];
         self.set_fn(name, Public, &arg_types, Func::from_method(Box::new(f)))
@@ -769,9 +769,9 @@ impl Module {
         let f = move |_: &Engine, _: &Module, args: &mut FnCallArgs| {
             let b = mem::take(args[1]).cast::<B>();
             let c = mem::take(args[2]).cast::<C>();
-            let mut a = args[0].write_lock::<A>().unwrap();
+            let a = &mut args[0].write_lock::<A>().unwrap();
 
-            func(&mut a, b, c).map(Dynamic::from)
+            func(a, b, c).map(Dynamic::from)
         };
         let arg_types = [TypeId::of::<A>(), TypeId::of::<B>(), TypeId::of::<C>()];
         self.set_fn(
@@ -892,9 +892,9 @@ impl Module {
             let b = mem::take(args[1]).cast::<B>();
             let c = mem::take(args[2]).cast::<C>();
             let d = mem::take(args[3]).cast::<D>();
-            let mut a = args[0].write_lock::<A>().unwrap();
+            let a = &mut args[0].write_lock::<A>().unwrap();
 
-            func(&mut a, b, c, d).map(Dynamic::from)
+            func(a, b, c, d).map(Dynamic::from)
         };
         let arg_types = [
             TypeId::of::<A>(),
@@ -928,17 +928,58 @@ impl Module {
         self.all_functions.get(&hash_qualified_fn)
     }
 
+    /// Combine another module into this module.
+    /// The other module is consumed to merge into this module.
+    pub fn combine(&mut self, other: Self) -> &mut Self {
+        self.modules.extend(other.modules.into_iter());
+        self.variables.extend(other.variables.into_iter());
+        self.functions.extend(other.functions.into_iter());
+        self.type_iterators.extend(other.type_iterators.into_iter());
+        self.all_functions.clear();
+        self.all_variables.clear();
+        self.indexed = false;
+        self
+    }
+
+    /// Combine another module into this module.
+    /// The other module is consumed to merge into this module.
+    /// Sub-modules are flattened onto the root module, with higher level overriding lower level.
+    pub fn combine_flatten(&mut self, other: Self) -> &mut Self {
+        other.modules.into_iter().for_each(|(_, m)| {
+            self.combine_flatten(m);
+        });
+
+        self.variables.extend(other.variables.into_iter());
+        self.functions.extend(other.functions.into_iter());
+        self.type_iterators.extend(other.type_iterators.into_iter());
+        self.all_functions.clear();
+        self.all_variables.clear();
+        self.indexed = false;
+        self
+    }
+
     /// Merge another module into this module.
     pub fn merge(&mut self, other: &Self) -> &mut Self {
-        self.merge_filtered(other, |_, _, _| true)
+        self.merge_filtered(other, &|_, _, _| true)
     }
 
     /// Merge another module into this module, with only selected script-defined functions based on a filter predicate.
     pub(crate) fn merge_filtered(
         &mut self,
         other: &Self,
-        _filter: impl Fn(FnAccess, &str, usize) -> bool,
+        _filter: &impl Fn(FnAccess, &str, usize) -> bool,
     ) -> &mut Self {
+        #[cfg(not(feature = "no_function"))]
+        for (k, v) in &other.modules {
+            let mut m = Self::new();
+            m.merge_filtered(v, _filter);
+            self.modules.insert(k.clone(), m);
+        }
+
+        #[cfg(feature = "no_function")]
+        self.modules
+            .extend(other.modules.iter().map(|(k, v)| (k.clone(), v.clone())));
+
         self.variables
             .extend(other.variables.iter().map(|(k, v)| (k.clone(), v.clone())));
 

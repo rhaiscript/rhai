@@ -1,0 +1,17 @@
+error: duplicate Rhai signature for 'foo'
+  --> $DIR/rhai_fn_rename_collision.rs:17:15
+   |
+17 |     #[rhai_fn(name = "foo")]
+   |               ^^^^^^^^^^^^
+
+error: duplicated function renamed 'foo'
+  --> $DIR/rhai_fn_rename_collision.rs:12:15
+   |
+12 |     #[rhai_fn(name = "foo")]
+   |               ^^^^^^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_module`
+  --> $DIR/rhai_fn_rename_collision.rs:28:8
+   |
+28 |     if test_module::test_fn(n) {
+   |        ^^^^^^^^^^^ use of undeclared type or module `test_module`

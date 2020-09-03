@@ -1,0 +1,11 @@
+error: expecting attribute name
+  --> $DIR/rhai_fn_path_attr.rs:11:11
+   |
+11 | #[rhai_fn(rhai::name = "thing")]
+   |           ^^^^^^^^^^
+
+error[E0433]: failed to resolve: use of undeclared type or module `test_module`
+  --> $DIR/rhai_fn_path_attr.rs:22:8
+   |
+22 |     if test_module::test_fn(n) {
+   |        ^^^^^^^^^^^ use of undeclared type or module `test_module`

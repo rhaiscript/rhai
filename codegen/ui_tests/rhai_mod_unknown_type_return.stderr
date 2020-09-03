@@ -1,0 +1,5 @@
+error[E0412]: cannot find type `boool` in this scope
+  --> $DIR/rhai_mod_unknown_type_return.rs:12:37
+   |
+12 |     pub fn test_fn(input: Point) -> boool {
+   |                                     ^^^^^ help: a builtin type with a similar name exists: `bool`

@@ -97,6 +97,31 @@ fn test_module_resolver() -> Result<(), Box<EvalAltResult>> {
     assert_eq!(
         engine.eval::<INT>(
             r#"
+                import "hello" as h1;
+                import "hello" as h2;
+                let x = 42;
+                h1::sum(x, -10, 3, 7)
+            "#
+        )?,
+        42
+    );
+
+    assert_eq!(
+        engine.eval::<INT>(
+            r#"
+                import "hello" as h1;
+                import "hello" as h2;
+                let x = 42;
+                h1::sum(x, 0, 0, 0);
+                x
+            "#
+        )?,
+        42
+    );
+
+    assert_eq!(
+        engine.eval::<INT>(
+            r#"
                 import "hello" as h;
                 let x = 21;
                 h::double(x);

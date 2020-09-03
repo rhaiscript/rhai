@@ -1,8 +1,10 @@
+#![allow(non_snake_case)]
+
 use crate::def_package;
 use crate::engine::{FN_TO_STRING, KEYWORD_DEBUG, KEYWORD_PRINT};
 use crate::fn_native::FnPtr;
-use crate::module::FuncReturn;
 use crate::parser::{ImmutableString, INT};
+use crate::plugin::*;
 
 #[cfg(not(feature = "no_index"))]
 use crate::engine::Array;
@@ -19,83 +21,157 @@ use crate::stdlib::{
     string::ToString,
 };
 
-// Register print and debug
-fn to_debug<T: Debug>(x: &mut T) -> FuncReturn<ImmutableString> {
-    Ok(format!("{:?}", x).into())
-}
-fn to_string<T: Display>(x: &mut T) -> FuncReturn<ImmutableString> {
-    Ok(x.to_string().into())
-}
-#[cfg(not(feature = "no_object"))]
-fn format_map(x: &mut Map) -> FuncReturn<ImmutableString> {
-    Ok(format!("#{:?}", x).into())
+type Unit = ();
+
+macro_rules! gen_functions {
+    ($root:ident => $fn_name:ident ( $($arg_type:ident),+ )) => {
+        pub mod $root { $(pub mod $arg_type {
+            use super::super::*;
+
+            #[export_fn]
+            #[inline(always)]
+            pub fn to_string_func(x: &mut $arg_type) -> ImmutableString {
+                super::super::$fn_name(x)
+            }
+        })* }
+    }
 }
 
-macro_rules! reg_op {
-    ($lib:expr, $op:expr, $func:ident, $($par:ty),*) => {
-        $( $lib.set_fn_1_mut($op, $func::<$par>); )*
-    };
+macro_rules! reg_print_functions {
+    ($mod_name:ident += $root:ident ; $($arg_type:ident),+) => { $(
+        set_exported_fn!($mod_name, FN_TO_STRING, $root::$arg_type::to_string_func);
+        set_exported_fn!($mod_name, KEYWORD_PRINT, $root::$arg_type::to_string_func);
+    )* }
+}
+
+macro_rules! reg_debug_functions {
+    ($mod_name:ident += $root:ident ; $($arg_type:ident),+) => { $(
+        set_exported_fn!($mod_name, KEYWORD_DEBUG, $root::$arg_type::to_string_func);
+    )* }
 }
 
 def_package!(crate:BasicStringPackage:"Basic string utilities, including printing.", lib, {
-    reg_op!(lib, KEYWORD_PRINT, to_string, INT, bool, char, FnPtr);
-    reg_op!(lib, FN_TO_STRING, to_string, INT, bool, char, FnPtr);
-    lib.set_fn_1_mut(KEYWORD_DEBUG, |f: &mut FnPtr| Ok(f.to_string()));
+    reg_print_functions!(lib += print_basic; INT, bool, char, FnPtr);
+    set_exported_fn!(lib, KEYWORD_PRINT, print_empty_string);
+    set_exported_fn!(lib, KEYWORD_PRINT, print_unit);
+    set_exported_fn!(lib, FN_TO_STRING, print_unit);
+    set_exported_fn!(lib, KEYWORD_PRINT, print_string);
+    set_exported_fn!(lib, FN_TO_STRING, print_string);
 
-    lib.set_fn_0(KEYWORD_PRINT, || Ok("".to_string()));
-    lib.set_fn_1(KEYWORD_PRINT, |_: ()| Ok("".to_string()));
-    lib.set_fn_1(FN_TO_STRING, |_: ()| Ok("".to_string()));
+    reg_debug_functions!(lib += debug_basic; INT, bool, Unit, char, ImmutableString);
+    set_exported_fn!(lib, KEYWORD_DEBUG, print_empty_string);
+    set_exported_fn!(lib, KEYWORD_DEBUG, debug_fn_ptr);
 
-    lib.set_fn_1(KEYWORD_PRINT, |s: ImmutableString| Ok(s));
-    lib.set_fn_1(FN_TO_STRING, |s: ImmutableString| Ok(s));
+    #[cfg(not(feature = "only_i32"))]
+    #[cfg(not(feature = "only_i64"))]
+    {
+        reg_print_functions!(lib += print_numbers; i8, u8, i16, u16, i32, u32, i64, u64);
+        reg_debug_functions!(lib += debug_numbers; i8, u8, i16, u16, i32, u32, i64, u64);
 
-    reg_op!(lib, KEYWORD_DEBUG, to_debug, INT, bool, (), char, ImmutableString);
-
-    if cfg!(not(feature = "only_i32")) && cfg!(not(feature = "only_i64")) {
-        reg_op!(lib, KEYWORD_PRINT, to_string, i8, u8, i16, u16, i32, u32);
-        reg_op!(lib, FN_TO_STRING, to_string, i8, u8, i16, u16, i32, u32);
-        reg_op!(lib, KEYWORD_DEBUG, to_debug, i8, u8, i16, u16, i32, u32);
-        reg_op!(lib, KEYWORD_PRINT, to_string, i64, u64);
-        reg_op!(lib, FN_TO_STRING, to_string, i64, u64);
-        reg_op!(lib, KEYWORD_DEBUG, to_debug, i64, u64);
-
-        if cfg!(not(target_arch = "wasm32")) {
-            reg_op!(lib, KEYWORD_PRINT, to_string, i128, u128);
-            reg_op!(lib, FN_TO_STRING, to_string, i128, u128);
-            reg_op!(lib, KEYWORD_DEBUG, to_debug, i128, u128);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            reg_print_functions!(lib += print_num_128; i128, u128);
+            reg_debug_functions!(lib += debug_num_128; i128, u128);
         }
     }
 
     #[cfg(not(feature = "no_float"))]
     {
-        reg_op!(lib, KEYWORD_PRINT, to_string, f32, f64);
-        reg_op!(lib, FN_TO_STRING, to_string, f32, f64);
-        reg_op!(lib, KEYWORD_DEBUG, to_debug, f32, f64);
+        reg_print_functions!(lib += print_float; f32, f64);
+        reg_debug_functions!(lib += debug_float; f32, f64);
     }
 
     #[cfg(feature = "decimal")]
     {
-        reg_op!(lib, KEYWORD_PRINT, to_string, Decimal);
-        reg_op!(lib, FN_TO_STRING, to_string, Decimal);
-        reg_op!(lib, KEYWORD_DEBUG, to_debug, Decimal);
+        reg_print_functions!(lib += print_decimal; Decimal);
+        reg_debug_functions!(lib += debug_decimal; Decimal);
     }
 
     #[cfg(not(feature = "no_index"))]
     {
-        reg_op!(lib, KEYWORD_PRINT, to_debug, Array);
-        reg_op!(lib, FN_TO_STRING, to_debug, Array);
-        reg_op!(lib, KEYWORD_DEBUG, to_debug, Array);
+        reg_print_functions!(lib += print_array; Array);
+        reg_debug_functions!(lib += print_array; Array);
     }
 
     #[cfg(not(feature = "no_object"))]
     {
-        lib.set_fn_1_mut(KEYWORD_PRINT, format_map);
-        lib.set_fn_1_mut(FN_TO_STRING, format_map);
-        lib.set_fn_1_mut(KEYWORD_DEBUG, format_map);
+        set_exported_fn!(lib, KEYWORD_PRINT, format_map::format_map);
+        set_exported_fn!(lib, FN_TO_STRING, format_map::format_map);
+        set_exported_fn!(lib, KEYWORD_DEBUG, format_map::format_map);
     }
-
-    lib.set_fn_2("+", |s: ImmutableString, ch: char| Ok(s + ch));
-    lib.set_fn_2_mut("+=", |s: &mut ImmutableString, ch: char| { *s += ch; Ok(()) });
-    lib.set_fn_2_mut("append", |s: &mut ImmutableString, ch: char| { *s += ch; Ok(()) });
-    lib.set_fn_2_mut("append", |s: &mut ImmutableString, s2: ImmutableString| { *s += &s2; Ok(()) });
 });
+
+gen_functions!(print_basic => to_string(INT, bool, char, FnPtr));
+gen_functions!(debug_basic => to_debug(INT, bool, Unit, char, ImmutableString));
+
+#[cfg(not(feature = "only_i32"))]
+#[cfg(not(feature = "only_i64"))]
+gen_functions!(print_numbers => to_string(i8, u8, i16, u16, i32, u32, i64, u64));
+
+#[cfg(not(feature = "only_i32"))]
+#[cfg(not(feature = "only_i64"))]
+gen_functions!(debug_numbers => to_debug(i8, u8, i16, u16, i32, u32, i64, u64));
+
+#[cfg(not(feature = "only_i32"))]
+#[cfg(not(feature = "only_i64"))]
+#[cfg(not(target_arch = "wasm32"))]
+gen_functions!(print_num_128 => to_string(i128, u128));
+
+#[cfg(not(feature = "only_i32"))]
+#[cfg(not(feature = "only_i64"))]
+#[cfg(not(target_arch = "wasm32"))]
+gen_functions!(debug_num_128 => to_debug(i128, u128));
+
+#[cfg(not(feature = "no_float"))]
+gen_functions!(print_float => to_string(f32, f64));
+
+#[cfg(not(feature = "no_float"))]
+gen_functions!(debug_float => to_debug(f32, f64));
+
+#[cfg(feature = "decimal")]
+gen_functions!(print_decimal => to_string(Decimal));
+
+#[cfg(feature = "decimal")]
+gen_functions!(debug_decimal => to_debug(Decimal));
+
+#[cfg(not(feature = "no_index"))]
+gen_functions!(print_array => to_debug(Array));
+
+// Register print and debug
+#[export_fn]
+#[inline(always)]
+fn print_empty_string() -> ImmutableString {
+    "".to_string().into()
+}
+#[export_fn]
+#[inline(always)]
+fn print_unit(_x: ()) -> ImmutableString {
+    "".to_string().into()
+}
+#[export_fn]
+#[inline(always)]
+fn print_string(s: ImmutableString) -> ImmutableString {
+    s
+}
+#[export_fn]
+#[inline(always)]
+fn debug_fn_ptr(f: &mut FnPtr) -> ImmutableString {
+    to_string(f)
+}
+#[inline(always)]
+fn to_string<T: Display>(x: &mut T) -> ImmutableString {
+    x.to_string().into()
+}
+#[inline]
+fn to_debug<T: Debug>(x: &mut T) -> ImmutableString {
+    format!("{:?}", x).into()
+}
+#[cfg(not(feature = "no_object"))]
+mod format_map {
+    use super::*;
+    #[inline]
+    #[export_fn]
+    pub fn format_map(x: &mut Map) -> ImmutableString {
+        format!("#{:?}", x).into()
+    }
+}

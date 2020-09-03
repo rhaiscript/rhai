@@ -1,0 +1,11 @@
+error[E0308]: mismatched types
+  --> $DIR/export_mod_raw_return.rs:12:8
+   |
+9  | #[export_module]
+   | ---------------- expected `std::result::Result<rhai::Dynamic, std::boxed::Box<rhai::EvalAltResult>>` because of return type
+...
+12 | pub fn test_fn(input: Point) -> bool {
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected enum `std::result::Result`, found `bool`
+   |
+   = note: expected enum `std::result::Result<rhai::Dynamic, std::boxed::Box<rhai::EvalAltResult>>`
+              found type `bool`

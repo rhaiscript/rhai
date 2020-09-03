@@ -33,7 +33,7 @@ engine.register_raw_fn(
 
         // But remember this is Rust, so you can keep only one mutable reference at any one time!
         // Therefore, get a '&mut' reference to the first argument _last_.
-        // Alternatively, use `args.split_at_mut(1)` etc. to split the slice first.
+        // Alternatively, use `args.split_first_mut()` etc. to split the slice first.
 
         let y: i64 = *args[1].read_lock::<i64>()            // get a reference to the second argument
                              .unwrap();                     // then copying it because it is a primary type
@@ -163,17 +163,17 @@ Hold Multiple References
 ------------------------
 
 In order to access a value argument that is expensive to clone _while_ holding a mutable reference
-to the first argument, either _consume_ that argument via `mem::take` as above, or use `args.split_at`
+to the first argument, either _consume_ that argument via `mem::take` as above, or use `args.split_first`
 to partition the slice:
 
 ```rust
 // Partition the slice
-let (first, rest) = args.split_at_mut(1);
+let (first, rest) = args.split_first_mut().unwrap();
 
 // Mutable reference to the first parameter
-let this_ptr: &mut Dynamic = &mut *first[0].write_lock::<A>().unwrap();
+let this_ptr: &mut A = &mut *first.write_lock::<A>().unwrap();
 
 // Immutable reference to the second value parameter
 // This can be mutable but there is no point because the parameter is passed by value
-let value_ref: &Dynamic = &*rest[0].read_lock::<B>().unwrap();
+let value_ref: &B = &*rest[0].read_lock::<B>().unwrap();
 ```

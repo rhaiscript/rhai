@@ -63,16 +63,5 @@ For example, the `len` method of an [array] has the signature: `Fn(&mut Array) -
 The array itself is not modified in any way, but using a `&mut` parameter avoids a cloning that would
 otherwise have happened if the signature were `Fn(Array) -> INT`.
 
-For primary types that are cheap to clone (e.g. those that implement `Copy`),
-including `ImmutableString`, this is not necessary.
-
-
-Avoid `&mut ImmutableString`
----------------------------
-
-`ImmutableString`, Rhai's internal [string] type, is an exception.
-
-`ImmutableString` is cheap to clone, but expensive to take a mutable reference (because the underlying
-string must be cloned to make a private copy).
-
-Therefore, avoid using `&mut ImmutableString` unless the intention is to mutate it.
+For primary types that are cheap to clone (e.g. those that implement `Copy`), including `ImmutableString`,
+this is not necessary.

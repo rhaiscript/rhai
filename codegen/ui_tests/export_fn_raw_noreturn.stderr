@@ -1,0 +1,11 @@
+error: return_raw functions must return Result<T>
+  --> $DIR/export_fn_raw_noreturn.rs:10:5
+   |
+10 | pub fn test_fn(input: &mut Point) {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0425]: cannot find function `test_fn` in this scope
+  --> $DIR/export_fn_raw_noreturn.rs:19:5
+   |
+19 |     test_fn(&mut n);
+   |     ^^^^^^^ not found in this scope

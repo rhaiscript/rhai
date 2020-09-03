@@ -3,13 +3,23 @@ Create a Module from Rust
 
 {{#include ../../links.md}}
 
-Manually creating a [`Module`] is possible via the `Module` API.
+
+Create via Plugin
+-----------------
+
+By far the simplest way to create a [module] is via a [plugin module].
+
+
+Create via `Module` API
+-----------------------
+
+Manually creating a [module] is possible via the `Module` API.
 
 For the complete `Module` API, refer to the [documentation](https://docs.rs/rhai/{{version}}/rhai/struct.Module.html) online.
 
 
-Make the Module Available to the Engine
---------------------------------------
+Make the `Module` Available to the `Engine`
+------------------------------------------
 
 In order to _use_ a custom module, there must be a [module resolver].
 

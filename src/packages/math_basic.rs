@@ -1,5 +1,8 @@
+#![allow(non_snake_case)]
+
 use crate::def_package;
 use crate::parser::INT;
+use crate::plugin::*;
 
 #[cfg(not(feature = "no_float"))]
 use crate::parser::FLOAT;
@@ -24,133 +27,304 @@ pub const MAX_INT: INT = i32::MAX;
 #[cfg(not(feature = "only_i32"))]
 pub const MAX_INT: INT = i64::MAX;
 
+macro_rules! gen_conversion_functions {
+    ($root:ident => $func_name:ident ( $($arg_type:ident),+ ) -> $result_type:ty) => {
+        pub mod $root { $(pub mod $arg_type {
+            use super::super::*;
+
+            #[export_fn]
+            #[inline(always)]
+            pub fn $func_name(x: $arg_type) -> $result_type {
+                x as $result_type
+            }
+        })* }
+    }
+}
+
+macro_rules! reg_functions {
+    ($mod_name:ident += $root:ident :: $func_name:ident ( $($arg_type:ident),+ ) ) => { $(
+        set_exported_fn!($mod_name, stringify!($func_name), $root::$arg_type::$func_name);
+    )* }
+}
+
 def_package!(crate:BasicMathPackage:"Basic mathematic functions.", lib, {
     #[cfg(not(feature = "no_float"))]
     {
-        // Advanced math functions
-        lib.set_fn_1("sin", |x: FLOAT| Ok(x.to_radians().sin()));
-        lib.set_fn_1("cos", |x: FLOAT| Ok(x.to_radians().cos()));
-        lib.set_fn_1("tan", |x: FLOAT| Ok(x.to_radians().tan()));
-        lib.set_fn_1("sinh", |x: FLOAT| Ok(x.to_radians().sinh()));
-        lib.set_fn_1("cosh", |x: FLOAT| Ok(x.to_radians().cosh()));
-        lib.set_fn_1("tanh", |x: FLOAT| Ok(x.to_radians().tanh()));
-        lib.set_fn_1("asin", |x: FLOAT| Ok(x.asin().to_degrees()));
-        lib.set_fn_1("acos", |x: FLOAT| Ok(x.acos().to_degrees()));
-        lib.set_fn_1("atan", |x: FLOAT| Ok(x.atan().to_degrees()));
-        lib.set_fn_1("asinh", |x: FLOAT| Ok(x.asinh().to_degrees()));
-        lib.set_fn_1("acosh", |x: FLOAT| Ok(x.acosh().to_degrees()));
-        lib.set_fn_1("atanh", |x: FLOAT| Ok(x.atanh().to_degrees()));
-        lib.set_fn_1("sqrt", |x: FLOAT| Ok(x.sqrt()));
-        lib.set_fn_1("exp", |x: FLOAT| Ok(x.exp()));
-        lib.set_fn_1("ln", |x: FLOAT| Ok(x.ln()));
-        lib.set_fn_2("log", |x: FLOAT, base: FLOAT| Ok(x.log(base)));
-        lib.set_fn_1("log10", |x: FLOAT| Ok(x.log10()));
-        lib.set_fn_1("floor", |x: FLOAT| Ok(x.floor()));
-        lib.set_fn_1("ceiling", |x: FLOAT| Ok(x.ceil()));
-        lib.set_fn_1("round", |x: FLOAT| Ok(x.ceil()));
-        lib.set_fn_1("int", |x: FLOAT| Ok(x.trunc()));
-        lib.set_fn_1("fraction", |x: FLOAT| Ok(x.fract()));
-        lib.set_fn_1("is_nan", |x: FLOAT| Ok(x.is_nan()));
-        lib.set_fn_1("is_finite", |x: FLOAT| Ok(x.is_finite()));
-        lib.set_fn_1("is_infinite", |x: FLOAT| Ok(x.is_infinite()));
+        // Floating point functions
+        lib.combine_flatten(exported_module!(float_functions));
 
-        #[cfg(not(feature = "no_object"))]
+        // Trig functions
+        lib.combine_flatten(exported_module!(trig_functions));
+
+        reg_functions!(lib += basic_to_float::to_float(INT));
+
+        #[cfg(not(feature = "only_i32"))]
+        #[cfg(not(feature = "only_i64"))]
         {
-            lib.set_getter_fn("floor", |x: &mut FLOAT| Ok(x.floor()));
-            lib.set_getter_fn("ceiling", |x: &mut FLOAT| Ok(x.ceil()));
-            lib.set_getter_fn("round", |x: &mut FLOAT| Ok(x.ceil()));
-            lib.set_getter_fn("int", |x: &mut FLOAT| Ok(x.trunc()));
-            lib.set_getter_fn("fraction", |x: &mut FLOAT| Ok(x.fract()));
-            lib.set_getter_fn("is_nan", |x: &mut FLOAT| Ok(x.is_nan()));
-            lib.set_getter_fn("is_finite", |x: &mut FLOAT| Ok(x.is_finite()));
-            lib.set_getter_fn("is_infinite", |x: &mut FLOAT| Ok(x.is_infinite()));
-        }
+            reg_functions!(lib += numbers_to_float::to_float(i8, u8, i16, u16, i32, u32, i64, u32));
 
-        // Register conversion functions
-        lib.set_fn_1("to_float", |x: INT| Ok(x as FLOAT));
-        lib.set_fn_1("to_float", |x: f32| Ok(x as FLOAT));
-
-        if cfg!(not(feature = "only_i32")) && cfg!(not(feature = "only_i64")) {
-            lib.set_fn_1("to_float", |x: i8| Ok(x as FLOAT));
-            lib.set_fn_1("to_float", |x: u8| Ok(x as FLOAT));
-            lib.set_fn_1("to_float", |x: i16| Ok(x as FLOAT));
-            lib.set_fn_1("to_float", |x: u16| Ok(x as FLOAT));
-            lib.set_fn_1("to_float", |x: i32| Ok(x as FLOAT));
-            lib.set_fn_1("to_float", |x: u32| Ok(x as FLOAT));
-            lib.set_fn_1("to_float", |x: i64| Ok(x as FLOAT));
-            lib.set_fn_1("to_float", |x: u64| Ok(x as FLOAT));
-
-            if cfg!(not(target_arch = "wasm32")) {
-                lib.set_fn_1("to_float", |x: i128| Ok(x as FLOAT));
-                lib.set_fn_1("to_float", |x: u128| Ok(x as FLOAT));
-            }
+            #[cfg(not(target_arch = "wasm32"))]
+            reg_functions!(lib += num_128_to_float::to_float(i128, u128));
         }
     }
 
     #[cfg(feature = "decimal")]
     {
-        // Advanced math functions
-        lib.set_fn_1("floor", |x: Decimal| Ok(x.floor()));
-        lib.set_fn_1("ceiling", |x: Decimal| Ok(x.ceil()));
-        lib.set_fn_1("round", |x: Decimal| Ok(x.round()));
-        lib.set_fn_2("round_dp", |x: Decimal, dp: INT| Ok(x.round_dp(dp as u32)));
-        lib.set_fn_1("int", |x: Decimal| Ok(x.trunc()));
-        lib.set_fn_1("fraction", |x: Decimal| Ok(x.fract()));
-        lib.set_fn_1("scale", |x: Decimal| Ok(x.scale()));
+        lib.combine_flatten(exported_module!(decimal_functions));
     }
 
-    lib.set_fn_1("to_int", |ch: char| Ok(ch as INT));
+    reg_functions!(lib += basic_to_int::to_int(char));
 
-    if cfg!(not(feature = "only_i32")) && cfg!(not(feature = "only_i64")) {
-        lib.set_fn_1("to_int", |x: i8| Ok(x as INT));
-        lib.set_fn_1("to_int", |x: u8| Ok(x as INT));
-        lib.set_fn_1("to_int", |x: i16| Ok(x as INT));
-        lib.set_fn_1("to_int", |x: u16| Ok(x as INT));
-    }
-
-    if cfg!(not(feature = "only_i32")) {
-        lib.set_fn_1("to_int", |x: i32| Ok(x as INT));
-        lib.set_fn_1("to_int", |x: u64| Ok(x as INT));
-
-        if cfg!(feature = "only_i64") {
-            lib.set_fn_1("to_int", |x: u32| Ok(x as INT));
-        }
-    }
-
-    #[cfg(not(feature = "no_float"))]
+    #[cfg(not(feature = "only_i32"))]
+    #[cfg(not(feature = "only_i64"))]
     {
-        if cfg!(not(feature = "unchecked")) {
-            lib.set_fn_1(
-                "to_int",
-                |x: f32| {
-                    if x > (MAX_INT as f32) {
-                        return EvalAltResult::ErrorArithmetic(
-                            format!("Integer overflow: to_int({})", x),
-                            Position::none(),
-                        ).into();
-                    }
+        reg_functions!(lib += numbers_to_int::to_int(i8, u8, i16, u16, i32, u32, i64, u64));
 
-                    Ok(x.trunc() as INT)
-                },
-            );
-            lib.set_fn_1(
-                "to_int",
-                |x: FLOAT| {
-                    if x > (MAX_INT as FLOAT) {
-                        return EvalAltResult::ErrorArithmetic(
-                            format!("Integer overflow: to_int({})", x),
-                            Position::none(),
-                        ).into();
-                    }
-
-                    Ok(x.trunc() as INT)
-                },
-            );
-        }
-
-        if cfg!(feature = "unchecked") {
-            lib.set_fn_1("to_int", |x: f32| Ok(x as INT));
-            lib.set_fn_1("to_int", |x: f64| Ok(x as INT));
-        }
+        #[cfg(not(target_arch = "wasm32"))]
+        reg_functions!(lib += num_128_to_int::to_int(i128, u128));
     }
 });
+
+#[cfg(not(feature = "no_float"))]
+#[export_module]
+mod trig_functions {
+    use crate::parser::FLOAT;
+
+    #[inline(always)]
+    pub fn sin(x: FLOAT) -> FLOAT {
+        x.to_radians().sin()
+    }
+    #[inline(always)]
+    pub fn cos(x: FLOAT) -> FLOAT {
+        x.to_radians().cos()
+    }
+    #[inline(always)]
+    pub fn tan(x: FLOAT) -> FLOAT {
+        x.to_radians().tan()
+    }
+    #[inline(always)]
+    pub fn sinh(x: FLOAT) -> FLOAT {
+        x.to_radians().sinh()
+    }
+    #[inline(always)]
+    pub fn cosh(x: FLOAT) -> FLOAT {
+        x.to_radians().cosh()
+    }
+    #[inline(always)]
+    pub fn tanh(x: FLOAT) -> FLOAT {
+        x.to_radians().tanh()
+    }
+    #[inline(always)]
+    pub fn asin(x: FLOAT) -> FLOAT {
+        x.asin().to_degrees()
+    }
+    #[inline(always)]
+    pub fn acos(x: FLOAT) -> FLOAT {
+        x.acos().to_degrees()
+    }
+    #[inline(always)]
+    pub fn atan(x: FLOAT) -> FLOAT {
+        x.atan().to_degrees()
+    }
+    #[inline(always)]
+    pub fn asinh(x: FLOAT) -> FLOAT {
+        x.asinh().to_degrees()
+    }
+    #[inline(always)]
+    pub fn acosh(x: FLOAT) -> FLOAT {
+        x.acosh().to_degrees()
+    }
+    #[inline(always)]
+    pub fn atanh(x: FLOAT) -> FLOAT {
+        x.atanh().to_degrees()
+    }
+}
+
+#[cfg(not(feature = "no_float"))]
+#[export_module]
+mod float_functions {
+    use crate::parser::FLOAT;
+
+    #[inline(always)]
+    pub fn sqrt(x: FLOAT) -> FLOAT {
+        x.sqrt()
+    }
+    #[inline(always)]
+    pub fn exp(x: FLOAT) -> FLOAT {
+        x.exp()
+    }
+    #[inline(always)]
+    pub fn ln(x: FLOAT) -> FLOAT {
+        x.ln()
+    }
+    #[inline(always)]
+    pub fn log(x: FLOAT, base: FLOAT) -> FLOAT {
+        x.log(base)
+    }
+    #[inline(always)]
+    pub fn log10(x: FLOAT) -> FLOAT {
+        x.log10()
+    }
+    #[inline(always)]
+    pub fn floor(x: FLOAT) -> FLOAT {
+        x.floor()
+    }
+    #[rhai_fn(get = "floor")]
+    #[inline(always)]
+    pub fn floor_prop(x: FLOAT) -> FLOAT {
+        floor(x)
+    }
+    #[inline(always)]
+    pub fn ceiling(x: FLOAT) -> FLOAT {
+        x.ceil()
+    }
+    #[rhai_fn(get = "ceiling")]
+    #[inline(always)]
+    pub fn ceiling_prop(x: FLOAT) -> FLOAT {
+        ceiling(x)
+    }
+    #[inline(always)]
+    pub fn round(x: FLOAT) -> FLOAT {
+        x.ceil()
+    }
+    #[rhai_fn(get = "round")]
+    #[inline(always)]
+    pub fn round_prop(x: FLOAT) -> FLOAT {
+        ceiling(x)
+    }
+    #[inline(always)]
+    pub fn int(x: FLOAT) -> FLOAT {
+        x.trunc()
+    }
+    #[rhai_fn(get = "int")]
+    #[inline(always)]
+    pub fn int_prop(x: FLOAT) -> FLOAT {
+        int(x)
+    }
+    #[inline(always)]
+    pub fn fraction(x: FLOAT) -> FLOAT {
+        x.fract()
+    }
+    #[rhai_fn(get = "fraction")]
+    #[inline(always)]
+    pub fn fraction_prop(x: FLOAT) -> FLOAT {
+        fraction(x)
+    }
+    #[inline(always)]
+    pub fn is_nan(x: FLOAT) -> bool {
+        x.is_nan()
+    }
+    #[rhai_fn(get = "is_nan")]
+    #[inline(always)]
+    pub fn is_nan_prop(x: FLOAT) -> bool {
+        is_nan(x)
+    }
+    #[inline(always)]
+    pub fn is_finite(x: FLOAT) -> bool {
+        x.is_finite()
+    }
+    #[rhai_fn(get = "is_finite")]
+    #[inline(always)]
+    pub fn is_finite_prop(x: FLOAT) -> bool {
+        is_finite(x)
+    }
+    #[inline(always)]
+    pub fn is_infinite(x: FLOAT) -> bool {
+        x.is_infinite()
+    }
+    #[rhai_fn(get = "is_infinite")]
+    #[inline(always)]
+    pub fn is_infinite_prop(x: FLOAT) -> bool {
+        is_infinite(x)
+    }
+    #[rhai_fn(name = "to_int", return_raw)]
+    #[inline]
+    pub fn f32_to_int(x: f32) -> Result<Dynamic, Box<EvalAltResult>> {
+        if cfg!(not(feature = "unchecked")) && x > (MAX_INT as f32) {
+            EvalAltResult::ErrorArithmetic(
+                format!("Integer overflow: to_int({})", x),
+                Position::none(),
+            )
+            .into()
+        } else {
+            Ok((x.trunc() as INT).into())
+        }
+    }
+    #[rhai_fn(name = "to_int", return_raw)]
+    #[inline]
+    pub fn f64_to_int(x: f64) -> Result<Dynamic, Box<EvalAltResult>> {
+        if cfg!(not(feature = "unchecked")) && x > (MAX_INT as f64) {
+            EvalAltResult::ErrorArithmetic(
+                format!("Integer overflow: to_int({})", x),
+                Position::none(),
+            )
+            .into()
+        } else {
+            Ok((x.trunc() as INT).into())
+        }
+    }
+}
+
+#[cfg(feature = "decimal")]
+#[export_module]
+mod decimal_functions {
+    #[inline(always)]
+    pub fn floor(x: Decimal) -> Decimal {
+        x.floor()
+    }
+    #[inline(always)]
+    pub fn ceiling(x: Decimal) -> Decimal {
+        x.ceil()
+    }
+    #[rhai_fn(get = "ceiling")]
+    #[inline(always)]
+    pub fn ceiling_prop(x: Decimal) -> Decimal {
+        ceiling(x)
+    }
+    #[inline(always)]
+    pub fn round(x: Decimal) -> Decimal {
+        x.ceil()
+    }
+    #[rhai_fn(get = "round")]
+    #[inline(always)]
+    pub fn round_dp(x: Decimal, dp: INT) -> Decimal {
+        x.round_dp(dp as u32)
+    }
+    #[inline(always)]
+    pub fn int(x: Decimal) -> Decimal {
+        x.trunc()
+    }
+    #[inline(always)]
+    pub fn fraction(x: Decimal) -> Decimal {
+        x.fract()
+    }
+    #[inline(always)]
+    pub fn scale(x: Decimal) -> INT {
+        x.scale() as INT
+    }
+}
+
+#[cfg(not(feature = "no_float"))]
+gen_conversion_functions!(basic_to_float => to_float (INT) -> FLOAT);
+
+#[cfg(not(feature = "no_float"))]
+#[cfg(not(feature = "only_i32"))]
+#[cfg(not(feature = "only_i64"))]
+gen_conversion_functions!(numbers_to_float => to_float (i8, u8, i16, u16, i32, u32, i64, u64) -> FLOAT);
+
+#[cfg(not(feature = "no_float"))]
+#[cfg(not(feature = "only_i32"))]
+#[cfg(not(feature = "only_i64"))]
+#[cfg(not(target_arch = "wasm32"))]
+gen_conversion_functions!(num_128_to_float => to_float (i128, u128) -> FLOAT);
+
+gen_conversion_functions!(basic_to_int => to_int (char) -> INT);
+
+#[cfg(not(feature = "only_i32"))]
+#[cfg(not(feature = "only_i64"))]
+gen_conversion_functions!(numbers_to_int => to_int (i8, u8, i16, u16, i32, u32, i64, u64) -> INT);
+
+#[cfg(not(feature = "only_i32"))]
+#[cfg(not(feature = "only_i64"))]
+#[cfg(not(target_arch = "wasm32"))]
+gen_conversion_functions!(num_128_to_int => to_int (i128, u128) -> INT);

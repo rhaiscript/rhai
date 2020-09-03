@@ -17,6 +17,7 @@ Supported targets and builds
 * All common CPU targets for Windows, Linux and MacOS.
 * WebAssembly (WASM)
 * `no-std`
+* Minimum Rust version 1.45
 
 Standard features
 -----------------
@@ -37,6 +38,7 @@ Standard features
 * Serialization/deserialization support via [serde](https://crates.io/crates/serde) (requires the `serde` feature).
 * Scripts are [optimized](https://schungx.github.io/rhai/engine/optimize.html) (useful for template-based machine-generated scripts) for repeated evaluations.
 * Support for [minimal builds](https://schungx.github.io/rhai/start/builds/minimal.html) by excluding unneeded language [features](https://schungx.github.io/rhai/start/features.html).
+* Easy custom API development via [plugins](https://schungx.github.io/rhai/plugins/index.html) system powered by procedural macros.
 
 Protection against attacks
 --------------------------
