@@ -455,7 +455,7 @@ impl<'e, 'x, 'px, 'a, 's, 'm, 'pm, 't, 'pt> EvalContext<'e, 'x, 'px, 'a, 's, 'm,
     #[cfg(feature = "internals")]
     #[cfg(not(feature = "no_module"))]
     #[inline(always)]
-    pub fn imports(&self) -> &'a Imports {
+    pub fn imports(&'a self) -> &'a Imports {
         self.mods
     }
     /// Get an iterator over the namespaces containing definition of all script-defined functions.
