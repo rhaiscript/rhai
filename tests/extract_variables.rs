@@ -14,7 +14,9 @@ fn test_extract_expressions() -> Result<(), Box<EvalAltResult>> {
 fn test_extract_statements() -> Result<(), Box<EvalAltResult>> {
     let e = Engine::new();
     assert_vars_stmt_eq(&e, &["x"],"if x > 0 { 42 } else { 123 }")?;
+    // x is defined inside the script
     assert_vars_stmt_eq(&e, &["y","z"],"let x = 4 + 5 - y + z; y = 1;")?;
+    // x and a are defined inside the script
     assert_vars_stmt_eq(&e, &["y","z"],"let x = 4 + 5 - y + z; y = 1;let a = x;")?;
     Ok(())
 }
