@@ -511,7 +511,9 @@ impl AST {
         for stmt in self.0.iter() {
             extract_stmt_variables(stmt, &mut defs, &mut vars);
         }
-        defs.iter().for_each(|n| {vars.remove(n);});
+        defs.iter().for_each(|n| {
+            vars.remove(n);
+        });
         vars
     }
 }
@@ -1259,78 +1261,90 @@ impl Expr {
     }
 }
 
-
 /// Extract variables from a statement, removing variables defined in the script itself
-fn extract_stmt_variables(stmt: &Stmt,defs: &mut HashSet<String>,vars: &mut HashSet<String>) {
-    match stmt{
-        Stmt::IfThenElse(e,bs,_)=>{
+fn extract_stmt_variables(stmt: &Stmt, defs: &mut HashSet<String>, vars: &mut HashSet<String>) {
+    match stmt {
+        Stmt::IfThenElse(e, bs, _) => {
             extract_expr_variables(e, defs, vars);
             extract_stmt_variables(&bs.0, defs, vars);
             if let Some(s) = &bs.1 {
                 extract_stmt_variables(s, defs, vars);
             }
-        },
-        Stmt::While(e,s,_)=>{
+        }
+        Stmt::While(e, s, _) => {
             extract_expr_variables(e, defs, vars);
             extract_stmt_variables(s, defs, vars);
-        },
-        Stmt::Loop(s,_)=> extract_stmt_variables(s, defs, vars),
-        Stmt::For(e,bs,_)=>{
+        }
+        Stmt::Loop(s, _) => extract_stmt_variables(s, defs, vars),
+        Stmt::For(e, bs, _) => {
             extract_expr_variables(e, defs, vars);
             extract_stmt_variables(&bs.1, defs, vars);
-        },
-        Stmt::Let(id,oe,_)=> {
+        }
+        Stmt::Let(id, oe, _) => {
             if let Some(e) = &oe {
                 extract_expr_variables(e, defs, vars);
             }
             defs.insert(id.name.clone());
-        },
-        Stmt::Const(id,oe,_)=> {
+        }
+        Stmt::Const(id, oe, _) => {
             if let Some(e) = &oe {
                 extract_expr_variables(e, defs, vars);
             }
             defs.insert(id.name.clone());
-        },
-        Stmt::Assignment(be,_)=>{
+        }
+        Stmt::Assignment(be, _) => {
             extract_expr_variables(&be.0, defs, vars);
             extract_expr_variables(&be.2, defs, vars);
-        },
-        Stmt::Block(ss,_)=>ss.iter().for_each(|s| extract_stmt_variables(s, defs, vars)),
-        Stmt::TryCatch(bs,_,_)=>{
+        }
+        Stmt::Block(ss, _) => ss
+            .iter()
+            .for_each(|s| extract_stmt_variables(s, defs, vars)),
+        Stmt::TryCatch(bs, _, _) => {
             extract_stmt_variables(&bs.0, defs, vars);
             extract_stmt_variables(&bs.2, defs, vars);
-        },
-        Stmt::Expr(e)=> extract_expr_variables(e, defs, vars),
-        _=>(),
+        }
+        Stmt::Expr(e) => extract_expr_variables(e, defs, vars),
+        _ => (),
     };
 }
 
 /// Extract variables from an expression
-fn extract_expr_variables(expr: &Expr,defs: &mut HashSet<String>,vars: &mut HashSet<String>) {
+fn extract_expr_variables(expr: &Expr, defs: &mut HashSet<String>, vars: &mut HashSet<String>) {
     match expr {
-        Expr::Variable(x)=> {vars.insert(x.3.name.clone());},
-        Expr::Stmt(ss,_)=>ss.iter().for_each(|s|extract_stmt_variables(s, defs, vars)),
-        Expr::Expr(e)=>extract_expr_variables(e, defs, vars),
-        Expr::FnCall(ci,_)=>ci.args.iter().for_each(|e|extract_expr_variables(e, defs, vars)),
-        Expr::Dot(be,_)=>{
+        Expr::Variable(x) => {
+            vars.insert(x.3.name.clone());
+        }
+        Expr::Stmt(ss, _) => ss
+            .iter()
+            .for_each(|s| extract_stmt_variables(s, defs, vars)),
+        Expr::Expr(e) => extract_expr_variables(e, defs, vars),
+        Expr::FnCall(ci, _) => ci
+            .args
+            .iter()
+            .for_each(|e| extract_expr_variables(e, defs, vars)),
+        Expr::Dot(be, _) => {
             extract_expr_variables(&be.lhs, defs, vars);
             extract_expr_variables(&be.rhs, defs, vars);
-        },
-        Expr::Index(be,_)=>{
+        }
+        Expr::Index(be, _) => {
             extract_expr_variables(&be.lhs, defs, vars);
             extract_expr_variables(&be.rhs, defs, vars);
-        },
-        Expr::Array(es,_)=>es.iter().for_each(|e|extract_expr_variables(e, defs, vars)),
-        Expr::Map(es,_)=>es.iter().for_each(|(_,e)|extract_expr_variables(e, defs, vars)),
-        Expr::In(be,_)=>extract_expr_variables(&be.rhs, defs, vars),
-        Expr::And(be,_)=>{
+        }
+        Expr::Array(es, _) => es
+            .iter()
+            .for_each(|e| extract_expr_variables(e, defs, vars)),
+        Expr::Map(es, _) => es
+            .iter()
+            .for_each(|(_, e)| extract_expr_variables(e, defs, vars)),
+        Expr::In(be, _) => extract_expr_variables(&be.rhs, defs, vars),
+        Expr::And(be, _) => {
             extract_expr_variables(&be.lhs, defs, vars);
             extract_expr_variables(&be.rhs, defs, vars);
-        },
-        Expr::Or(be,_)=>{
+        }
+        Expr::Or(be, _) => {
             extract_expr_variables(&be.lhs, defs, vars);
             extract_expr_variables(&be.rhs, defs, vars);
-        },
+        }
         _ => (),
     };
 }
