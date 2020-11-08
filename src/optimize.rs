@@ -141,6 +141,7 @@ fn call_fn_with_constant_arguments(
         .engine
         .call_native_fn(
             &mut Default::default(),
+            &mut Default::default(),
             state.lib,
             fn_name,
             hash_fn,

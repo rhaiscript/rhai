@@ -1,4 +1,5 @@
 use crate::engine::Engine;
+use crate::fn_native::Shared;
 use crate::module::{Module, ModuleResolver};
 use crate::result::EvalAltResult;
 use crate::token::Position;
@@ -23,7 +24,7 @@ use crate::stdlib::{boxed::Box, collections::HashMap, ops::AddAssign, string::St
 /// engine.set_module_resolver(Some(resolver));
 /// ```
 #[derive(Debug, Clone, Default)]
-pub struct StaticModuleResolver(HashMap<String, Module>);
+pub struct StaticModuleResolver(HashMap<String, Shared<Module>>);
 
 impl StaticModuleResolver {
     /// Create a new `StaticModuleResolver`.
@@ -48,12 +49,13 @@ impl StaticModuleResolver {
     }
     /// Add a module keyed by its path.
     #[inline(always)]
-    pub fn insert(&mut self, path: impl Into<String>, module: Module) {
-        self.0.insert(path.into(), module);
+    pub fn insert(&mut self, path: impl Into<String>, mut module: Module) {
+        module.build_index();
+        self.0.insert(path.into(), module.into());
     }
     /// Remove a module given its path.
     #[inline(always)]
-    pub fn remove(&mut self, path: &str) -> Option<Module> {
+    pub fn remove(&mut self, path: &str) -> Option<Shared<Module>> {
         self.0.remove(path)
     }
     /// Does the path exist?
@@ -63,17 +65,12 @@ impl StaticModuleResolver {
     }
     /// Get an iterator of all the modules.
     #[inline(always)]
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &Module)> {
-        self.0.iter().map(|(k, v)| (k.as_str(), v))
+    pub fn iter(&self) -> impl Iterator<Item = (&str, Shared<Module>)> {
+        self.0.iter().map(|(k, v)| (k.as_str(), v.clone()))
     }
     /// Get a mutable iterator of all the modules.
     #[inline(always)]
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&str, &mut Module)> {
-        self.0.iter_mut().map(|(k, v)| (k.as_str(), v))
-    }
-    /// Get a mutable iterator of all the modules.
-    #[inline(always)]
-    pub fn into_iter(self) -> impl Iterator<Item = (String, Module)> {
+    pub fn into_iter(self) -> impl Iterator<Item = (String, Shared<Module>)> {
         self.0.into_iter()
     }
     /// Get an iterator of all the module paths.
@@ -83,13 +80,8 @@ impl StaticModuleResolver {
     }
     /// Get an iterator of all the modules.
     #[inline(always)]
-    pub fn values(&self) -> impl Iterator<Item = &Module> {
-        self.0.values()
-    }
-    /// Get a mutable iterator of all the modules.
-    #[inline(always)]
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Module> {
-        self.0.values_mut()
+    pub fn values<'a>(&'a self) -> impl Iterator<Item = Shared<Module>> + 'a {
+        self.0.values().map(|m| m.clone())
     }
     /// Remove all modules.
     #[inline(always)]
@@ -118,7 +110,12 @@ impl StaticModuleResolver {
 
 impl ModuleResolver for StaticModuleResolver {
     #[inline(always)]
-    fn resolve(&self, _: &Engine, path: &str, pos: Position) -> Result<Module, Box<EvalAltResult>> {
+    fn resolve(
+        &self,
+        _: &Engine,
+        path: &str,
+        pos: Position,
+    ) -> Result<Shared<Module>, Box<EvalAltResult>> {
         self.0
             .get(path)
             .cloned()

@@ -60,23 +60,17 @@ pub struct FuncInfo {
 pub struct Module {
     /// Sub-modules.
     modules: HashMap<String, Module>,
-
     /// Module variables.
     variables: HashMap<String, Dynamic>,
-
     /// Flattened collection of all module variables, including those in sub-modules.
     all_variables: HashMap<u64, Dynamic, StraightHasherBuilder>,
-
     /// External Rust functions.
     functions: HashMap<u64, FuncInfo, StraightHasherBuilder>,
-
     /// Iterator functions, keyed by the type producing the iterator.
     type_iterators: HashMap<TypeId, IteratorFn>,
-
     /// Flattened collection of all external Rust functions, native or scripted,
     /// including those in sub-modules.
     all_functions: HashMap<u64, CallableFunction, StraightHasherBuilder>,
-
     /// Is the module indexed?
     indexed: bool,
 }
@@ -179,6 +173,26 @@ impl Module {
             && self.all_variables.is_empty()
             && self.modules.is_empty()
             && self.type_iterators.is_empty()
+    }
+
+    /// Is the module indexed?
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rhai::Module;
+    ///
+    /// let mut module = Module::new();
+    /// assert!(!module.is_indexed());
+    ///
+    /// # #[cfg(not(feature = "no_module"))]
+    /// # {
+    /// module.build_index();
+    /// assert!(module.is_indexed());
+    /// # }
+    /// ```
+    pub fn is_indexed(&self) -> bool {
+        self.indexed
     }
 
     /// Clone the module, optionally skipping the index.
@@ -329,7 +343,7 @@ impl Module {
                         && fn_name == name
                 },
             )
-            .map(|FuncInfo { func, .. }| func.get_shared_fn_def())
+            .map(|FuncInfo { func, .. }| func.get_fn_def())
     }
 
     /// Does a sub-module exist in the module?
@@ -1120,7 +1134,7 @@ impl Module {
     /// Name and Position in `EvalAltResult` are None and must be set afterwards.
     ///
     /// The `u64` hash is calculated by the function `crate::calc_native_fn_hash` and must match
-    /// the hash calculated by `index_all_sub_modules`.
+    /// the hash calculated by `build_index`.
     #[inline(always)]
     pub(crate) fn get_qualified_fn(&self, hash_qualified_fn: u64) -> Option<&CallableFunction> {
         self.all_functions.get(&hash_qualified_fn)
@@ -1265,6 +1279,7 @@ impl Module {
 
     /// Get an iterator to the functions in the module.
     #[cfg(not(feature = "no_optimize"))]
+    #[cfg(not(feature = "no_function"))]
     #[inline(always)]
     pub(crate) fn iter_fn(&self) -> impl Iterator<Item = &FuncInfo> {
         self.functions.values()
@@ -1286,7 +1301,7 @@ impl Module {
             .values()
             .map(|f| &f.func)
             .filter(|f| f.is_script())
-            .map(CallableFunction::get_shared_fn_def)
+            .map(CallableFunction::get_fn_def)
             .map(|f| {
                 let func = f.clone();
                 (f.access, f.name.as_str(), f.params.len(), func)
@@ -1374,7 +1389,7 @@ impl Module {
 
         // Modules left in the scope become sub-modules
         mods.into_iter().for_each(|(alias, m)| {
-            module.modules.insert(alias.to_string(), m);
+            module.modules.insert(alias.to_string(), m.as_ref().clone());
         });
 
         // Non-private functions defined become module functions
@@ -1395,10 +1410,12 @@ impl Module {
         Ok(module)
     }
 
-    /// Scan through all the sub-modules in the module build an index of all
-    /// variables and external Rust functions via hashing.
+    /// Scan through all the sub-modules in the module and build a hash index of all
+    /// variables and functions as one flattened namespace.
+    ///
+    /// If the module is already indexed, this method has no effect.
     #[cfg(not(feature = "no_module"))]
-    pub(crate) fn index_all_sub_modules(&mut self) {
+    pub fn build_index(&mut self) {
         // Collect a particular module.
         fn index_module<'a>(
             module: &'a Module,

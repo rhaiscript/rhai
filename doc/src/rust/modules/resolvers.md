@@ -29,6 +29,8 @@ Loads a script file (based off the current directory) with `.rhai` extension.
 All functions in the _global_ namespace, plus all those defined in the same module,
 are _merged_ into a _unified_ namespace.
 
+Modules are also _cached_ so a script file is only evaluated _once_, even when repeatedly imported.
+
 ```rust
 ------------------
 | my_module.rhai |
@@ -121,10 +123,6 @@ m::greet();                         // prints "hello! from module!"
 ### Changing the base directory
 
 The base directory can be changed via the `FileModuleResolver::new_with_path` constructor function.
-
-### Returning a module instead
-
-`FileModuleResolver::create_module` loads a script file and returns a module with the standard behavior.
 
 
 `StaticModuleResolver`

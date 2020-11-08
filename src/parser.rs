@@ -32,7 +32,7 @@ use crate::{
 use crate::stdlib::{
     borrow::Cow,
     boxed::Box,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     format,
     hash::Hash,
     iter::empty,
@@ -44,6 +44,9 @@ use crate::stdlib::{
 
 #[cfg(not(feature = "no_function"))]
 use crate::stdlib::hash::Hasher;
+
+#[cfg(not(feature = "no_closure"))]
+use crate::stdlib::collections::HashSet;
 
 #[cfg(not(feature = "no_std"))]
 #[cfg(not(feature = "no_function"))]

@@ -223,7 +223,14 @@ engine.register_raw_fn("super_call",
 ------------------
 
 `FnPtr::call_dynamic` takes a parameter of type `NativeCallContext` which holds the _native call context_
-of the particular call to a registered Rust function.
+of the particular call to a registered Rust function. It is a type that exposes the following:
+
+| Field               |              Type               | Description                                                                                                                                                                                                                                |
+| ------------------- | :-----------------------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `engine()`          |            `&Engine`            | the current [`Engine`], with all configurations and settings.<br/>This is sometimes useful for calling a script-defined function within the same evaluation context using [`Engine::call_fn`][`call_fn`], or calling a [function pointer]. |
+| `imports()`         |       `Option<&Imports>`        | reference to the current stack of [modules] imported via `import` statements (if any)                                                                                                                                                      |
+| `iter_namespaces()` | `impl Iterator<Item = &Module>` | iterator of the namespaces (as [modules]) containing all script-defined functions                                                                                                                                                          |
+
 
 This type is normally provided by the [`Engine`] (e.g. when using [`Engine::register_fn_raw`](../rust/register-raw.md)).
 However, it may also be manually constructed from a tuple:

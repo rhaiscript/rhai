@@ -1,5 +1,5 @@
 use crate::engine::Engine;
-use crate::fn_native::SendSync;
+use crate::fn_native::{SendSync, Shared};
 use crate::module::Module;
 use crate::result::EvalAltResult;
 use crate::token::Position;
@@ -28,5 +28,5 @@ pub trait ModuleResolver: SendSync {
         engine: &Engine,
         path: &str,
         pos: Position,
-    ) -> Result<Module, Box<EvalAltResult>>;
+    ) -> Result<Shared<Module>, Box<EvalAltResult>>;
 }

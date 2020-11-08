@@ -18,7 +18,7 @@ jobs:
         os: [ubuntu-latest]
         flags:
           - ""
-          - "--features serde"
+          - "--features serde,internals"
           - "--features unchecked"
           - "--features sync"
           - "--features no_optimize"

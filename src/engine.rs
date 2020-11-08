@@ -3,7 +3,7 @@
 use crate::ast::{BinaryExpr, Expr, FnCallInfo, Ident, IdentX, ReturnType, Stmt};
 use crate::dynamic::{map_std_type_name, Dynamic, Union, Variant};
 use crate::fn_call::run_builtin_op_assignment;
-use crate::fn_native::{Callback, FnPtr, OnVarCallback};
+use crate::fn_native::{shared_try_take, Callback, FnPtr, OnVarCallback, Shared};
 use crate::module::{Module, ModuleRef};
 use crate::optimize::OptimizationLevel;
 use crate::packages::{Package, PackagesCollection, StandardPackage};
@@ -73,48 +73,49 @@ pub type Map = HashMap<ImmutableString, Dynamic>;
 //
 // We cannot use &str or Cow<str> here because `eval` may load a module and the module name will live beyond
 // the AST of the eval script text. The best we can do is a shared reference.
-//
-// `Imports` is implemented as two `Vec`'s of exactly the same length.  That's because a `Module` is large,
-// so packing the import names together improves cache locality.
 #[derive(Debug, Clone, Default)]
-pub struct Imports(StaticVec<Module>, StaticVec<ImmutableString>);
+pub struct Imports(StaticVec<(Shared<Module>, ImmutableString)>);
 
 impl Imports {
     /// Get the length of this stack of imported modules.
     pub fn len(&self) -> usize {
         self.0.len()
     }
+    /// Is this stack of imported modules empty?
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
     /// Get the imported module at a particular index.
-    pub fn get(&self, index: usize) -> Option<&Module> {
-        self.0.get(index)
+    pub fn get(&self, index: usize) -> Option<Shared<Module>> {
+        self.0.get(index).map(|(m, _)| m).cloned()
     }
     /// Get the index of an imported module by name.
     pub fn find(&self, name: &str) -> Option<usize> {
-        self.1
+        self.0
             .iter()
             .enumerate()
             .rev()
-            .find(|(_, key)| key.as_str() == name)
+            .find(|(_, (_, key))| key.as_str() == name)
             .map(|(index, _)| index)
     }
     /// Push an imported module onto the stack.
-    pub fn push(&mut self, name: impl Into<ImmutableString>, module: Module) {
-        self.0.push(module);
-        self.1.push(name.into());
+    pub fn push(&mut self, name: impl Into<ImmutableString>, module: impl Into<Shared<Module>>) {
+        self.0.push((module.into(), name.into()));
     }
     /// Truncate the stack of imported modules to a particular length.
     pub fn truncate(&mut self, size: usize) {
         self.0.truncate(size);
-        self.1.truncate(size);
     }
     /// Get an iterator to this stack of imported modules.
     #[allow(dead_code)]
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &Module)> {
-        self.1.iter().map(|name| name.as_str()).zip(self.0.iter())
+    pub fn iter(&self) -> impl Iterator<Item = (&str, Shared<Module>)> {
+        self.0
+            .iter()
+            .map(|(module, name)| (name.as_str(), module.clone()))
     }
     /// Get a consuming iterator to this stack of imported modules.
-    pub fn into_iter(self) -> impl Iterator<Item = (ImmutableString, Module)> {
-        self.1.into_iter().zip(self.0.into_iter())
+    pub fn into_iter(self) -> impl Iterator<Item = (ImmutableString, Shared<Module>)> {
+        self.0.into_iter().map(|(module, name)| (name, module))
     }
 }
 
@@ -630,11 +631,11 @@ fn default_print(_s: &str) {
 
 /// Search for a module within an imports stack.
 /// Position in `EvalAltResult` is `None` and must be set afterwards.
-pub fn search_imports<'s>(
-    mods: &'s Imports,
+pub fn search_imports(
+    mods: &Imports,
     state: &mut State,
     modules: &ModuleRef,
-) -> Result<&'s Module, Box<EvalAltResult>> {
+) -> Result<Shared<Module>, Box<EvalAltResult>> {
     let Ident { name: root, pos } = &modules[0];
 
     // Qualified - check if the root module is directly indexed
@@ -1487,7 +1488,9 @@ impl Engine {
                         calc_native_fn_hash(empty(), OP_FUNC, args.iter().map(|a| a.type_id()));
 
                     if self
-                        .call_native_fn(state, lib, OP_FUNC, hash, args, false, false, def_value)
+                        .call_native_fn(
+                            mods, state, lib, OP_FUNC, hash, args, false, false, def_value,
+                        )
                         .map_err(|err| err.fill_position(rhs.position()))?
                         .0
                         .as_bool()
@@ -1805,9 +1808,9 @@ impl Engine {
 
                                 // Overriding exact implementation
                                 if func.is_plugin_fn() {
-                                    func.get_plugin_fn().call((self, lib).into(), args)?;
+                                    func.get_plugin_fn().call((self, mods, lib).into(), args)?;
                                 } else {
-                                    func.get_native_fn()((self, lib).into(), args)?;
+                                    func.get_native_fn()((self, mods, lib).into(), args)?;
                                 }
                             }
                             // Built-in op-assignment function
@@ -2126,11 +2129,18 @@ impl Engine {
                     .try_cast::<ImmutableString>()
                 {
                     if let Some(resolver) = &self.module_resolver {
-                        let mut module = resolver.resolve(self, &path, expr.position())?;
+                        let module = resolver.resolve(self, &path, expr.position())?;
 
                         if let Some(name_def) = alias {
-                            module.index_all_sub_modules();
-                            mods.push(name_def.name.clone(), module);
+                            if !module.is_indexed() {
+                                // Index the module (making a clone copy if necessary) if it is not indexed
+                                let mut module =
+                                    shared_try_take(module).unwrap_or_else(|m| m.as_ref().clone());
+                                module.build_index();
+                                mods.push(name_def.name.clone(), module);
+                            } else {
+                                mods.push(name_def.name.clone(), module);
+                            }
                         }
 
                         state.modules += 1;

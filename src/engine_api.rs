@@ -1658,15 +1658,16 @@ impl Engine {
         mut ast: AST,
         optimization_level: OptimizationLevel,
     ) -> AST {
-        let lib = if cfg!(not(feature = "no_function")) {
-            ast.lib()
-                .iter_fn()
-                .filter(|f| f.func.is_script())
-                .map(|f| f.func.get_fn_def().clone())
-                .collect()
-        } else {
-            Default::default()
-        };
+        #[cfg(not(feature = "no_function"))]
+        let lib = ast
+            .lib()
+            .iter_fn()
+            .filter(|f| f.func.is_script())
+            .map(|f| (**f.func.get_fn_def()).clone())
+            .collect();
+
+        #[cfg(feature = "no_function")]
+        let lib = Default::default();
 
         let stmt = mem::take(ast.statements_mut());
         optimize_into_ast(self, scope, stmt, lib, optimization_level)

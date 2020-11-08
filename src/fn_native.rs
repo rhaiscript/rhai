@@ -2,7 +2,7 @@
 
 use crate::ast::{FnAccess, ScriptFnDef};
 use crate::dynamic::Dynamic;
-use crate::engine::{Engine, EvalContext};
+use crate::engine::{Engine, EvalContext, Imports};
 use crate::module::Module;
 use crate::plugin::PluginFunction;
 use crate::result::EvalAltResult;
@@ -50,27 +50,49 @@ pub type Locked<T> = RwLock<T>;
 
 /// Context of native Rust function call.
 #[derive(Debug, Copy, Clone)]
-pub struct NativeCallContext<'e, 'm, 'pm: 'm> {
+pub struct NativeCallContext<'e, 'a, 'm, 'pm: 'm> {
     engine: &'e Engine,
+    mods: Option<&'a Imports>,
     lib: &'m [&'pm Module],
 }
 
+impl<'e, 'a, 'm, 'pm: 'm, M: AsRef<[&'pm Module]> + ?Sized>
+    From<(&'e Engine, &'a mut Imports, &'m M)> for NativeCallContext<'e, 'a, 'm, 'pm>
+{
+    fn from(value: (&'e Engine, &'a mut Imports, &'m M)) -> Self {
+        Self {
+            engine: value.0,
+            mods: Some(value.1),
+            lib: value.2.as_ref(),
+        }
+    }
+}
+
 impl<'e, 'm, 'pm: 'm, M: AsRef<[&'pm Module]> + ?Sized> From<(&'e Engine, &'m M)>
-    for NativeCallContext<'e, 'm, 'pm>
+    for NativeCallContext<'e, '_, 'm, 'pm>
 {
     fn from(value: (&'e Engine, &'m M)) -> Self {
         Self {
             engine: value.0,
+            mods: None,
             lib: value.1.as_ref(),
         }
     }
 }
 
-impl<'e, 'm, 'pm> NativeCallContext<'e, 'm, 'pm> {
+impl<'e, 'a, 'm, 'pm> NativeCallContext<'e, 'a, 'm, 'pm> {
     /// The current `Engine`.
     #[inline(always)]
     pub fn engine(&self) -> &'e Engine {
         self.engine
+    }
+    /// _[INTERNALS]_ The current set of modules imported via `import` statements.
+    /// Available under the `internals` feature only.
+    #[cfg(feature = "internals")]
+    #[cfg(not(feature = "no_module"))]
+    #[inline(always)]
+    pub fn imports(&self) -> Option<&Imports> {
+        self.mods
     }
     /// Get an iterator over the namespaces containing definition of all script-defined functions.
     #[inline(always)]
@@ -181,9 +203,11 @@ impl FnPtr {
             args.insert(0, obj);
         }
 
+        let mut mods = ctx.mods.cloned().unwrap_or_default();
+
         ctx.engine()
             .exec_fn_call(
-                &mut Default::default(),
+                &mut mods,
                 &mut Default::default(),
                 ctx.lib,
                 fn_name,
@@ -396,14 +420,14 @@ impl CallableFunction {
             Self::Script(f) => f.access,
         }
     }
-    /// Get a reference to a native Rust function.
+    /// Get a shared reference to a native Rust function.
     ///
     /// # Panics
     ///
     /// Panics if the `CallableFunction` is not `Pure` or `Method`.
-    pub fn get_native_fn(&self) -> &FnAny {
+    pub fn get_native_fn(&self) -> &Shared<FnAny> {
         match self {
-            Self::Pure(f) | Self::Method(f) => f.as_ref(),
+            Self::Pure(f) | Self::Method(f) => f,
             Self::Iterator(_) | Self::Plugin(_) => unreachable!(),
 
             #[cfg(not(feature = "no_function"))]
@@ -416,22 +440,9 @@ impl CallableFunction {
     ///
     /// Panics if the `CallableFunction` is not `Script`.
     #[cfg(not(feature = "no_function"))]
-    pub fn get_shared_fn_def(&self) -> &Shared<ScriptFnDef> {
+    pub fn get_fn_def(&self) -> &Shared<ScriptFnDef> {
         match self {
             Self::Pure(_) | Self::Method(_) | Self::Iterator(_) | Self::Plugin(_) => unreachable!(),
-            Self::Script(f) => f,
-        }
-    }
-    /// Get a reference to a script-defined function definition.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the `CallableFunction` is not `Script`.
-    pub fn get_fn_def(&self) -> &ScriptFnDef {
-        match self {
-            Self::Pure(_) | Self::Method(_) | Self::Iterator(_) | Self::Plugin(_) => unreachable!(),
-
-            #[cfg(not(feature = "no_function"))]
             Self::Script(f) => f,
         }
     }
@@ -449,14 +460,14 @@ impl CallableFunction {
             Self::Script(_) => unreachable!(),
         }
     }
-    /// Get a reference to a plugin function.
+    /// Get a shared reference to a plugin function.
     ///
     /// # Panics
     ///
     /// Panics if the `CallableFunction` is not `Plugin`.
-    pub fn get_plugin_fn<'s>(&'s self) -> &FnPlugin {
+    pub fn get_plugin_fn<'s>(&'s self) -> &Shared<FnPlugin> {
         match self {
-            Self::Plugin(f) => f.as_ref(),
+            Self::Plugin(f) => f,
             Self::Pure(_) | Self::Method(_) | Self::Iterator(_) => unreachable!(),
 
             #[cfg(not(feature = "no_function"))]

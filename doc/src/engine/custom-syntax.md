@@ -121,6 +121,7 @@ where:
 | `context`                     |       `&mut EvalContext`        | mutable reference to the current evaluation _context_                                 |
 | - `context.scope`             |          `&mut Scope`           | mutable reference to the current [`Scope`]; variables can be added to/removed from it |
 | - `context.engine()`          |            `&Engine`            | reference to the current [`Engine`]                                                   |
+| - `context.imports()`         |           `&Imports`            | reference to the current stack of [modules] imported via `import` statements          |
 | - `context.iter_namespaces()` | `impl Iterator<Item = &Module>` | iterator of the namespaces (as [modules]) containing all script-defined functions     |
 | - `context.this_ptr()`        |       `Option<&Dynamic>`        | reference to the current bound [`this`] pointer, if any                               |
 | - `context.call_level()`      |             `usize`             | the current nesting level of function calls                                           |

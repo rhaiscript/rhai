@@ -1,6 +1,5 @@
-use crate::ast::AST;
 use crate::engine::Engine;
-use crate::fn_native::Locked;
+use crate::fn_native::{Locked, Shared};
 use crate::module::{Module, ModuleResolver};
 use crate::result::EvalAltResult;
 use crate::token::Position;
@@ -40,7 +39,7 @@ use crate::stdlib::{boxed::Box, collections::HashMap, path::PathBuf, string::Str
 pub struct FileModuleResolver {
     path: PathBuf,
     extension: String,
-    cache: Locked<HashMap<PathBuf, AST>>,
+    cache: Locked<HashMap<PathBuf, Shared<Module>>>,
 }
 
 impl Default for FileModuleResolver {
@@ -119,16 +118,6 @@ impl FileModuleResolver {
     pub fn new() -> Self {
         Default::default()
     }
-
-    /// Create a `Module` from a file path.
-    #[inline(always)]
-    pub fn create_module<P: Into<PathBuf>>(
-        &self,
-        engine: &Engine,
-        path: &str,
-    ) -> Result<Module, Box<EvalAltResult>> {
-        self.resolve(engine, path, Default::default())
-    }
 }
 
 impl ModuleResolver for FileModuleResolver {
@@ -137,48 +126,51 @@ impl ModuleResolver for FileModuleResolver {
         engine: &Engine,
         path: &str,
         pos: Position,
-    ) -> Result<Module, Box<EvalAltResult>> {
+    ) -> Result<Shared<Module>, Box<EvalAltResult>> {
         // Construct the script file path
         let mut file_path = self.path.clone();
         file_path.push(path);
         file_path.set_extension(&self.extension); // Force extension
 
         let scope = Default::default();
-        let module;
 
         // See if it is cached
-        let ast = {
+        let mut module = None;
+
+        let module_ref = {
             #[cfg(not(feature = "sync"))]
             let c = self.cache.borrow();
             #[cfg(feature = "sync")]
             let c = self.cache.read().unwrap();
 
-            if let Some(ast) = c.get(&file_path) {
-                module = Module::eval_ast_as_new(scope, ast, engine).map_err(|err| {
-                    Box::new(EvalAltResult::ErrorInModule(path.to_string(), err, pos))
-                })?;
-                None
+            if let Some(module) = c.get(&file_path) {
+                module.clone()
             } else {
                 // Load the file and compile it if not found
                 let ast = engine.compile_file(file_path.clone()).map_err(|err| {
                     Box::new(EvalAltResult::ErrorInModule(path.to_string(), err, pos))
                 })?;
 
-                module = Module::eval_ast_as_new(scope, &ast, engine).map_err(|err| {
+                let mut m = Module::eval_ast_as_new(scope, &ast, engine).map_err(|err| {
                     Box::new(EvalAltResult::ErrorInModule(path.to_string(), err, pos))
                 })?;
-                Some(ast)
+
+                m.build_index();
+
+                let m: Shared<Module> = m.into();
+                module = Some(m.clone());
+                m
             }
         };
 
-        if let Some(ast) = ast {
+        if let Some(module) = module {
             // Put it into the cache
             #[cfg(not(feature = "sync"))]
-            self.cache.borrow_mut().insert(file_path, ast);
+            self.cache.borrow_mut().insert(file_path, module);
             #[cfg(feature = "sync")]
-            self.cache.write().unwrap().insert(file_path, ast);
+            self.cache.write().unwrap().insert(file_path, module);
         }
 
-        Ok(module)
+        Ok(module_ref)
     }
 }

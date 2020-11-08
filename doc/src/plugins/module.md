@@ -342,11 +342,11 @@ specially by the plugins system.
 
 `NativeCallContext` is a type that encapsulates the current _native call context_ and exposes the following:
 
-* `NativeCallContext::engine(): &Engine` - the current [`Engine`], with all configurations and settings.
-  This is sometimes useful for calling a script-defined function within the same evaluation context
-  using [`Engine::call_fn`][`call_fn`].
-
-* `NativeCallContext::namespace(): &Module` - the global namespace of script-defined functions, as a [`Module`].
+| Field               |              Type               | Description                                                                                                                                                                                                                                |
+| ------------------- | :-----------------------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `engine()`          |            `&Engine`            | the current [`Engine`], with all configurations and settings.<br/>This is sometimes useful for calling a script-defined function within the same evaluation context using [`Engine::call_fn`][`call_fn`], or calling a [function pointer]. |
+| `imports()`         |       `Option<&Imports>`        | reference to the current stack of [modules] imported via `import` statements (if any)                                                                                                                                                      |
+| `iter_namespaces()` | `impl Iterator<Item = &Module>` | iterator of the namespaces (as [modules]) containing all script-defined functions                                                                                                                                                          |
 
 This first parameter, if exists, will be stripped before all other processing.  It is _virtual_.
 Most importantly, it does _not_ count as a parameter to the function and there is no need to provide

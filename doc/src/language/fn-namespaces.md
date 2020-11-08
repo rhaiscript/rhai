@@ -30,6 +30,8 @@ There is one _global_ namespace for every [`Engine`], which includes:
 
 * All the Rust functions defined in [packages] that are loaded into the [`Engine`].
 
+* All the [modules] imported via [`import`] statements.
+
 In addition, during evaluation of an [`AST`], all script-defined functions bundled together within
 the [`AST`] are added to the global namespace and override any existing registered functions of
 the same names and number of parameters.

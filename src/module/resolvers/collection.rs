@@ -1,4 +1,5 @@
 use crate::engine::Engine;
+use crate::fn_native::Shared;
 use crate::module::{Module, ModuleResolver};
 use crate::result::EvalAltResult;
 use crate::token::Position;
@@ -90,7 +91,7 @@ impl ModuleResolver for ModuleResolversCollection {
         engine: &Engine,
         path: &str,
         pos: Position,
-    ) -> Result<Module, Box<EvalAltResult>> {
+    ) -> Result<Shared<Module>, Box<EvalAltResult>> {
         for resolver in self.0.iter() {
             match resolver.resolve(engine, path, pos) {
                 Ok(module) => return Ok(module),
