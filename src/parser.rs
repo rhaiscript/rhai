@@ -1812,6 +1812,7 @@ fn parse_binary_op(
             | Token::RightShift
             | Token::Modulo
             | Token::PowerOf
+            | Token::Scinot
             | Token::Ampersand
             | Token::Pipe
             | Token::XOr => Expr::FnCall(Box::new(FnCallExpr { args, ..op_base }), pos),

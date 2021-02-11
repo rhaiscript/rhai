@@ -83,6 +83,20 @@ macro_rules! gen_arithmetic_functions {
                     }
                 }
 
+                #[rhai_fn(name = "e", return_raw)]
+                pub fn scinot(x: INT, y: INT) -> Result<Dynamic, Box<EvalAltResult>> {
+                    if cfg!(not(feature = "unchecked")) {
+                        if cfg!(not(feature = "only_i32")) && y > (u32::MAX as INT) {
+                            Err(make_err(format!("Integer raised to too large an index: {} ~ {}", x, y)))
+                        } else if y < 0 {
+                            Err(make_err(format!("Integer raised to a negative index: {} ~ {}", x, y)))
+                        } else {
+                            (10 as INT).checked_pow(y as u32).ok_or_else(|| make_err(format!("Power overflow: {} ~ {}", x, y))).map(|n| Dynamic::from(n*x))
+                        }
+                    } else {
+                        Ok(Dynamic::from(x*(10 as INT).pow(y as u32)))
+                    }
+                }
                 #[rhai_fn(name = "<<", return_raw)]
                 pub fn shift_left(x: $arg_type, y: INT) -> Result<Dynamic, Box<EvalAltResult>> {
                     if cfg!(not(feature = "unchecked")) {
@@ -250,6 +264,10 @@ mod f32_functions {
         pub fn pow_f_f(x: f32, y: f32) -> Result<Dynamic, Box<EvalAltResult>> {
             Ok(Dynamic::from(x.powf(y)))
         }
+        #[rhai_fn(name = "e", return_raw)]
+        pub fn scinot_f_f(x: f32, y: f32) -> Result<Dynamic, Box<EvalAltResult>> {
+            Ok(Dynamic::from(x*(10.0 as f32).powf(y)))
+        }
     }
     #[rhai_fn(name = "-")]
     pub fn neg(x: f32) -> f32 {
@@ -280,6 +298,17 @@ mod f32_functions {
             )))
         } else {
             Ok(Dynamic::from(x.powi(y as i32)))
+        }
+    }
+    #[rhai_fn(name = "e", return_raw)]
+    pub fn scinot_f_i(x: f32, y: INT) -> Result<Dynamic, Box<EvalAltResult>> {
+        if cfg!(not(feature = "unchecked")) && y > (i32::MAX as INT) {
+            Err(make_err(format!(
+                "Number raised to too large an index: {} ~ {}",
+                x, y
+            )))
+        } else {
+            Ok(Dynamic::from(x*(10 as f32).powi(y as i32)))
         }
     }
 }
@@ -313,6 +342,10 @@ mod f64_functions {
         pub fn pow_f_f(x: f64, y: f64) -> Result<Dynamic, Box<EvalAltResult>> {
             Ok(Dynamic::from(x.powf(y)))
         }
+        #[rhai_fn(name = "e", return_raw)]
+        pub fn pow_f_f(x: f64, y: f64) -> Result<Dynamic, Box<EvalAltResult>> {
+            Ok(Dynamic::from(x*(10.0 as f64).powf(y)))
+        }
     }
     #[rhai_fn(name = "-")]
     pub fn neg(x: f64) -> f64 {
@@ -343,6 +376,17 @@ mod f64_functions {
             )))
         } else {
             Ok(x.powi(y as i32).into())
+        }
+    }
+    #[rhai_fn(name = "e", return_raw)]
+    pub fn scinot_f_i(x: FLOAT, y: INT) -> Result<Dynamic, Box<EvalAltResult>> {
+        if cfg!(not(feature = "unchecked")) && y > (i32::MAX as INT) {
+            Err(make_err(format!(
+                "Number raised to too large an index: {} ~ {}",
+                x, y
+            )))
+        } else {
+            Ok((x*(10 as FLOAT).powi(y as i32)).into())
         }
     }
 }

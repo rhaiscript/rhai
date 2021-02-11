@@ -196,6 +196,8 @@ pub enum Token {
     Modulo,
     /// `**`
     PowerOf,
+    /// `e`
+    Scinot,
     /// `<<`
     LeftShift,
     /// `>>`
@@ -423,6 +425,7 @@ impl Token {
                 Modulo => "%",
                 ModuloAssign => "%=",
                 PowerOf => "**",
+                Scinot => "e",
                 PowerOfAssign => "**=",
 
                 #[cfg(not(feature = "no_function"))]
@@ -512,6 +515,7 @@ impl Token {
             "%" => Modulo,
             "%=" => ModuloAssign,
             "**" => PowerOf,
+            "e" => Scinot,
             "**=" => PowerOfAssign,
 
             #[cfg(not(feature = "no_function"))]
@@ -600,6 +604,7 @@ impl Token {
             LeftShiftAssign  |
             RightShiftAssign |
             PowerOf          |
+            Scinot           |
             PowerOfAssign    |
             AndAssign        |
             OrAssign         |
@@ -641,7 +646,7 @@ impl Token {
 
             Divide | Multiply | Modulo => 180,
 
-            PowerOf => 190,
+            PowerOf | Scinot => 190,
 
             LeftShift | RightShift => 210,
 
@@ -665,7 +670,7 @@ impl Token {
             Period => true,
 
             // Exponentiation binds to the right
-            PowerOf => true,
+            PowerOf | Scinot => true,
 
             _ => false,
         }
@@ -677,7 +682,7 @@ impl Token {
 
         match self {
             LeftBrace | RightBrace | LeftParen | RightParen | LeftBracket | RightBracket | Plus
-            | UnaryPlus | Minus | UnaryMinus | Multiply | Divide | Modulo | PowerOf | LeftShift
+            | UnaryPlus | Minus | UnaryMinus | Multiply | Divide | Modulo | PowerOf | Scinot | LeftShift
             | RightShift | SemiColon | Colon | DoubleColon | Comma | Period | MapStart | Equals
             | LessThan | GreaterThan | LessThanEqualsTo | GreaterThanEqualsTo | EqualsTo
             | NotEqualsTo | Bang | Pipe | Or | XOr | Ampersand | And | PlusAssign | MinusAssign
@@ -1192,6 +1197,7 @@ fn get_next_token_inner(
                     ));
                 }
             }
+            ('e', _) => return Some((Token::Scinot, start_pos)),
 
             // letter or underscore ...
             #[cfg(not(feature = "unicode-xid-ident"))]
