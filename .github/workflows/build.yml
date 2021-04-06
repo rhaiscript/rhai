@@ -24,6 +24,7 @@ jobs:
           - "--features no_optimize"
           - "--features no_float"
           - "--features f32_float"
+          - "--features f32_float,serde"
           - "--features decimal"
           - "--features no_float,decimal"
           - "--tests --features only_i32"
