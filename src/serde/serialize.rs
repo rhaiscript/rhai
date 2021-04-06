@@ -26,7 +26,7 @@ impl Serialize for Dynamic {
             Union::Float(x, _) => ser.serialize_f64(**x),
             #[cfg(not(feature = "no_float"))]
             #[cfg(feature = "f32_float")]
-            Union::Float(x, _) => ser.serialize_f32(*x),
+            Union::Float(x, _) => ser.serialize_f32(**x),
 
             #[cfg(feature = "decimal")]
             #[cfg(not(feature = "f32_float"))]
