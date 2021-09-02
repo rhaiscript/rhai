@@ -1,6 +1,15 @@
 Rhai Release Notes
 ==================
 
+Version 1.0.3
+=============
+
+Bug fixes
+---------
+
+* Fixed bug with `catch` variable used in `catch` block.
+
+
 Version 1.0.2
 =============
 
