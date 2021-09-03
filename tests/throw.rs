@@ -54,6 +54,18 @@ fn test_try_catch() -> Result<(), Box<EvalAltResult>> {
     assert_eq!(
         engine.eval::<INT>(
             "
+                let err = 123;
+                let x = 0;
+                try { throw 42; } catch(err) { print(err); }
+                err
+            "
+        )?,
+        123
+    );
+
+    assert_eq!(
+        engine.eval::<INT>(
+            "
                 let foo = 123;
                 let x = 0;
                 try { throw 42; } catch(err) { return foo; }

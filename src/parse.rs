@@ -2902,7 +2902,7 @@ fn parse_try_catch(
     }
 
     // try { body } catch (
-    let var_def = if match_token(input, Token::LeftParen).0 {
+    let err_var = if match_token(input, Token::LeftParen).0 {
         let (name, pos) = parse_var_name(input)?;
         let (matched, err_pos) = match_token(input, Token::RightParen);
 
@@ -2924,8 +2924,16 @@ fn parse_try_catch(
     // try { body } catch ( var ) { catch_block }
     let catch_body = parse_block(input, state, lib, settings.level_up())?;
 
+    if err_var.is_some() {
+        // Remove the error variable from the stack
+        state
+            .stack
+            .pop()
+            .expect("stack contains at least one entry");
+    }
+
     Ok(Stmt::TryCatch(
-        (body.into(), var_def, catch_body.into()).into(),
+        (body.into(), err_var, catch_body.into()).into(),
         settings.pos,
     ))
 }
