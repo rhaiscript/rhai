@@ -397,6 +397,9 @@ impl<'a> Scope<'a> {
     /// *ptr = 123_i64.into();
     ///
     /// assert_eq!(my_scope.get_value::<i64>("x").unwrap(), 123);
+    ///
+    /// my_scope.push_constant("Z", 1_i64);
+    /// assert!(my_scope.get_mut("Z").is_none());
     /// ```
     #[inline]
     #[must_use]

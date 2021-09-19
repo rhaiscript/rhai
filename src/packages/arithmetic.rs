@@ -163,13 +163,7 @@ macro_rules! gen_signed_functions {
                     }
                 }
                 pub fn sign(x: $arg_type) -> INT {
-                    if x == 0 {
-                        0
-                    } else if x < 0 {
-                        -1
-                    } else {
-                        1
-                    }
+                    x.signum() as INT
                 }
             }
         })* }
@@ -249,6 +243,8 @@ gen_signed_functions!(signed_num_128 => i128);
 #[cfg(not(feature = "no_float"))]
 #[export_module]
 mod f32_functions {
+    use crate::EvalAltResult;
+
     #[cfg(not(feature = "f32_float"))]
     pub mod basic_arithmetic {
         #[rhai_fn(name = "+")]
@@ -329,13 +325,15 @@ mod f32_functions {
     pub fn abs(x: f32) -> f32 {
         x.abs()
     }
-    pub fn sign(x: f32) -> INT {
+    #[rhai_fn(return_raw)]
+    pub fn sign(x: f32) -> Result<INT, Box<EvalAltResult>> {
         if x == 0.0 {
-            0
-        } else if x < 0.0 {
-            -1
+            Ok(0)
         } else {
-            1
+            match x.signum() {
+                x if x.is_nan() => Err(make_err("Sign of NaN is undefined")),
+                x => Ok(x as INT),
+            }
         }
     }
     pub fn is_zero(x: f32) -> bool {
@@ -437,13 +435,15 @@ mod f64_functions {
     pub fn abs(x: f64) -> f64 {
         x.abs()
     }
-    pub fn sign(x: f64) -> INT {
+    #[rhai_fn(return_raw)]
+    pub fn sign(x: f64) -> Result<INT, Box<EvalAltResult>> {
         if x == 0.0 {
-            0
-        } else if x < 0.0 {
-            -1
+            Ok(0)
         } else {
-            1
+            match x.signum() {
+                x if x.is_nan() => Err(make_err("Sign of NaN is undefined")),
+                x => Ok(x as INT),
+            }
         }
     }
     pub fn is_zero(x: f64) -> bool {

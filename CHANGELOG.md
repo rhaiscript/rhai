@@ -1,6 +1,16 @@
 Rhai Release Notes
 ==================
 
+Version 1.0.5
+=============
+
+Bug fixes
+---------
+
+* `FloatWrapper` is no longer erroneously exported under `no_float+internals`.
+* The `sign` function now works properly for float values that are `NaN`.
+
+
 Version 1.0.4
 =============
 

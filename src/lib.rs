@@ -227,9 +227,14 @@ pub use token::{InputStream, Token, TokenizeState, TokenizerControl, TokenizerCo
 #[cfg(feature = "internals")]
 #[deprecated = "this type is volatile and may change"]
 pub use ast::{
-    ASTNode, BinaryExpr, CustomExpr, Expr, FloatWrapper, FnCallExpr, FnCallHashes, Ident,
-    OpAssignment, OptionFlags, ReturnType, ScriptFnDef, Stmt, StmtBlock, AST_OPTION_FLAGS::*,
+    ASTNode, BinaryExpr, CustomExpr, Expr, FnCallExpr, FnCallHashes, Ident, OpAssignment,
+    OptionFlags, ReturnType, ScriptFnDef, Stmt, StmtBlock, AST_OPTION_FLAGS::*,
 };
+
+#[cfg(feature = "internals")]
+#[cfg(not(feature = "no_float"))]
+#[deprecated = "this type is volatile and may change"]
+pub use ast::FloatWrapper;
 
 #[cfg(feature = "internals")]
 #[deprecated = "this type is volatile and may change"]
