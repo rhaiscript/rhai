@@ -44,7 +44,8 @@ const SCOPE_SEARCH_BARRIER_MARKER: &str = "$BARRIER$";
 /// The message: never fails because `TokenStream` never ends
 const NEVER_ENDS: &str = "never fails because `TokenStream` never ends";
 
-/// A factory of identifiers from text strings.
+/// _(internals)_ A factory of identifiers from text strings.
+/// Exported under the `internals` feature only.
 ///
 /// When [`SmartString`](https://crates.io/crates/smartstring) is used as [`Identifier`],
 /// this just returns a copy because most identifiers in Rhai are short and ASCII-based.
@@ -74,38 +75,39 @@ impl IdentifierBuilder {
     }
 }
 
-/// A type that encapsulates the current state of the parser.
+/// _(internals)_ A type that encapsulates the current state of the parser.
+/// Exported under the `internals` feature only.
 #[derive(Debug)]
 pub struct ParseState<'e> {
     /// Reference to the scripting [`Engine`].
-    engine: &'e Engine,
+    pub engine: &'e Engine,
     /// Input stream buffer containing the next character to read.
-    tokenizer_control: TokenizerControl,
+    pub tokenizer_control: TokenizerControl,
     /// Interned strings.
-    interned_strings: IdentifierBuilder,
+    pub interned_strings: IdentifierBuilder,
     /// Encapsulates a local stack with variable names to simulate an actual runtime scope.
-    stack: Vec<(Identifier, AccessMode)>,
+    pub stack: Vec<(Identifier, AccessMode)>,
     /// Size of the local variables stack upon entry of the current block scope.
-    entry_stack_len: usize,
+    pub entry_stack_len: usize,
     /// Tracks a list of external variables (variables that are not explicitly declared in the scope).
     #[cfg(not(feature = "no_closure"))]
-    external_vars: BTreeMap<Identifier, Position>,
+    pub external_vars: BTreeMap<Identifier, Position>,
     /// An indicator that disables variable capturing into externals one single time
     /// up until the nearest consumed Identifier token.
     /// If set to false the next call to [`access_var`][ParseState::access_var] will not capture the variable.
     /// All consequent calls to [`access_var`][ParseState::access_var] will not be affected
     #[cfg(not(feature = "no_closure"))]
-    allow_capture: bool,
+    pub allow_capture: bool,
     /// Encapsulates a local stack with imported [module][crate::Module] names.
     #[cfg(not(feature = "no_module"))]
-    modules: StaticVec<Identifier>,
+    pub modules: StaticVec<Identifier>,
     /// Maximum levels of expression nesting.
     #[cfg(not(feature = "unchecked"))]
-    max_expr_depth: Option<NonZeroUsize>,
+    pub max_expr_depth: Option<NonZeroUsize>,
     /// Maximum levels of expression nesting in functions.
     #[cfg(not(feature = "unchecked"))]
     #[cfg(not(feature = "no_function"))]
-    max_function_expr_depth: Option<NonZeroUsize>,
+    pub max_function_expr_depth: Option<NonZeroUsize>,
 }
 
 impl<'e> ParseState<'e> {

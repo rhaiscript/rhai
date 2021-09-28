@@ -4,6 +4,17 @@ Rhai Release Notes
 Version 1.0.6
 =============
 
+Bug fixes
+---------
+
+* Eliminate unnecessary property write-back when accessed via a getter since property getters are assumed to be _pure_.
+* Writing to a property of an indexed valued obtained via an indexer now works properly by writing back the changed value via an index setter.
+
+Enhancements
+------------
+
+* `MultiInputsStream`, `ParseState`, `TokenIterator`, `IdentifierBuilder` and `AccessMode` are exported under the `internals` feature.
+
 
 Version 1.0.5
 =============

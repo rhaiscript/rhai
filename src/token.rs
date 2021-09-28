@@ -2057,15 +2057,17 @@ pub fn is_id_continue(x: char) -> bool {
     x.is_ascii_alphanumeric() || x == '_'
 }
 
-/// A type that implements the [`InputStream`] trait.
+/// _(internals)_ A type that implements the [`InputStream`] trait.
+/// Exported under the `internals` feature only.
+///
 /// Multiple character streams are jointed together to form one single stream.
 pub struct MultiInputsStream<'a> {
     /// Buffered character, if any.
-    buf: Option<char>,
+    pub buf: Option<char>,
     /// The current stream index.
-    index: usize,
+    pub index: usize,
     /// The input character streams.
-    streams: StaticVec<Peekable<Chars<'a>>>,
+    pub streams: StaticVec<Peekable<Chars<'a>>>,
 }
 
 impl InputStream for MultiInputsStream<'_> {
@@ -2115,20 +2117,21 @@ impl InputStream for MultiInputsStream<'_> {
     }
 }
 
-/// An iterator on a [`Token`] stream.
+/// _(internals)_ An iterator on a [`Token`] stream.
+/// Exported under the `internals` feature only.
 pub struct TokenIterator<'a> {
     /// Reference to the scripting `Engine`.
-    engine: &'a Engine,
+    pub engine: &'a Engine,
     /// Current state.
-    state: TokenizeState,
+    pub state: TokenizeState,
     /// Current position.
-    pos: Position,
+    pub pos: Position,
     /// External buffer containing the next character to read, if any.
-    tokenizer_control: TokenizerControl,
+    pub tokenizer_control: TokenizerControl,
     /// Input character stream.
-    stream: MultiInputsStream<'a>,
+    pub stream: MultiInputsStream<'a>,
     /// A processor function that maps a token to another.
-    map: Option<fn(Token) -> Token>,
+    pub map: Option<fn(Token) -> Token>,
 }
 
 impl<'a> Iterator for TokenIterator<'a> {

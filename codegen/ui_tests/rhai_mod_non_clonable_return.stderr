@@ -8,7 +8,7 @@ error[E0277]: the trait bound `NonClonable: Clone` is not satisfied
      |            the trait `Clone` is not implemented for `NonClonable`
      |
 note: required by a bound in `rhai::Dynamic::from`
-    --> $DIR/dynamic.rs:1043:30
+    --> $DIR/dynamic.rs:1044:30
      |
-1043 |     pub fn from<T: Variant + Clone>(mut value: T) -> Self {
+1044 |     pub fn from<T: Variant + Clone>(mut value: T) -> Self {
      |                              ^^^^^ required by this bound in `rhai::Dynamic::from`

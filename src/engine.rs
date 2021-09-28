@@ -335,6 +335,20 @@ impl ChainArgument {
             _ => None,
         }
     }
+    /// Return the [position][Position].
+    #[inline(always)]
+    #[must_use]
+    #[allow(dead_code)]
+    pub const fn position(&self) -> Position {
+        match self {
+            #[cfg(not(feature = "no_object"))]
+            ChainArgument::Property(pos) => *pos,
+            #[cfg(not(feature = "no_object"))]
+            ChainArgument::MethodCallArgs(_, pos) => *pos,
+            #[cfg(not(feature = "no_index"))]
+            ChainArgument::IndexValue(_, pos) => *pos,
+        }
+    }
 }
 
 #[cfg(not(feature = "no_object"))]
@@ -1253,6 +1267,7 @@ impl Engine {
             #[cfg(not(feature = "no_index"))]
             ChainType::Indexing => {
                 let pos = rhs.position();
+                let root_pos = idx_val.position();
                 let idx_val = idx_val
                     .into_index_value()
                     .expect("never fails because `chain_type` is `ChainType::Index`");
@@ -1262,17 +1277,50 @@ impl Engine {
                     Expr::Dot(x, term, x_pos) | Expr::Index(x, term, x_pos)
                         if !_terminate_chaining =>
                     {
+                        let mut idx_val_for_setter = idx_val.clone();
                         let idx_pos = x.lhs.position();
-                        let obj_ptr = &mut self.get_indexed_mut(
-                            mods, state, lib, target, idx_val, idx_pos, false, true, level,
-                        )?;
-
                         let rhs_chain = match_chaining_type(rhs);
-                        self.eval_dot_index_chain_helper(
-                            mods, state, lib, this_ptr, obj_ptr, root, &x.rhs, *term, idx_values,
-                            rhs_chain, level, new_val,
-                        )
-                        .map_err(|err| err.fill_position(*x_pos))
+
+                        let (try_setter, result) = {
+                            let mut obj = self.get_indexed_mut(
+                                mods, state, lib, target, idx_val, idx_pos, false, true, level,
+                            )?;
+                            let is_obj_temp_val = obj.is_temp_value();
+                            let obj_ptr = &mut obj;
+
+                            match self.eval_dot_index_chain_helper(
+                                mods, state, lib, this_ptr, obj_ptr, root, &x.rhs, *term,
+                                idx_values, rhs_chain, level, new_val,
+                            ) {
+                                Ok((result, true)) if is_obj_temp_val => {
+                                    (Some(obj.take_or_clone()), (result, true))
+                                }
+                                Ok(result) => (None, result),
+                                Err(err) => return Err(err.fill_position(*x_pos)),
+                            }
+                        };
+
+                        if let Some(mut new_val) = try_setter {
+                            // Try to call index setter if value is changed
+                            let hash_set =
+                                FnCallHashes::from_native(crate::calc_fn_hash(FN_IDX_SET, 3));
+                            let args = &mut [target, &mut idx_val_for_setter, &mut new_val];
+
+                            if let Err(err) = self.exec_fn_call(
+                                mods, state, lib, FN_IDX_SET, hash_set, args, is_ref_mut, true,
+                                root_pos, None, level,
+                            ) {
+                                // Just ignore if there is no index setter
+                                if !matches!(*err, EvalAltResult::ErrorFunctionNotFound(_, _)) {
+                                    return Err(err);
+                                }
+                            }
+                        }
+
+                        self.check_data_size(target.as_ref())
+                            .map_err(|err| err.fill_position(root.1))?;
+
+                        Ok(result)
                     }
                     // xxx[rhs] op= new_val
                     _ if new_val.is_some() => {
@@ -1305,11 +1353,10 @@ impl Engine {
                             let hash_set =
                                 FnCallHashes::from_native(crate::calc_fn_hash(FN_IDX_SET, 3));
                             let args = &mut [target, &mut idx_val_for_setter, &mut new_val];
-                            let pos = Position::NONE;
 
                             self.exec_fn_call(
                                 mods, state, lib, FN_IDX_SET, hash_set, args, is_ref_mut, true,
-                                pos, None, level,
+                                root_pos, None, level,
                             )?;
                         }
 
@@ -1480,6 +1527,7 @@ impl Engine {
                                 }
                                 _ => Err(err),
                             },
+                            // Assume getters are always pure
                             |(v, _)| Ok((v, false)),
                         )
                     }
@@ -1533,7 +1581,9 @@ impl Engine {
                                 let hash_set = FnCallHashes::from_native(*hash_set);
                                 let mut arg_values = [target.as_mut(), &mut Default::default()];
                                 let args = &mut arg_values[..1];
-                                let (mut val, updated) = self
+
+                                // Assume getters are always pure
+                                let (mut val, _) = self
                                     .exec_fn_call(
                                         mods, state, lib, getter, hash_get, args, is_ref_mut, true,
                                         *pos, None, level,
@@ -1577,7 +1627,7 @@ impl Engine {
                                     .map_err(|err| err.fill_position(*x_pos))?;
 
                                 // Feed the value back via a setter just in case it has been updated
-                                if updated || may_be_changed {
+                                if may_be_changed {
                                     // Re-use args because the first &mut parameter will not be consumed
                                     let mut arg_values = [target.as_mut(), val];
                                     let args = &mut arg_values;
@@ -2341,7 +2391,7 @@ impl Engine {
                 let args = &mut [lhs_ptr_inner, &mut new_val];
 
                 match self.call_native_fn(mods, state, lib, op, hash, args, true, true, op_pos) {
-                    Err(err) if matches!(err.as_ref(), EvalAltResult::ErrorFunctionNotFound(f, _) if f.starts_with(op)) =>
+                    Err(err) if matches!(*err, EvalAltResult::ErrorFunctionNotFound(ref f, _) if f.starts_with(op)) =>
                     {
                         // Expand to `var = var op rhs`
                         let op = &op[..op.len() - 1]; // extract operator without =

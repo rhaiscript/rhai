@@ -12,7 +12,7 @@ fn fib(n) {
     }
 }
 
-print(`Running Fibonacci(28) x ${REPEAT} times...`);
+print(`Running Fibonacci(${TARGET}) x ${REPEAT} times...`);
 print("Ready... Go!");
 
 let result;

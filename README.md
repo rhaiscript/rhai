@@ -76,7 +76,7 @@ Example
 
 The [`scripts`](https://github.com/rhaiscript/rhai/tree/master/scripts) subdirectory contains sample Rhai scripts.
 
-Below is a the standard _Fibonacci_ example for scripting languages:
+Below is the standard _Fibonacci_ example for scripting languages:
 
 ```js
 // This Rhai script calculates the n-th Fibonacci number using a really dumb algorithm
@@ -93,7 +93,7 @@ fn fib(n) {
     }
 }
 
-print(`Running Fibonacci(28) x ${REPEAT} times...`);
+print(`Running Fibonacci(${TARGET}) x ${REPEAT} times...`);
 print("Ready... Go!");
 
 let result;
