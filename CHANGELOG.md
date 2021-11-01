@@ -1,6 +1,17 @@
 Rhai Release Notes
 ==================
 
+Version 1.1.1
+=============
+
+Bug fixes
+---------
+
+* Assignment to indexing expression with dot expressions inside no longer cause a compilation error.
+* The `no_module` and `internals` features now work together without a compilation error.
+* String literal operations (such as `"hello" + ", world"`) now optimizes correctly.
+
+
 Version 1.1.0
 =============
 
@@ -58,10 +69,6 @@ Enhancements
 * `ReturnType` is removed in favor of option flags for `Stmt::Return`.
 * `Stmt::Break` and `Stmt::Continue` are merged into `Stmt::BreakLoop` via an option flag.
 * `StaticVec` is changed to keep three items inline instead of four.
-
-
-Version 1.0.7
-=============
 
 
 Version 1.0.6

@@ -3,7 +3,7 @@ members = [".", "codegen"]
 
 [package]
 name = "rhai"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2018"
 authors = ["Jonathan Turner", "Lukáš Hozda", "Stephen Chung", "jhwgh1968"]
 description = "Embedded scripting for Rust"
@@ -20,7 +20,7 @@ smallvec = { version = "1.6", default-features = false, features = ["union"] }
 ahash = { version = "0.7", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 smartstring = { version = "0.2.7", default-features = false }
-rhai_codegen = { version = "1.0", path = "codegen", default-features = false }
+rhai_codegen = { version = "1.1", path = "codegen", default-features = false }
 
 [features]
 default = ["ahash/std", "num-traits/std"]

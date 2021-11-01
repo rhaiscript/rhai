@@ -13,9 +13,9 @@ help: a struct with a similar name exists
    |                           ~~~~~
 help: consider importing one of these items
    |
+11 |     use core::fmt::Pointer;
+   |
 11 |     use std::fmt::Pointer;
    |
 11 |     use syn::__private::fmt::Pointer;
-   |
-11 |     use core::fmt::Pointer;
    |

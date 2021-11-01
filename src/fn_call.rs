@@ -727,7 +727,7 @@ impl Engine {
                 return Ok((Dynamic::UNIT, false));
             }
 
-            let scope: &mut Scope = &mut Default::default();
+            let scope = &mut Scope::new();
 
             // Move captured variables into scope
             #[cfg(not(feature = "no_closure"))]

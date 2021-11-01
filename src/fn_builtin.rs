@@ -266,6 +266,24 @@ pub fn get_builtin_binary_op_fn(
             _ => None,
         };
     }
+    // () op string
+    if types_pair == (TypeId::of::<()>(), TypeId::of::<ImmutableString>()) {
+        return match op {
+            "+" => Some(|_, args| Ok(args[1].clone())),
+            "==" | ">" | ">=" | "<" | "<=" => Some(|_, _| Ok(Dynamic::FALSE)),
+            "!=" => Some(|_, _| Ok(Dynamic::TRUE)),
+            _ => None,
+        };
+    }
+    // string op ()
+    if types_pair == (TypeId::of::<ImmutableString>(), TypeId::of::<()>()) {
+        return match op {
+            "+" => Some(|_, args| Ok(args[0].clone())),
+            "==" | ">" | ">=" | "<" | "<=" => Some(|_, _| Ok(Dynamic::FALSE)),
+            "!=" => Some(|_, _| Ok(Dynamic::TRUE)),
+            _ => None,
+        };
+    }
 
     // map op string
     #[cfg(not(feature = "no_object"))]

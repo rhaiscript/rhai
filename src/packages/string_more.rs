@@ -45,22 +45,17 @@ mod string_functions {
         s
     }
 
-    #[rhai_fn(name = "+", name = "append")]
+    #[rhai_fn(name = "append")]
     pub fn add_append_str(string1: ImmutableString, string2: ImmutableString) -> ImmutableString {
         string1 + string2
     }
-    #[rhai_fn(name = "+", name = "append")]
+    #[rhai_fn(name = "append")]
     pub fn add_append_char(string: ImmutableString, character: char) -> ImmutableString {
         string + character
     }
-
-    #[rhai_fn(name = "+", name = "append")]
+    #[rhai_fn(name = "append")]
     pub fn add_append_unit(string: ImmutableString, item: ()) -> ImmutableString {
         let _item = item;
-        string
-    }
-    #[rhai_fn(name = "+")]
-    pub fn add_prepend_unit(_item: (), string: ImmutableString) -> ImmutableString {
         string
     }
 

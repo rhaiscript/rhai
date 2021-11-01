@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - master
-      - bug-fixes
+      - v1.1-fixes
   pull_request: {}
 
 jobs:
@@ -19,22 +19,22 @@ jobs:
         flags:
           - ""
           - "--features metadata,serde,internals"
-          - "--features unchecked"
-          - "--features sync"
-          - "--features no_position"
-          - "--features no_optimize"
-          - "--features no_float"
+          - "--features unchecked,serde,metadata,internals"
+          - "--features sync,serde,metadata,internals"
+          - "--features no_position,serde,metadata,internals"
+          - "--features no_optimize,serde,metadata,internals"
+          - "--features no_float,serde,metadata,internals"
           - "--features f32_float,serde,metadata,internals"
-          - "--features decimal"
+          - "--features decimal,serde,metadata,internals"
           - "--features no_float,decimal"
           - "--tests --features only_i32,serde,metadata,internals"
-          - "--features only_i64"
-          - "--features no_index"
-          - "--features no_object"
-          - "--features no_function"
-          - "--features no_module"
-          - "--features no_closure"
-          - "--features unicode-xid-ident"
+          - "--features only_i64,serde,metadata,internals"
+          - "--features no_index,serde,metadata,internals"
+          - "--features no_object,serde,metadata,internals"
+          - "--features no_function,serde,metadata,internals"
+          - "--features no_module,serde,metadata,internals"
+          - "--features no_closure,serde,metadata,internals"
+          - "--features unicode-xid-ident,serde,metadata,internals"
           - "--features sync,no_function,no_float,no_position,no_optimize,no_module,no_closure,metadata,serde,unchecked"
           - "--features no_function,no_float,no_position,no_index,no_object,no_optimize,no_module,no_closure,unchecked"
         toolchain: [stable]

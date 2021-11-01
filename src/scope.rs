@@ -307,10 +307,11 @@ impl<'a> Scope<'a> {
     pub(crate) fn get_index(&self, name: &str) -> Option<(usize, AccessMode)> {
         self.names
             .iter()
-            .enumerate()
             .rev() // Always search a Scope in reverse order
+            .enumerate()
             .find_map(|(index, (key, _))| {
                 if name == key.as_ref() {
+                    let index = self.len() - 1 - index;
                     Some((index, self.values[index].access_mode()))
                 } else {
                     None
@@ -334,10 +335,14 @@ impl<'a> Scope<'a> {
     pub fn get_value<T: Variant + Clone>(&self, name: &str) -> Option<T> {
         self.names
             .iter()
-            .enumerate()
             .rev()
+            .enumerate()
             .find(|(_, (key, _))| name == key.as_ref())
-            .and_then(|(index, _)| self.values[index].flatten_clone().try_cast())
+            .and_then(|(index, _)| {
+                self.values[self.len() - 1 - index]
+                    .flatten_clone()
+                    .try_cast()
+            })
     }
     /// Check if the named entry in the [`Scope`] is constant.
     ///
@@ -516,12 +521,14 @@ impl<'a> Scope<'a> {
 
         self.names
             .iter()
-            .enumerate()
             .rev()
-            .for_each(|(i, (name, alias))| {
+            .enumerate()
+            .for_each(|(index, (name, alias))| {
                 if !entries.names.iter().any(|(key, _)| key == name) {
                     entries.names.push((name.clone(), alias.clone()));
-                    entries.values.push(self.values[i].clone());
+                    entries
+                        .values
+                        .push(self.values[self.len() - 1 - index].clone());
                 }
             });
 

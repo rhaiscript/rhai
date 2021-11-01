@@ -1,10 +1,11 @@
-#[cfg(not(feature = "serde"))]
+#[cfg(any(not(feature = "serde"), feature = "no_object"))]
 fn main() {
     println!("This example requires the 'serde' feature to run.");
     println!("Try: cargo run --features serde --example serde");
 }
 
 #[cfg(feature = "serde")]
+#[cfg(not(feature = "no_object"))]
 fn main() {
     example::ser();
     println!();
@@ -12,6 +13,7 @@ fn main() {
 }
 
 #[cfg(feature = "serde")]
+#[cfg(not(feature = "no_object"))]
 mod example {
     use rhai::serde::{from_dynamic, to_dynamic};
     use rhai::{Dynamic, Engine, Map};

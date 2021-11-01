@@ -1573,13 +1573,18 @@ fn make_assignment_stmt(
     #[must_use]
     fn check_lvalue(expr: &Expr, parent_is_dot: bool) -> Option<Position> {
         match expr {
-            Expr::Index(x, _, _) | Expr::Dot(x, _, _) if parent_is_dot => match x.lhs {
-                Expr::Property(_) => check_lvalue(&x.rhs, matches!(expr, Expr::Dot(_, _, _))),
+            Expr::Index(x, term, _) | Expr::Dot(x, term, _) if parent_is_dot => match x.lhs {
+                Expr::Property(_) if !term => {
+                    check_lvalue(&x.rhs, matches!(expr, Expr::Dot(_, _, _)))
+                }
+                Expr::Property(_) => None,
+                // Anything other than a property after dotting (e.g. a method call) is not an l-value
                 ref e => Some(e.position()),
             },
-            Expr::Index(x, _, _) | Expr::Dot(x, _, _) => match x.lhs {
+            Expr::Index(x, term, _) | Expr::Dot(x, term, _) => match x.lhs {
                 Expr::Property(_) => unreachable!("unexpected Expr::Property in indexing"),
-                _ => check_lvalue(&x.rhs, matches!(expr, Expr::Dot(_, _, _))),
+                _ if !term => check_lvalue(&x.rhs, matches!(expr, Expr::Dot(_, _, _))),
+                _ => None,
             },
             Expr::Property(_) if parent_is_dot => None,
             Expr::Property(_) => unreachable!("unexpected Expr::Property in indexing"),
@@ -1619,19 +1624,30 @@ fn make_assignment_stmt(
             }
         }
         // xxx[???]... = rhs, xxx.prop... = rhs
-        Expr::Index(ref x, _, _) | Expr::Dot(ref x, _, _) => {
-            match check_lvalue(&x.rhs, matches!(lhs, Expr::Dot(_, _, _))) {
-                None => match x.lhs {
-                    // var[???] = rhs, var.??? = rhs
-                    Expr::Variable(_, _, _) => {
-                        Ok(Stmt::Assignment((lhs, op_info, rhs).into(), op_pos))
+        Expr::Index(ref x, term, _) | Expr::Dot(ref x, term, _) => {
+            let valid_lvalue = if term {
+                None
+            } else {
+                check_lvalue(&x.rhs, matches!(lhs, Expr::Dot(_, _, _)))
+            };
+
+            match valid_lvalue {
+                None => {
+                    match x.lhs {
+                        // var[???] = rhs, var.??? = rhs
+                        Expr::Variable(_, _, _) => {
+                            Ok(Stmt::Assignment((lhs, op_info, rhs).into(), op_pos))
+                        }
+                        // expr[???] = rhs, expr.??? = rhs
+                        ref expr => {
+                            Err(PERR::AssignmentToInvalidLHS("".to_string())
+                                .into_err(expr.position()))
+                        }
                     }
-                    // expr[???] = rhs, expr.??? = rhs
-                    ref expr => {
-                        Err(PERR::AssignmentToInvalidLHS("".to_string()).into_err(expr.position()))
-                    }
-                },
-                Some(pos) => Err(PERR::AssignmentToInvalidLHS("".to_string()).into_err(pos)),
+                }
+                Some(err_pos) => {
+                    Err(PERR::AssignmentToInvalidLHS("".to_string()).into_err(err_pos))
+                }
             }
         }
         // ??? && ??? = rhs, ??? || ??? = rhs

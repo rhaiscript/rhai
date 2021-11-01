@@ -482,9 +482,7 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
 
         // switch const { ... }
         Stmt::Switch(match_expr, x, pos) if match_expr.is_constant() => {
-            let value = match_expr
-                .get_literal_value()
-                .expect("`match_expr` is constant");
+            let value = match_expr.get_literal_value().expect("constant");
             let hasher = &mut get_hasher();
             value.hash(hasher);
             let hash = hasher.finish();
@@ -878,7 +876,7 @@ fn optimize_expr(expr: &mut Expr, state: &mut OptimizerState, chaining: bool) {
         #[cfg(not(feature = "no_index"))]
         Expr::Array(_, _) if expr.is_constant() => {
             state.set_dirty();
-            *expr = Expr::DynamicConstant(expr.get_literal_value().expect("`expr` is constant").into(), expr.position());
+            *expr = Expr::DynamicConstant(expr.get_literal_value().expect("constant").into(), expr.position());
         }
         // [ items .. ]
         #[cfg(not(feature = "no_index"))]
@@ -887,7 +885,7 @@ fn optimize_expr(expr: &mut Expr, state: &mut OptimizerState, chaining: bool) {
         #[cfg(not(feature = "no_object"))]
         Expr::Map(_, _) if expr.is_constant() => {
             state.set_dirty();
-            *expr = Expr::DynamicConstant(expr.get_literal_value().expect("`expr` is constant").into(), expr.position());
+            *expr = Expr::DynamicConstant(expr.get_literal_value().expect("constant").into(), expr.position());
         }
         // #{ key:value, .. }
         #[cfg(not(feature = "no_object"))]
@@ -981,31 +979,37 @@ fn optimize_expr(expr: &mut Expr, state: &mut OptimizerState, chaining: bool) {
         => {
             let arg_values = &mut x.args.iter().map(|e| match e {
                                                             Expr::Stack(slot, _) => x.constants[*slot].clone(),
-                                                            _ => e.get_literal_value().expect("`e` is constant")
+                                                            _ => e.get_literal_value().expect("constant")
                                                         }).collect::<StaticVec<_>>();
 
             let arg_types: StaticVec<_> = arg_values.iter().map(Dynamic::type_id).collect();
 
-            let result = match x.name.as_str() {
-                KEYWORD_TYPE_OF if arg_values.len() == 1 => Some(state.engine.map_type_name(arg_values[0].type_name()).into()),
+            match x.name.as_str() {
+                KEYWORD_TYPE_OF if arg_values.len() == 1 => {
+                    state.set_dirty();
+                    *expr = Expr::from_dynamic(state.engine.map_type_name(arg_values[0].type_name()).into(), *pos);
+                    return;
+                }
                 #[cfg(not(feature = "no_closure"))]
-                KEYWORD_IS_SHARED if arg_values.len() == 1 => Some(Dynamic::FALSE),
+                KEYWORD_IS_SHARED if arg_values.len() == 1 => {
+                    state.set_dirty();
+                    *expr = Expr::from_dynamic(Dynamic::FALSE, *pos);
+                    return;
+                }
                 // Overloaded operators can override built-in.
                 _ if x.args.len() == 2 && !state.has_native_fn(x.hashes.native, arg_types.as_ref()) => {
-                    get_builtin_binary_op_fn(x.name.as_ref(), &arg_values[0], &arg_values[1])
+                    if let Some(result) = get_builtin_binary_op_fn(x.name.as_ref(), &arg_values[0], &arg_values[1])
                         .and_then(|f| {
                             let ctx = (state.engine, x.name.as_ref(), state.lib).into();
                             let (first, second) = arg_values.split_first_mut().expect("`arg_values` is not empty");
                             (f)(ctx, &mut [ first, &mut second[0] ]).ok()
-                        })
+                        }) {
+                            state.set_dirty();
+                            *expr = Expr::from_dynamic(result, *pos);
+                            return;
+                        }
                 }
-                _ => None
-            };
-
-            if let Some(result) = result {
-                state.set_dirty();
-                *expr = Expr::from_dynamic(result, *pos);
-                return;
+                _ => ()
             }
 
             x.args.iter_mut().for_each(|a| optimize_expr(a, state, false));
@@ -1035,7 +1039,7 @@ fn optimize_expr(expr: &mut Expr, state: &mut OptimizerState, chaining: bool) {
             if !has_script_fn {
                 let arg_values = &mut x.args.iter().map(|e| match e {
                                                                 Expr::Stack(slot, _) => x.constants[*slot].clone(),
-                                                                _ => e.get_literal_value().expect("`e` is constant")
+                                                                _ => e.get_literal_value().expect("constant")
                                                             }).collect::<StaticVec<_>>();
 
                 let result = match x.name.as_str() {
