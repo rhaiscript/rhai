@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 use instant::{Duration, Instant};
 
 def_package!(crate:BasicTimePackage:"Basic timing utilities.", lib, {
+    lib.standard = true;
+
     // Register date/time functions
     combine_with_exported_module!(lib, "time", time_functions);
 });

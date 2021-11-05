@@ -2970,6 +2970,7 @@ impl Engine {
                             // Create automatic global module
                             let mut global = Module::new();
                             global.internal = true;
+                            global.standard = false;
                             mods.push(KEYWORD_GLOBAL, global);
                             Some(mods.get_mut(mods.len() - 1).expect("global module exists"))
                         };

@@ -10,6 +10,8 @@ use std::prelude::v1::*;
 use crate::Array;
 
 def_package!(crate:BasicMapPackage:"Basic object map utilities.", lib, {
+    lib.standard = true;
+
     combine_with_exported_module!(lib, "map", map_functions);
 });
 

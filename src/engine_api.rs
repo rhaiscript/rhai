@@ -27,16 +27,16 @@ impl Engine {
     #[allow(dead_code)]
     pub(crate) fn global_namespace(&self) -> &Module {
         self.global_modules
-            .last()
+            .first()
             .expect("global_modules contains at least one module")
     }
     /// Get a mutable reference to the global namespace module
-    /// (which is the last module in `global_modules`).
+    /// (which is the first module in `global_modules`).
     #[inline(always)]
     pub(crate) fn global_namespace_mut(&mut self) -> &mut Module {
         Shared::get_mut(
             self.global_modules
-                .last_mut()
+                .first_mut()
                 .expect("global_modules contains at least one module"),
         )
         .expect("global namespace module is never shared")
@@ -895,8 +895,9 @@ impl Engine {
     /// modules are searched in reverse order.
     #[inline(always)]
     pub fn register_global_module(&mut self, module: Shared<Module>) -> &mut Self {
-        // Insert the module into the front
-        self.global_modules.insert(0, module);
+        // Insert the module into the front.
+        // The first module is always the global namespace.
+        self.global_modules.insert(1, module);
         self
     }
     /// Register a shared [`Module`] as a static module namespace with the [`Engine`].

@@ -613,7 +613,7 @@ impl Engine {
 
         // First check script-defined functions
         let result = lib.iter().any(|&m| m.contains_fn(hash_script))
-            // Then check packages
+            // Then check the global namespace and packages
             || self.global_modules.iter().any(|m| m.contains_fn(hash_script))
             // Then check imported modules
             || mods.map_or(false, |m| m.contains_fn(hash_script))

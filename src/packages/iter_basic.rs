@@ -292,6 +292,8 @@ macro_rules! reg_range {
 }
 
 def_package!(crate:BasicIteratorPackage:"Basic range iterators.", lib, {
+    lib.standard = true;
+
     reg_range!(lib | "range" => INT);
 
     #[cfg(not(feature = "only_i32"))]

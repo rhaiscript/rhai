@@ -43,5 +43,7 @@ mod core_functions {
 }
 
 def_package!(crate:LanguageCorePackage:"Language core functions.", lib, {
+    lib.standard = true;
+
     combine_with_exported_module!(lib, "language_core", core_functions);
 });

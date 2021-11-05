@@ -805,55 +805,56 @@ impl Token {
 
         match self {
             LexError(_)      |
-            LeftBrace        | // {+expr} - is unary
-            // RightBrace    | {expr} - expr not unary & is closing
-            LeftParen        | // (-expr) - is unary
-            // RightParen    | (expr) - expr not unary & is closing
-            LeftBracket      | // [-expr] - is unary
-            // RightBracket  | [expr] - expr not unary & is closing
+            SemiColon        | // ; - is unary
+            Comma            | // ( ... , -expr ) - is unary
+            //Period           |
+            LeftBrace        | // { -expr } - is unary
+            // RightBrace    | { expr } - expr not unary & is closing
+            LeftParen        | // ( -expr ) - is unary
+            // RightParen    | // ( expr ) - expr not unary & is closing
+            LeftBracket      | // [ -expr ] - is unary
+            // RightBracket  | // [ expr ] - expr not unary & is closing
             Plus             |
+            PlusAssign       |
             UnaryPlus        |
             Minus            |
+            MinusAssign      |
             UnaryMinus       |
             Multiply         |
+            MultiplyAssign   |
             Divide           |
-            Comma            |
-            Period           |
+            DivideAssign     |
+            Modulo           |
+            ModuloAssign     |
+            PowerOf          |
+            PowerOfAssign    |
+            LeftShift        |
+            LeftShiftAssign  |
+            RightShift       |
+            RightShiftAssign |
             Equals           |
+            EqualsTo         |
+            NotEqualsTo      |
             LessThan         |
             GreaterThan      |
             Bang             |
             LessThanEqualsTo |
             GreaterThanEqualsTo |
-            EqualsTo         |
-            NotEqualsTo      |
             Pipe             |
-            Or               |
             Ampersand        |
-            And              |
             If               |
-            Do               |
+            //Do               |
             While            |
             Until            |
-            PlusAssign       |
-            MinusAssign      |
-            MultiplyAssign   |
-            DivideAssign     |
-            LeftShiftAssign  |
-            RightShiftAssign |
-            PowerOf          |
-            PowerOfAssign    |
+            In               |
+            And              |
             AndAssign        |
+            Or               |
             OrAssign         |
-            XOrAssign        |
-            LeftShift        |
-            RightShift       |
             XOr              |
-            Modulo           |
-            ModuloAssign     |
+            XOrAssign        |
             Return           |
-            Throw            |
-            In               => true,
+            Throw                           => true,
 
             _ => false,
         }

@@ -4,6 +4,8 @@ use crate::{def_package, FnPtr, ImmutableString, NativeCallContext};
 use std::prelude::v1::*;
 
 def_package!(crate:BasicFnPackage:"Basic Fn functions.", lib, {
+    lib.standard = true;
+
     combine_with_exported_module!(lib, "FnPtr", fn_ptr_functions);
 });
 

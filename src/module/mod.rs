@@ -131,6 +131,8 @@ pub struct Module {
     id: Option<Identifier>,
     /// Is this module internal?
     pub(crate) internal: bool,
+    /// Is this module part of a standard library?
+    pub(crate) standard: bool,
     /// Sub-modules.
     modules: BTreeMap<Identifier, Shared<Module>>,
     /// [`Module`] variables.
@@ -246,6 +248,7 @@ impl Module {
         Self {
             id: None,
             internal: false,
+            standard: false,
             modules: Default::default(),
             variables: Default::default(),
             all_variables: Default::default(),

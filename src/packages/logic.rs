@@ -38,6 +38,8 @@ macro_rules! reg_functions {
 }
 
 def_package!(crate:LogicPackage:"Logical operators.", lib, {
+    lib.standard = true;
+
     #[cfg(not(feature = "only_i32"))]
     #[cfg(not(feature = "only_i64"))]
     {

@@ -62,6 +62,8 @@ macro_rules! reg_functions {
 }
 
 def_package!(crate:BasicMathPackage:"Basic mathematic functions.", lib, {
+    lib.standard = true;
+
     // Integer functions
     combine_with_exported_module!(lib, "int", int_functions);
 

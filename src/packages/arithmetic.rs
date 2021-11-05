@@ -177,6 +177,8 @@ macro_rules! reg_functions {
 }
 
 def_package!(crate:ArithmeticPackage:"Basic arithmetic", lib, {
+    lib.standard = true;
+
     combine_with_exported_module!(lib, "int", int_functions);
     reg_functions!(lib += signed_basic; INT);
 

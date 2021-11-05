@@ -10,6 +10,8 @@ use std::prelude::v1::*;
 use crate::def_package;
 
 def_package!(crate:CorePackage:"_Core_ package containing basic facilities.", lib, {
+    lib.standard = true;
+
     LanguageCorePackage::init(lib);
     ArithmeticPackage::init(lib);
     LogicPackage::init(lib);

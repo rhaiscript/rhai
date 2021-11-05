@@ -1825,7 +1825,9 @@ impl<F: Float + fmt::Debug> fmt::Debug for FloatWrapper<F> {
 impl<F: Float + fmt::Display + fmt::LowerExp + From<f32>> fmt::Display for FloatWrapper<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let abs = self.0.abs();
-        if abs > Self::MAX_NATURAL_FLOAT_FOR_DISPLAY.into()
+        if abs.fract().is_zero() {
+            f.write_str("0.0")
+        } else if abs > Self::MAX_NATURAL_FLOAT_FOR_DISPLAY.into()
             || abs < Self::MIN_NATURAL_FLOAT_FOR_DISPLAY.into()
         {
             write!(f, "{:e}", self.0)

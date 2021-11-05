@@ -16,6 +16,8 @@ pub const FUNC_TO_STRING: &str = "to_string";
 pub const FUNC_TO_DEBUG: &str = "to_debug";
 
 def_package!(crate:BasicStringPackage:"Basic string utilities, including printing.", lib, {
+    lib.standard = true;
+
     combine_with_exported_module!(lib, "print_debug", print_debug_functions);
     combine_with_exported_module!(lib, "number_formatting", number_formatting);
 });
