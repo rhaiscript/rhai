@@ -3,7 +3,7 @@ members = [".", "codegen"]
 
 [package]
 name = "rhai"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2018"
 authors = ["Jonathan Turner", "Lukáš Hozda", "Stephen Chung", "jhwgh1968"]
 description = "Embedded scripting for Rust"
