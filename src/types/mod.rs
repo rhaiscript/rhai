@@ -9,7 +9,7 @@ pub mod interner;
 pub mod parse_error;
 pub mod scope;
 
-pub use custom_types::{CustomType, CustomTypesCollection};
+pub use custom_types::{CustomTypeInfo, CustomTypesCollection};
 pub use dynamic::Dynamic;
 #[cfg(not(feature = "no_std"))]
 pub use dynamic::Instant;

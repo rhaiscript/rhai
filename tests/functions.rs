@@ -97,7 +97,7 @@ fn test_functions_global_module() -> Result<(), Box<EvalAltResult>> {
             if matches!(&*err, EvalAltResult::ErrorVariableNotFound(v, ..) if v == "global::ANSWER")
     ));
 
-    engine.register_result_fn(
+    engine.register_fn(
         "do_stuff",
         |context: NativeCallContext, callback: rhai::FnPtr| -> Result<INT, _> {
             callback.call_within_context(&context, ())

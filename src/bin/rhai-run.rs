@@ -51,7 +51,7 @@ fn main() {
         let mut engine = Engine::new();
 
         #[cfg(not(feature = "no_optimize"))]
-        engine.set_optimization_level(rhai::OptimizationLevel::Full);
+        engine.set_optimization_level(rhai::OptimizationLevel::Simple);
 
         let mut f = match File::open(&filename) {
             Err(err) => {

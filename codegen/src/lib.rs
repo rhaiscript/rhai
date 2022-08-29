@@ -303,7 +303,7 @@ pub fn register_exported_fn(args: proc_macro::TokenStream) -> proc_macro::TokenS
         Ok((engine_expr, export_name, rust_mod_path)) => {
             let gen_mod_path = crate::register::generated_module_path(&rust_mod_path);
             proc_macro::TokenStream::from(quote! {
-                #engine_expr.register_result_fn(#export_name, #gen_mod_path::dynamic_result_fn)
+                #engine_expr.register_fn(#export_name, #gen_mod_path::dynamic_result_fn)
             })
         }
         Err(e) => e.to_compile_error().into(),

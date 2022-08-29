@@ -1,8 +1,6 @@
 error[E0277]: the trait bound `NonClonable: Clone` is not satisfied
     --> ui_tests/non_clonable_second.rs:11:27
      |
-10   | #[export_fn]
-     | ------------ in this procedural macro expansion
 11   | pub fn test_fn(a: u32, b: NonClonable) -> bool {
      |                           ^^^^^^^^^^^ the trait `Clone` is not implemented for `NonClonable`
      |
@@ -11,7 +9,6 @@ note: required by a bound in `rhai::Dynamic::cast`
      |
      |     pub fn cast<T: Any + Clone>(self) -> T {
      |                          ^^^^^ required by this bound in `rhai::Dynamic::cast`
-     = note: this error originates in the attribute macro `export_fn` (in Nightly builds, run with -Z macro-backtrace for more info)
 help: consider annotating `NonClonable` with `#[derive(Clone)]`
      |
 3    | #[derive(Clone)]

@@ -66,7 +66,7 @@ fn build_type() -> Result<(), Box<EvalAltResult>> {
                 .with_get_set("z", Self::get_z, Self::set_z);
 
             #[cfg(not(feature = "no_index"))]
-            builder.with_indexer_get_result(Self::get_component);
+            builder.with_indexer_get(Self::get_component);
         }
     }
 

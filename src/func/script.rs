@@ -111,12 +111,13 @@ impl Engine {
         let mut lib_merged = crate::StaticVec::with_capacity(lib.len() + 1);
 
         #[cfg(not(feature = "no_module"))]
-        let (lib, constants) = if let Some(crate::ast::EncapsulatedEnviron {
-            lib: ref fn_lib,
-            ref imports,
-            ref constants,
-        }) = fn_def.environ
-        {
+        let (lib, constants) = if let Some(ref environ) = fn_def.environ {
+            let crate::ast::EncapsulatedEnviron {
+                lib: fn_lib,
+                imports,
+                constants,
+            } = environ.as_ref();
+
             imports
                 .iter()
                 .cloned()

@@ -113,7 +113,7 @@ impl Engine {
             });
         }
 
-        let mut ast = self.compile_scripts_with_scope(scope, &[script])?;
+        let mut ast = self.compile_with_scope(scope, script)?;
 
         let mut resolver = StaticModuleResolver::new();
         let mut imports = BTreeSet::new();

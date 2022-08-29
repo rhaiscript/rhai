@@ -9,6 +9,9 @@ use std::any::{type_name, TypeId};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
+#[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
+use crate::func::register::Mut;
+
 impl Engine {
     /// Get the global namespace module (which is the fist module in `global_modules`).
     #[inline(always)]
@@ -50,11 +53,11 @@ impl Engine {
     /// # }
     /// ```
     #[inline]
-    pub fn register_fn<N, A, F>(&mut self, name: N, func: F) -> &mut Self
-    where
-        N: AsRef<str> + Into<Identifier>,
-        F: RegisterNativeFunction<A, ()>,
-    {
+    pub fn register_fn<A, R, S, F: RegisterNativeFunction<A, R, S>>(
+        &mut self,
+        name: impl AsRef<str> + Into<Identifier>,
+        func: F,
+    ) -> &mut Self {
         let param_types = F::param_types();
 
         #[cfg(feature = "metadata")]
@@ -67,64 +70,6 @@ impl Engine {
         if F::return_type() != TypeId::of::<()>() {
             param_type_names.push(self.format_type_name(F::return_type_name()).into());
         }
-
-        #[cfg(feature = "metadata")]
-        let param_type_names: crate::StaticVec<_> =
-            param_type_names.iter().map(String::as_str).collect();
-        #[cfg(feature = "metadata")]
-        let param_type_names = Some(param_type_names.as_ref());
-
-        #[cfg(not(feature = "metadata"))]
-        let param_type_names: Option<&[&str]> = None;
-
-        self.global_namespace_mut().set_fn(
-            name,
-            FnNamespace::Global,
-            FnAccess::Public,
-            param_type_names,
-            param_types,
-            func.into_callable_function(),
-        );
-        self
-    }
-    /// Register a custom fallible function with the [`Engine`].
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use rhai::{Engine, EvalAltResult};
-    ///
-    /// // Normal function
-    /// fn div(x: i64, y: i64) -> Result<i64, Box<EvalAltResult>> {
-    ///     if y == 0 {
-    ///         // '.into()' automatically converts to 'Box<EvalAltResult::ErrorRuntime>'
-    ///         Err("division by zero!".into())
-    ///     } else {
-    ///         Ok(x / y)
-    ///     }
-    /// }
-    ///
-    /// let mut engine = Engine::new();
-    ///
-    /// engine.register_result_fn("div", div);
-    ///
-    /// engine.eval::<i64>("div(42, 0)")
-    ///       .expect_err("expecting division by zero error!");
-    /// ```
-    #[inline]
-    pub fn register_result_fn<N, A, F, R>(&mut self, name: N, func: F) -> &mut Self
-    where
-        N: AsRef<str> + Into<Identifier>,
-        F: RegisterNativeFunction<A, RhaiResultOf<R>>,
-    {
-        let param_types = F::param_types();
-
-        #[cfg(feature = "metadata")]
-        let param_type_names: crate::StaticVec<_> = F::param_names()
-            .iter()
-            .map(|ty| format!("_: {}", self.format_type_name(ty)))
-            .chain(Some(self.format_type_name(F::return_type_name()).into()))
-            .collect();
 
         #[cfg(feature = "metadata")]
         let param_type_names: crate::StaticVec<_> =
@@ -164,16 +109,12 @@ impl Engine {
     ///
     /// To access the first mutable parameter, use `args.get_mut(0).unwrap()`
     #[inline(always)]
-    pub fn register_raw_fn<N, T>(
+    pub fn register_raw_fn<T: Variant + Clone>(
         &mut self,
-        name: N,
+        name: impl AsRef<str> + Into<Identifier>,
         arg_types: impl AsRef<[TypeId]>,
         func: impl Fn(NativeCallContext, &mut FnCallArgs) -> RhaiResultOf<T> + SendSync + 'static,
-    ) -> &mut Self
-    where
-        N: AsRef<str> + Into<Identifier>,
-        T: Variant + Clone,
-    {
+    ) -> &mut Self {
         self.global_namespace_mut().set_raw_fn(
             name,
             FnNamespace::Global,
@@ -291,7 +232,7 @@ impl Engine {
             .set_custom_type_raw(fully_qualified_type_path, name);
         self
     }
-    /// Register an type iterator for an iterable type with the [`Engine`].
+    /// Register a type iterator for an iterable type with the [`Engine`].
     /// This is an advanced API.
     #[inline(always)]
     pub fn register_iterator<T>(&mut self) -> &mut Self
@@ -300,6 +241,17 @@ impl Engine {
         <T as IntoIterator>::Item: Variant + Clone,
     {
         self.global_namespace_mut().set_iterable::<T>();
+        self
+    }
+    /// Register a fallible type iterator for an iterable type with the [`Engine`].
+    /// This is an advanced API.
+    #[inline(always)]
+    pub fn register_iterator_result<T, X>(&mut self) -> &mut Self
+    where
+        T: Variant + Clone + IntoIterator<Item = RhaiResultOf<X>>,
+        X: Variant + Clone,
+    {
+        self.global_namespace_mut().set_iterable_result::<T, X>();
         self
     }
     /// Register a getter function for a member of a registered type with the [`Engine`].
@@ -344,61 +296,12 @@ impl Engine {
     /// ```
     #[cfg(not(feature = "no_object"))]
     #[inline(always)]
-    pub fn register_get<T: Variant + Clone, V: Variant + Clone>(
+    pub fn register_get<T: Variant + Clone, V: Variant + Clone, S>(
         &mut self,
         name: impl AsRef<str>,
-        get_fn: impl Fn(&mut T) -> V + SendSync + 'static,
+        get_fn: impl RegisterNativeFunction<(Mut<T>,), V, S> + SendSync + 'static,
     ) -> &mut Self {
         self.register_fn(crate::engine::make_getter(name.as_ref()).as_str(), get_fn)
-    }
-    /// Register a getter function for a member of a registered type with the [`Engine`].
-    ///
-    /// The function signature must start with `&mut self` and not `&self`.
-    ///
-    /// Not available under `no_object`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use rhai::{Engine, Dynamic, EvalAltResult};
-    ///
-    /// #[derive(Clone)]
-    /// struct TestStruct {
-    ///     field: i64
-    /// }
-    ///
-    /// impl TestStruct {
-    ///     fn new() -> Self {
-    ///         Self { field: 1 }
-    ///     }
-    ///     // Even a getter must start with `&mut self` and not `&self`.
-    ///     fn get_field(&mut self) -> Result<i64, Box<EvalAltResult>> {
-    ///         Ok(self.field)
-    ///     }
-    /// }
-    ///
-    /// # fn main() -> Result<(), Box<rhai::EvalAltResult>> {
-    /// let mut engine = Engine::new();
-    ///
-    /// // Register API for the custom type.
-    /// engine
-    ///     .register_type::<TestStruct>()
-    ///     .register_fn("new_ts", TestStruct::new)
-    ///     // Register a getter on a property (notice it doesn't have to be the same name).
-    ///     .register_get_result("xyz", TestStruct::get_field);
-    ///
-    /// assert_eq!(engine.eval::<i64>("let a = new_ts(); a.xyz")?, 1);
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[cfg(not(feature = "no_object"))]
-    #[inline(always)]
-    pub fn register_get_result<T: Variant + Clone, V: Variant + Clone>(
-        &mut self,
-        name: impl AsRef<str>,
-        get_fn: impl Fn(&mut T) -> RhaiResultOf<V> + SendSync + 'static,
-    ) -> &mut Self {
-        self.register_result_fn(crate::engine::make_getter(name.as_ref()).as_str(), get_fn)
     }
     /// Register a setter function for a member of a registered type with the [`Engine`].
     ///
@@ -443,63 +346,12 @@ impl Engine {
     /// ```
     #[cfg(not(feature = "no_object"))]
     #[inline(always)]
-    pub fn register_set<T: Variant + Clone, V: Variant + Clone>(
+    pub fn register_set<T: Variant + Clone, V: Variant + Clone, S>(
         &mut self,
         name: impl AsRef<str>,
-        set_fn: impl Fn(&mut T, V) + SendSync + 'static,
+        set_fn: impl RegisterNativeFunction<(Mut<T>, V), (), S> + SendSync + 'static,
     ) -> &mut Self {
         self.register_fn(crate::engine::make_setter(name.as_ref()).as_str(), set_fn)
-    }
-    /// Register a setter function for a member of a registered type with the [`Engine`].
-    ///
-    /// Not available under `no_object`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use rhai::{Engine, Dynamic, EvalAltResult};
-    ///
-    /// #[derive(Debug, Clone, Eq, PartialEq)]
-    /// struct TestStruct {
-    ///     field: i64
-    /// }
-    ///
-    /// impl TestStruct {
-    ///     fn new() -> Self {
-    ///         Self { field: 1 }
-    ///     }
-    ///     fn set_field(&mut self, new_val: i64) -> Result<(), Box<rhai::EvalAltResult>> {
-    ///         self.field = new_val;
-    ///         Ok(())
-    ///     }
-    /// }
-    ///
-    /// # fn main() -> Result<(), Box<rhai::EvalAltResult>> {
-    /// let mut engine = Engine::new();
-    ///
-    /// // Register API for the custom type.
-    /// engine
-    ///     .register_type::<TestStruct>()
-    ///     .register_fn("new_ts", TestStruct::new)
-    ///     // Register a setter on a property (notice it doesn't have to be the same name)
-    ///     .register_set_result("xyz", TestStruct::set_field);
-    ///
-    /// // Notice that, with a getter, there is no way to get the property value
-    /// assert_eq!(
-    ///     engine.eval::<TestStruct>("let a = new_ts(); a.xyz = 42; a")?,
-    ///     TestStruct { field: 42 }
-    /// );
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[cfg(not(feature = "no_object"))]
-    #[inline(always)]
-    pub fn register_set_result<T: Variant + Clone, V: Variant + Clone>(
-        &mut self,
-        name: impl AsRef<str>,
-        set_fn: impl Fn(&mut T, V) -> RhaiResultOf<()> + SendSync + 'static,
-    ) -> &mut Self {
-        self.register_result_fn(crate::engine::make_setter(name.as_ref()).as_str(), set_fn)
     }
     /// Short-hand for registering both getter and setter functions
     /// of a registered type with the [`Engine`].
@@ -548,11 +400,11 @@ impl Engine {
     /// ```
     #[cfg(not(feature = "no_object"))]
     #[inline(always)]
-    pub fn register_get_set<T: Variant + Clone, V: Variant + Clone>(
+    pub fn register_get_set<T: Variant + Clone, V: Variant + Clone, S1, S2>(
         &mut self,
         name: impl AsRef<str>,
-        get_fn: impl Fn(&mut T) -> V + SendSync + 'static,
-        set_fn: impl Fn(&mut T, V) + SendSync + 'static,
+        get_fn: impl RegisterNativeFunction<(Mut<T>,), V, S1> + SendSync + 'static,
+        set_fn: impl RegisterNativeFunction<(Mut<T>, V), (), S2> + SendSync + 'static,
     ) -> &mut Self {
         self.register_get(&name, get_fn).register_set(&name, set_fn)
     }
@@ -607,9 +459,9 @@ impl Engine {
     /// ```
     #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
     #[inline]
-    pub fn register_indexer_get<T: Variant + Clone, X: Variant + Clone, V: Variant + Clone>(
+    pub fn register_indexer_get<T: Variant + Clone, X: Variant + Clone, V: Variant + Clone, S>(
         &mut self,
-        get_fn: impl Fn(&mut T, X) -> V + SendSync + 'static,
+        get_fn: impl RegisterNativeFunction<(Mut<T>, X), V, S> + SendSync + 'static,
     ) -> &mut Self {
         #[cfg(not(feature = "no_index"))]
         if TypeId::of::<T>() == TypeId::of::<crate::Array>() {
@@ -630,85 +482,6 @@ impl Engine {
         }
 
         self.register_fn(crate::engine::FN_IDX_GET, get_fn)
-    }
-    /// Register an index getter for a custom type with the [`Engine`].
-    ///
-    /// The function signature must start with `&mut self` and not `&self`.
-    ///
-    /// Not available under both `no_index` and `no_object`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the type is [`Array`][crate::Array], [`Map`][crate::Map], [`String`],
-    /// [`ImmutableString`][crate::ImmutableString], `&str` or [`INT`][crate::INT].
-    /// Indexers for arrays, object maps, strings and integers cannot be registered.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use rhai::{Engine, Dynamic, EvalAltResult};
-    ///
-    /// #[derive(Clone)]
-    /// struct TestStruct {
-    ///     fields: Vec<i64>
-    /// }
-    ///
-    /// impl TestStruct {
-    ///     fn new() -> Self {
-    ///         Self { fields: vec![1, 2, 3, 4, 5] }
-    ///     }
-    ///     // Even a getter must start with `&mut self` and not `&self`.
-    ///     fn get_field(&mut self, index: i64) -> Result<i64, Box<EvalAltResult>> {
-    ///         Ok(self.fields[index as usize])
-    ///     }
-    /// }
-    ///
-    /// # fn main() -> Result<(), Box<rhai::EvalAltResult>> {
-    /// let mut engine = Engine::new();
-    ///
-    /// // Register API for the custom type.
-    /// # #[cfg(not(feature = "no_object"))]
-    /// engine.register_type::<TestStruct>();
-    ///
-    /// engine
-    ///     .register_fn("new_ts", TestStruct::new)
-    ///     // Register an indexer.
-    ///     .register_indexer_get_result(TestStruct::get_field);
-    ///
-    /// # #[cfg(not(feature = "no_index"))]
-    /// assert_eq!(engine.eval::<i64>("let a = new_ts(); a[2]")?, 3);
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
-    #[inline]
-    pub fn register_indexer_get_result<
-        T: Variant + Clone,
-        X: Variant + Clone,
-        V: Variant + Clone,
-    >(
-        &mut self,
-        get_fn: impl Fn(&mut T, X) -> RhaiResultOf<V> + SendSync + 'static,
-    ) -> &mut Self {
-        #[cfg(not(feature = "no_index"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Array>() {
-            panic!("Cannot register indexer for arrays.");
-        }
-        #[cfg(not(feature = "no_object"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Map>() {
-            panic!("Cannot register indexer for object maps.");
-        }
-        if TypeId::of::<T>() == TypeId::of::<String>()
-            || TypeId::of::<T>() == TypeId::of::<&str>()
-            || TypeId::of::<T>() == TypeId::of::<crate::ImmutableString>()
-        {
-            panic!("Cannot register indexer for strings.");
-        }
-        if TypeId::of::<T>() == TypeId::of::<crate::INT>() {
-            panic!("Cannot register indexer for integers.");
-        }
-
-        self.register_result_fn(crate::engine::FN_IDX_GET, get_fn)
     }
     /// Register an index setter for a custom type with the [`Engine`].
     ///
@@ -761,9 +534,9 @@ impl Engine {
     /// ```
     #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
     #[inline]
-    pub fn register_indexer_set<T: Variant + Clone, X: Variant + Clone, V: Variant + Clone>(
+    pub fn register_indexer_set<T: Variant + Clone, X: Variant + Clone, V: Variant + Clone, S>(
         &mut self,
-        set_fn: impl Fn(&mut T, X, V) + SendSync + 'static,
+        set_fn: impl RegisterNativeFunction<(Mut<T>, X, V), (), S> + SendSync + 'static,
     ) -> &mut Self {
         #[cfg(not(feature = "no_index"))]
         if TypeId::of::<T>() == TypeId::of::<crate::Array>() {
@@ -784,86 +557,6 @@ impl Engine {
         }
 
         self.register_fn(crate::engine::FN_IDX_SET, set_fn)
-    }
-    /// Register an index setter for a custom type with the [`Engine`].
-    ///
-    /// Not available under both `no_index` and `no_object`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the type is [`Array`][crate::Array], [`Map`][crate::Map], [`String`],
-    /// [`ImmutableString`][crate::ImmutableString], `&str` or [`INT`][crate::INT].
-    /// Indexers for arrays, object maps, strings and integers cannot be registered.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use rhai::{Engine, Dynamic, EvalAltResult};
-    ///
-    /// #[derive(Clone)]
-    /// struct TestStruct {
-    ///     fields: Vec<i64>
-    /// }
-    ///
-    /// impl TestStruct {
-    ///     fn new() -> Self {
-    ///         Self { fields: vec![1, 2, 3, 4, 5] }
-    ///     }
-    ///     fn set_field(&mut self, index: i64, value: i64) -> Result<(), Box<rhai::EvalAltResult>> {
-    ///         self.fields[index as usize] = value;
-    ///         Ok(())
-    ///     }
-    /// }
-    ///
-    /// # fn main() -> Result<(), Box<rhai::EvalAltResult>> {
-    /// let mut engine = Engine::new();
-    ///
-    /// // Register API for the custom type.
-    /// # #[cfg(not(feature = "no_object"))]
-    /// engine.register_type::<TestStruct>();
-    ///
-    /// engine
-    ///     .register_fn("new_ts", TestStruct::new)
-    ///     // Register an indexer.
-    ///     .register_indexer_set_result(TestStruct::set_field);
-    ///
-    /// # #[cfg(not(feature = "no_index"))]
-    /// let result = engine.eval::<TestStruct>("let a = new_ts(); a[2] = 42; a")?;
-    ///
-    /// # #[cfg(not(feature = "no_index"))]
-    /// assert_eq!(result.fields[2], 42);
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
-    #[inline]
-    pub fn register_indexer_set_result<
-        T: Variant + Clone,
-        X: Variant + Clone,
-        V: Variant + Clone,
-    >(
-        &mut self,
-        set_fn: impl Fn(&mut T, X, V) -> RhaiResultOf<()> + SendSync + 'static,
-    ) -> &mut Self {
-        #[cfg(not(feature = "no_index"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Array>() {
-            panic!("Cannot register indexer for arrays.");
-        }
-        #[cfg(not(feature = "no_object"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Map>() {
-            panic!("Cannot register indexer for object maps.");
-        }
-        if TypeId::of::<T>() == TypeId::of::<String>()
-            || TypeId::of::<T>() == TypeId::of::<&str>()
-            || TypeId::of::<T>() == TypeId::of::<crate::ImmutableString>()
-        {
-            panic!("Cannot register indexer for strings.");
-        }
-        if TypeId::of::<T>() == TypeId::of::<crate::INT>() {
-            panic!("Cannot register indexer for integers.");
-        }
-
-        self.register_result_fn(crate::engine::FN_IDX_SET, set_fn)
     }
     /// Short-hand for registering both index getter and setter functions for a custom type with the [`Engine`].
     ///
@@ -917,10 +610,16 @@ impl Engine {
     /// ```
     #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
     #[inline(always)]
-    pub fn register_indexer_get_set<T: Variant + Clone, X: Variant + Clone, V: Variant + Clone>(
+    pub fn register_indexer_get_set<
+        T: Variant + Clone,
+        X: Variant + Clone,
+        V: Variant + Clone,
+        S1,
+        S2,
+    >(
         &mut self,
-        get_fn: impl Fn(&mut T, X) -> V + SendSync + 'static,
-        set_fn: impl Fn(&mut T, X, V) + SendSync + 'static,
+        get_fn: impl RegisterNativeFunction<(Mut<T>, X), V, S1> + SendSync + 'static,
+        set_fn: impl RegisterNativeFunction<(Mut<T>, X, V), (), S2> + SendSync + 'static,
     ) -> &mut Self {
         self.register_indexer_get(get_fn)
             .register_indexer_set(set_fn)

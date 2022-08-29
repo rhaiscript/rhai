@@ -18,7 +18,7 @@ keywords = ["scripting", "scripting-engine", "scripting-language", "embedded"]
 categories = ["no-std", "embedded", "wasm", "parser-implementations"]
 
 [dependencies]
-smallvec = { version = "1.7", default-features = false, features = ["union", "const_new" ] }
+smallvec = { version = "1.7", default-features = false, features = ["union", "const_new", "const_generics"] }
 ahash = { version = "0.8", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 bitflags = { version = "1", default-features = false }

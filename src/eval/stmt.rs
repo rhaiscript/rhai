@@ -641,38 +641,21 @@ impl Engine {
                                     break;
                                 }
 
-                                let index_value = (x as INT).into();
+                                let index_value = Dynamic::from(x as INT);
 
-                                #[cfg(not(feature = "no_closure"))]
-                                {
-                                    let index_var = scope.get_mut_by_index(counter_index);
-                                    if index_var.is_shared() {
-                                        *index_var.write_lock().expect("`Dynamic`") = index_value;
-                                    } else {
-                                        *index_var = index_value;
-                                    }
-                                }
-                                #[cfg(feature = "no_closure")]
-                                {
-                                    *scope.get_mut_by_index(counter_index) = index_value;
-                                }
+                                *scope.get_mut_by_index(counter_index).write_lock().unwrap() =
+                                    index_value;
                             }
 
-                            let value = iter_value.flatten();
-
-                            #[cfg(not(feature = "no_closure"))]
-                            {
-                                let loop_var = scope.get_mut_by_index(index);
-                                if loop_var.is_shared() {
-                                    *loop_var.write_lock().expect("`Dynamic`") = value;
-                                } else {
-                                    *loop_var = value;
+                            let value = match iter_value {
+                                Ok(v) => v.flatten(),
+                                Err(err) => {
+                                    loop_result = Err(err.fill_position(expr.position()));
+                                    break;
                                 }
-                            }
-                            #[cfg(feature = "no_closure")]
-                            {
-                                *scope.get_mut_by_index(index) = value;
-                            }
+                            };
+
+                            *scope.get_mut_by_index(index).write_lock().unwrap() = value;
 
                             #[cfg(not(feature = "unchecked"))]
                             if let Err(err) = self

@@ -163,6 +163,11 @@ mod string_functions {
             string.chars().count() as INT
         }
     }
+    /// Return true if the string is empty.
+    #[rhai_fn(name = "is_empty", get = "is_empty")]
+    pub fn is_empty(string: &str) -> bool {
+        string.len() == 0
+    }
     /// Return the length of the string, in number of bytes used to store it in UTF-8 encoding.
     ///
     /// # Example

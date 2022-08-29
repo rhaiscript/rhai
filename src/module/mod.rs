@@ -20,6 +20,9 @@ use std::{
     ops::{Add, AddAssign},
 };
 
+#[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
+use crate::func::register::Mut;
+
 /// A type representing the namespace of a function.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "metadata", derive(serde::Serialize))]
@@ -585,10 +588,10 @@ impl Module {
     ///
     /// assert_eq!(module.get_custom_type(name), Some("MyType"));
     /// ```
-    #[inline(always)]
+    #[inline]
     #[must_use]
     pub fn get_custom_type(&self, key: &str) -> Option<&str> {
-        self.custom_types.get(key)
+        self.custom_types.get(key).map(|t| t.display_name.as_str())
     }
 
     /// Returns `true` if this [`Module`] contains no items.
@@ -1242,18 +1245,14 @@ impl Module {
     /// assert!(module.contains_fn(hash));
     /// ```
     #[inline(always)]
-    pub fn set_raw_fn<T, F>(
+    pub fn set_raw_fn<T: Variant + Clone>(
         &mut self,
         name: impl AsRef<str>,
         namespace: FnNamespace,
         access: FnAccess,
         arg_types: impl AsRef<[TypeId]>,
-        func: F,
-    ) -> u64
-    where
-        T: Variant + Clone,
-        F: Fn(NativeCallContext, &mut FnCallArgs) -> RhaiResultOf<T> + SendSync + 'static,
-    {
+        func: impl Fn(NativeCallContext, &mut FnCallArgs) -> RhaiResultOf<T> + SendSync + 'static,
+    ) -> u64 {
         let f =
             move |ctx: NativeCallContext, args: &mut FnCallArgs| func(ctx, args).map(Dynamic::from);
 
@@ -1290,11 +1289,14 @@ impl Module {
     /// assert!(module.contains_fn(hash));
     /// ```
     #[inline(always)]
-    pub fn set_native_fn<ARGS, N, T, F>(&mut self, name: N, func: F) -> u64
+    pub fn set_native_fn<A, T, F, S>(
+        &mut self,
+        name: impl AsRef<str> + Into<Identifier>,
+        func: F,
+    ) -> u64
     where
-        N: AsRef<str> + Into<Identifier>,
         T: Variant + Clone,
-        F: RegisterNativeFunction<ARGS, RhaiResultOf<T>>,
+        F: RegisterNativeFunction<A, T, RhaiResultOf<S>>,
     {
         self.set_fn(
             name,
@@ -1326,14 +1328,11 @@ impl Module {
     /// ```
     #[cfg(not(feature = "no_object"))]
     #[inline(always)]
-    pub fn set_getter_fn<ARGS, A, T, F>(&mut self, name: impl AsRef<str>, func: F) -> u64
+    pub fn set_getter_fn<A, T, F, S>(&mut self, name: impl AsRef<str>, func: F) -> u64
     where
         A: Variant + Clone,
         T: Variant + Clone,
-        F: RegisterNativeFunction<ARGS, RhaiResultOf<T>>
-            + Fn(&mut A) -> RhaiResultOf<T>
-            + SendSync
-            + 'static,
+        F: RegisterNativeFunction<(Mut<A>,), T, RhaiResultOf<S>> + SendSync + 'static,
     {
         self.set_fn(
             crate::engine::make_getter(name.as_ref()).as_str(),
@@ -1370,14 +1369,11 @@ impl Module {
     /// ```
     #[cfg(not(feature = "no_object"))]
     #[inline(always)]
-    pub fn set_setter_fn<ARGS, A, B, F>(&mut self, name: impl AsRef<str>, func: F) -> u64
+    pub fn set_setter_fn<A, T, F, S>(&mut self, name: impl AsRef<str>, func: F) -> u64
     where
         A: Variant + Clone,
-        B: Variant + Clone,
-        F: RegisterNativeFunction<ARGS, RhaiResultOf<()>>
-            + Fn(&mut A, B) -> RhaiResultOf<()>
-            + SendSync
-            + 'static,
+        T: Variant + Clone,
+        F: RegisterNativeFunction<(Mut<A>, T), (), RhaiResultOf<S>> + SendSync + 'static,
     {
         self.set_fn(
             crate::engine::make_setter(name.as_ref()).as_str(),
@@ -1386,6 +1382,48 @@ impl Module {
             None,
             &F::param_types(),
             func.into_callable_function(),
+        )
+    }
+
+    /// Set a pair of Rust getter and setter functions into the [`Module`], returning both non-zero hash keys.
+    /// This is a short-hand for [`set_getter_fn`][Module::set_getter_fn] and [`set_setter_fn`][Module::set_setter_fn].
+    ///
+    /// These function are automatically exposed to the global namespace.
+    ///
+    /// If there are similar existing Rust functions, they are replaced.
+    ///
+    /// # Function Metadata
+    ///
+    /// No metadata for the function is registered.
+    /// Use [`update_fn_metadata`][Module::update_fn_metadata] to add metadata.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rhai::{Module, ImmutableString};
+    ///
+    /// let mut module = Module::new();
+    /// let (hash_get, hash_set) = module.set_getter_setter_fn("value",
+    ///                                 |x: &mut i64| { Ok(x.to_string().into()) },
+    ///                                 |x: &mut i64, y: ImmutableString| {
+    ///                                     *x = y.len() as i64;
+    ///                                     Ok(())
+    ///                                 }
+    /// );
+    /// assert!(module.contains_fn(hash_get));
+    /// assert!(module.contains_fn(hash_set));
+    /// ```
+    #[cfg(not(feature = "no_object"))]
+    #[inline(always)]
+    pub fn set_getter_setter_fn<A: Variant + Clone, T: Variant + Clone, S1, S2>(
+        &mut self,
+        name: impl AsRef<str>,
+        getter: impl RegisterNativeFunction<(Mut<A>,), T, RhaiResultOf<S1>> + SendSync + 'static,
+        setter: impl RegisterNativeFunction<(Mut<A>, T), (), RhaiResultOf<S2>> + SendSync + 'static,
+    ) -> (u64, u64) {
+        (
+            self.set_getter_fn(name.as_ref(), getter),
+            self.set_setter_fn(name.as_ref(), setter),
         )
     }
 
@@ -1418,15 +1456,12 @@ impl Module {
     /// ```
     #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
     #[inline]
-    pub fn set_indexer_get_fn<ARGS, A, B, T, F>(&mut self, func: F) -> u64
+    pub fn set_indexer_get_fn<A, B, T, F, S>(&mut self, func: F) -> u64
     where
         A: Variant + Clone,
         B: Variant + Clone,
         T: Variant + Clone,
-        F: RegisterNativeFunction<ARGS, RhaiResultOf<T>>
-            + Fn(&mut A, B) -> RhaiResultOf<T>
-            + SendSync
-            + 'static,
+        F: RegisterNativeFunction<(Mut<A>, B), T, RhaiResultOf<S>> + SendSync + 'static,
     {
         #[cfg(not(feature = "no_index"))]
         if TypeId::of::<A>() == TypeId::of::<crate::Array>() {
@@ -1482,15 +1517,12 @@ impl Module {
     /// ```
     #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
     #[inline]
-    pub fn set_indexer_set_fn<ARGS, A, B, C, F>(&mut self, func: F) -> u64
+    pub fn set_indexer_set_fn<A, B, T, F, S>(&mut self, func: F) -> u64
     where
         A: Variant + Clone,
         B: Variant + Clone,
-        C: Variant + Clone,
-        F: RegisterNativeFunction<ARGS, RhaiResultOf<()>>
-            + Fn(&mut A, B, C) -> RhaiResultOf<()>
-            + SendSync
-            + 'static,
+        T: Variant + Clone,
+        F: RegisterNativeFunction<(Mut<A>, B, T), (), RhaiResultOf<S>> + SendSync + 'static,
     {
         #[cfg(not(feature = "no_index"))]
         if TypeId::of::<A>() == TypeId::of::<crate::Array>() {
@@ -1517,9 +1549,11 @@ impl Module {
         )
     }
 
-    /// Set a pair of Rust index getter and setter functions, returning both non-zero hash keys.
+    /// Set a pair of Rust index getter and setter functions into the [`Module`], returning both non-zero hash keys.
     /// This is a short-hand for [`set_indexer_get_fn`][Module::set_indexer_get_fn] and
     /// [`set_indexer_set_fn`][Module::set_indexer_set_fn].
+    ///
+    /// These functions are automatically exposed to the global namespace.
     ///
     /// If there are similar existing Rust functions, they are replaced.
     ///
@@ -1552,16 +1586,17 @@ impl Module {
     /// ```
     #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
     #[inline(always)]
-    pub fn set_indexer_get_set_fn<A, B, T>(
-        &mut self,
-        get_fn: impl Fn(&mut A, B) -> RhaiResultOf<T> + SendSync + 'static,
-        set_fn: impl Fn(&mut A, B, T) -> RhaiResultOf<()> + SendSync + 'static,
-    ) -> (u64, u64)
-    where
+    pub fn set_indexer_get_set_fn<
         A: Variant + Clone,
         B: Variant + Clone,
         T: Variant + Clone,
-    {
+        S1,
+        S2,
+    >(
+        &mut self,
+        get_fn: impl RegisterNativeFunction<(Mut<A>, B), T, RhaiResultOf<S1>> + SendSync + 'static,
+        set_fn: impl RegisterNativeFunction<(Mut<A>, B, T), (), RhaiResultOf<S2>> + SendSync + 'static,
+    ) -> (u64, u64) {
         (
             self.set_indexer_get_fn(get_fn),
             self.set_indexer_set_fn(set_fn),
@@ -1925,9 +1960,6 @@ impl Module {
     /// The entire [`AST`][crate::AST] is encapsulated into each function, allowing functions to
     /// cross-call each other.
     ///
-    /// Functions in the global namespace, plus all functions defined in the [`Module`], are
-    /// _merged_ into a _unified_ namespace. Therefore, all functions will be found.
-    ///
     /// # Example
     ///
     /// ```
@@ -1957,9 +1989,6 @@ impl Module {
     ///
     /// The entire [`AST`][crate::AST] is encapsulated into each function, allowing functions to
     /// cross-call each other.
-    ///
-    /// Functions in the global namespace, plus all functions defined in the [`Module`], are
-    /// _merged_ into a _unified_ namespace. Therefore, all functions will be found.
     ///
     /// # WARNING - Low Level API
     ///
@@ -2016,7 +2045,7 @@ impl Module {
             if let Some(fn_ptr) = value.downcast_ref::<crate::FnPtr>() {
                 if ast.iter_fn_def().any(|f| f.name == fn_ptr.fn_name()) {
                     return Err(crate::ERR::ErrorMismatchDataType(
-                        "".to_string(),
+                        String::new(),
                         if fn_ptr.is_anonymous() {
                             format!("cannot export closure in variable {_name}")
                         } else {
@@ -2051,6 +2080,12 @@ impl Module {
         // Non-private functions defined become module functions
         #[cfg(not(feature = "no_function"))]
         {
+            let environ = Shared::new(crate::ast::EncapsulatedEnviron {
+                lib: ast.shared_lib().clone(),
+                imports: imports.into_boxed_slice(),
+                constants,
+            });
+
             ast.shared_lib()
                 .iter_fn()
                 .filter(|&f| match f.metadata.access {
@@ -2067,11 +2102,7 @@ impl Module {
                         .clone();
 
                     // Encapsulate AST environment
-                    func.environ = Some(crate::ast::EncapsulatedEnviron {
-                        lib: ast.shared_lib().clone(),
-                        imports: imports.clone().into_boxed_slice(),
-                        constants: constants.clone(),
-                    });
+                    func.environ = Some(environ.clone());
 
                     module.set_script_fn(func);
                 });
@@ -2217,30 +2248,24 @@ impl Module {
     }
 
     /// Set a type iterator into the [`Module`].
-    #[cfg(not(feature = "sync"))]
-    #[inline]
-    pub fn set_iter(
-        &mut self,
-        type_id: TypeId,
-        func: impl Fn(Dynamic) -> Box<dyn Iterator<Item = Dynamic>> + 'static,
-    ) -> &mut Self {
-        let func = Shared::new(func);
-        if self.indexed {
-            self.all_type_iterators.insert(type_id, func.clone());
-            self.contains_indexed_global_functions = true;
-        }
-        self.type_iterators.insert(type_id, func);
-        self
-    }
-
-    /// Set a type iterator into the [`Module`].
-    #[cfg(feature = "sync")]
-    #[inline]
+    #[inline(always)]
     pub fn set_iter(
         &mut self,
         type_id: TypeId,
         func: impl Fn(Dynamic) -> Box<dyn Iterator<Item = Dynamic>> + SendSync + 'static,
     ) -> &mut Self {
+        self.set_iter_result(type_id, move |x| {
+            Box::new(func(x).map(Ok)) as Box<dyn Iterator<Item = RhaiResultOf<Dynamic>>>
+        })
+    }
+
+    /// Set a fallible type iterator into the [`Module`].
+    #[inline]
+    pub fn set_iter_result(
+        &mut self,
+        type_id: TypeId,
+        func: impl Fn(Dynamic) -> Box<dyn Iterator<Item = RhaiResultOf<Dynamic>>> + SendSync + 'static,
+    ) -> &mut Self {
         let func = Shared::new(func);
         if self.indexed {
             self.all_type_iterators.insert(type_id, func.clone());
@@ -2251,7 +2276,7 @@ impl Module {
     }
 
     /// Set a type iterator into the [`Module`].
-    #[inline]
+    #[inline(always)]
     pub fn set_iterable<T>(&mut self) -> &mut Self
     where
         T: Variant + Clone + IntoIterator,
@@ -2262,8 +2287,20 @@ impl Module {
         })
     }
 
+    /// Set a fallible type iterator into the [`Module`].
+    #[inline(always)]
+    pub fn set_iterable_result<T, X>(&mut self) -> &mut Self
+    where
+        T: Variant + Clone + IntoIterator<Item = RhaiResultOf<X>>,
+        X: Variant + Clone,
+    {
+        self.set_iter_result(TypeId::of::<T>(), |obj: Dynamic| {
+            Box::new(obj.cast::<T>().into_iter().map(|v| v.map(Dynamic::from)))
+        })
+    }
+
     /// Set an iterator type into the [`Module`] as a type iterator.
-    #[inline]
+    #[inline(always)]
     pub fn set_iterator<T>(&mut self) -> &mut Self
     where
         T: Variant + Clone + Iterator,
@@ -2271,6 +2308,18 @@ impl Module {
     {
         self.set_iter(TypeId::of::<T>(), |obj: Dynamic| {
             Box::new(obj.cast::<T>().map(Dynamic::from))
+        })
+    }
+
+    /// Set a iterator type into the [`Module`] as a fallible type iterator.
+    #[inline(always)]
+    pub fn set_iterator_result<T, X>(&mut self) -> &mut Self
+    where
+        T: Variant + Clone + Iterator<Item = RhaiResultOf<X>>,
+        X: Variant + Clone,
+    {
+        self.set_iter_result(TypeId::of::<T>(), |obj: Dynamic| {
+            Box::new(obj.cast::<T>().map(|v| v.map(Dynamic::from)))
         })
     }
 

@@ -291,6 +291,8 @@ struct ParseSettings {
     in_closure: bool,
     /// Is the construct being parsed located inside a breakable loop?
     is_breakable: bool,
+    /// Allow statements in blocks?
+    allow_statements: bool,
     /// Language options in effect (overrides Engine options).
     options: LangOptions,
     /// Current expression nesting level.
@@ -1193,12 +1195,21 @@ impl Engine {
                 }
             };
 
-            let stmt = self.parse_stmt(input, state, lib, settings.level_up())?;
-            let need_comma = !stmt.is_self_terminated();
+            let (action_expr, need_comma) = if settings.allow_statements {
+                let stmt = self.parse_stmt(input, state, lib, settings.level_up())?;
+                let need_comma = !stmt.is_self_terminated();
+
+                let stmt_block: StmtBlock = stmt.into();
+                (Expr::Stmt(stmt_block.into()), need_comma)
+            } else {
+                (
+                    self.parse_expr(input, state, lib, settings.level_up())?,
+                    true,
+                )
+            };
             let has_condition = !matches!(condition, Expr::BoolConstant(true, ..));
 
-            let stmt_block: StmtBlock = stmt.into();
-            expressions.push((condition, Expr::Stmt(stmt_block.into())).into());
+            expressions.push((condition, action_expr).into());
             let index = expressions.len() - 1;
 
             if case_expr_list.is_empty() {
@@ -2047,12 +2058,12 @@ impl Engine {
                                 Ok(Stmt::Assignment((op_info, (lhs, rhs).into()).into()))
                             }
                             // expr[???] = rhs, expr.??? = rhs
-                            ref expr => Err(PERR::AssignmentToInvalidLHS("".to_string())
+                            ref expr => Err(PERR::AssignmentToInvalidLHS(String::new())
                                 .into_err(expr.position())),
                         }
                     }
                     Some(err_pos) => {
-                        Err(PERR::AssignmentToInvalidLHS("".to_string()).into_err(err_pos))
+                        Err(PERR::AssignmentToInvalidLHS(String::new()).into_err(err_pos))
                     }
                 }
             }
@@ -2063,7 +2074,7 @@ impl Engine {
             )
             .into_err(op_pos)),
             // expr = rhs
-            _ => Err(PERR::AssignmentToInvalidLHS("".to_string()).into_err(lhs.position())),
+            _ => Err(PERR::AssignmentToInvalidLHS(String::new()).into_err(lhs.position())),
         }
     }
 
@@ -3072,6 +3083,22 @@ impl Engine {
 
         let mut statements = StaticVec::new_const();
 
+        if !settings.allow_statements {
+            let stmt = self.parse_expr_stmt(input, state, lib, settings.level_up())?;
+            statements.push(stmt);
+
+            // Must end with }
+            return match input.next().expect(NEVER_ENDS) {
+                (Token::RightBrace, pos) => Ok((statements, settings.pos, pos).into()),
+                (Token::LexError(err), pos) => Err(err.into_err(pos)),
+                (.., pos) => Err(PERR::MissingToken(
+                    Token::LeftBrace.into(),
+                    "to start a statement block".into(),
+                )
+                .into_err(pos)),
+            };
+        }
+
         let prev_entry_stack_len = state.block_stack_len;
         state.block_stack_len = state.stack.len();
 
@@ -3286,6 +3313,7 @@ impl Engine {
                             #[cfg(not(feature = "no_closure"))]
                             in_closure: false,
                             is_breakable: false,
+                            allow_statements: true,
                             level: 0,
                             options,
                             pos,
@@ -3661,8 +3689,9 @@ impl Engine {
                     (Token::Pipe, ..) => break,
                     (Token::Identifier(s), pos) => {
                         if params_list.iter().any(|p| p.as_str() == &*s) {
-                            return Err(PERR::FnDuplicatedParam("".to_string(), s.to_string())
-                                .into_err(pos));
+                            return Err(
+                                PERR::FnDuplicatedParam(String::new(), s.to_string()).into_err(pos)
+                            );
                         }
                         let s = state.get_interned_string(s);
                         state.stack.push(s.clone(), ());
@@ -3756,7 +3785,7 @@ impl Engine {
         let mut functions = BTreeMap::new();
 
         let mut options = self.options;
-        options.remove(LangOptions::IF_EXPR | LangOptions::SWITCH_EXPR | LangOptions::STMT_EXPR);
+        options.remove(LangOptions::STMT_EXPR);
         #[cfg(not(feature = "no_function"))]
         options.remove(LangOptions::ANON_FN);
 
@@ -3768,6 +3797,7 @@ impl Engine {
             #[cfg(not(feature = "no_closure"))]
             in_closure: false,
             is_breakable: false,
+            allow_statements: false,
             level: 0,
             options,
             pos: Position::NONE,
@@ -3823,6 +3853,7 @@ impl Engine {
                 #[cfg(not(feature = "no_closure"))]
                 in_closure: false,
                 is_breakable: false,
+                allow_statements: true,
                 options: self.options,
                 level: 0,
                 pos: Position::NONE,

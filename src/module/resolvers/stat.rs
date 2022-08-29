@@ -54,8 +54,14 @@ impl StaticModuleResolver {
     /// Add a [module][Module] keyed by its path.
     #[inline]
     pub fn insert(&mut self, path: impl Into<Identifier>, mut module: Module) {
+        let path = path.into();
+
+        if module.id().is_none() {
+            module.set_id(path.clone());
+        }
+
         module.build_index();
-        self.0.insert(path.into(), module.into());
+        self.0.insert(path, module.into());
     }
     /// Remove a [module][Module] given its path.
     #[inline(always)]

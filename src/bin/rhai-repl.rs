@@ -15,12 +15,12 @@ fn print_error(input: &str, mut err: EvalAltResult) {
 
     let line_no = if lines.len() > 1 {
         if pos.is_none() {
-            "".to_string()
+            String::new()
         } else {
             format!("{}: ", pos.line().unwrap())
         }
     } else {
-        "".to_string()
+        String::new()
     };
 
     // Print error position

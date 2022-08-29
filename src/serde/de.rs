@@ -515,41 +515,31 @@ impl<'a: 'de, 'de, ITER: Iterator<Item = &'a Dynamic>> serde::de::SeqAccess<'de>
 
 /// `MapAccess` implementation for maps.
 #[cfg(not(feature = "no_object"))]
-struct IterateMap<'a, KEYS, VALUES>
-where
-    KEYS: Iterator<Item = &'a str>,
-    VALUES: Iterator<Item = &'a Dynamic>,
-{
+struct IterateMap<'a, K: Iterator<Item = &'a str>, V: Iterator<Item = &'a Dynamic>> {
     // Iterator for a stream of [`Dynamic`][crate::Dynamic] keys.
-    keys: KEYS,
+    keys: K,
     // Iterator for a stream of [`Dynamic`][crate::Dynamic] values.
-    values: VALUES,
+    values: V,
 }
 
 #[cfg(not(feature = "no_object"))]
-impl<'a, KEYS, VALUES> IterateMap<'a, KEYS, VALUES>
-where
-    KEYS: Iterator<Item = &'a str>,
-    VALUES: Iterator<Item = &'a Dynamic>,
-{
+impl<'a, K: Iterator<Item = &'a str>, V: Iterator<Item = &'a Dynamic>> IterateMap<'a, K, V> {
     #[must_use]
-    pub fn new(keys: KEYS, values: VALUES) -> Self {
+    pub fn new(keys: K, values: V) -> Self {
         Self { keys, values }
     }
 }
 
 #[cfg(not(feature = "no_object"))]
-impl<'a: 'de, 'de, KEYS, VALUES> serde::de::MapAccess<'de> for IterateMap<'a, KEYS, VALUES>
-where
-    KEYS: Iterator<Item = &'a str>,
-    VALUES: Iterator<Item = &'a Dynamic>,
+impl<'a: 'de, 'de, K: Iterator<Item = &'a str>, V: Iterator<Item = &'a Dynamic>>
+    serde::de::MapAccess<'de> for IterateMap<'a, K, V>
 {
     type Error = RhaiError;
 
-    fn next_key_seed<K: serde::de::DeserializeSeed<'de>>(
+    fn next_key_seed<S: serde::de::DeserializeSeed<'de>>(
         &mut self,
-        seed: K,
-    ) -> RhaiResultOf<Option<K::Value>> {
+        seed: S,
+    ) -> RhaiResultOf<Option<S::Value>> {
         // Deserialize each `Identifier` key coming out of the keys iterator.
         match self.keys.next() {
             None => Ok(None),
@@ -559,10 +549,10 @@ where
         }
     }
 
-    fn next_value_seed<V: serde::de::DeserializeSeed<'de>>(
+    fn next_value_seed<S: serde::de::DeserializeSeed<'de>>(
         &mut self,
-        seed: V,
-    ) -> RhaiResultOf<V::Value> {
+        seed: S,
+    ) -> RhaiResultOf<S::Value> {
         // Deserialize each value item coming out of the iterator.
         seed.deserialize(&mut DynamicDeserializer::from_dynamic(
             self.values.next().unwrap(),

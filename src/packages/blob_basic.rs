@@ -140,6 +140,11 @@ pub mod blob_functions {
     pub fn len(blob: &mut Blob) -> INT {
         blob.len() as INT
     }
+    /// Return true if the BLOB is empty.
+    #[rhai_fn(name = "is_empty", get = "is_empty", pure)]
+    pub fn is_empty(blob: &mut Blob) -> bool {
+        blob.len() == 0
+    }
     /// Get the byte value at the `index` position in the BLOB.
     ///
     /// * If `index` < 0, position counts from the end of the BLOB (`-1` is the last element).

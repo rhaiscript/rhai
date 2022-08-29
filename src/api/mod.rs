@@ -70,6 +70,15 @@ pub mod default_limits {
 }
 
 impl Engine {
+    /// The module resolution service used by the [`Engine`].
+    ///
+    /// Not available under `no_module`.
+    #[cfg(not(feature = "no_module"))]
+    #[inline(always)]
+    pub fn module_resolver(&self) -> &dyn crate::ModuleResolver {
+        &*self.module_resolver
+    }
+
     /// Set the module resolution service used by the [`Engine`].
     ///
     /// Not available under `no_module`.

@@ -666,6 +666,11 @@ mod range_functions {
         let _ = range;
         true
     }
+    /// Return true if the range contains no items.
+    #[rhai_fn(get = "is_empty", name = "is_empty", pure)]
+    pub fn is_empty_exclusive(range: &mut ExclusiveRange) -> bool {
+        range.is_empty()
+    }
     /// Return the start of the inclusive range.
     #[rhai_fn(get = "start", name = "start", pure)]
     pub fn start_inclusive(range: &mut InclusiveRange) -> INT {
@@ -687,5 +692,10 @@ mod range_functions {
     pub fn is_exclusive_inclusive(range: &mut InclusiveRange) -> bool {
         let _ = range;
         false
+    }
+    /// Return true if the range contains no items.
+    #[rhai_fn(get = "is_empty", name = "is_empty", pure)]
+    pub fn is_empty_inclusive(range: &mut InclusiveRange) -> bool {
+        range.is_empty()
     }
 }

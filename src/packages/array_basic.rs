@@ -30,6 +30,11 @@ pub mod array_functions {
     pub fn len(array: &mut Array) -> INT {
         array.len() as INT
     }
+    /// Return true if the array is empty.
+    #[rhai_fn(name = "is_empty", get = "is_empty", pure)]
+    pub fn is_empty(array: &mut Array) -> bool {
+        array.len() == 0
+    }
     /// Get a copy of the element at the `index` position in the array.
     ///
     /// * If `index` < 0, position counts from the end of the array (`-1` is the last element).

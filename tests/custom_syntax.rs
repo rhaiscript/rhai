@@ -303,7 +303,7 @@ fn test_custom_syntax_raw() -> Result<(), Box<EvalAltResult>> {
             .compile("hello hey")
             .expect_err("should error")
             .err_type(),
-        ParseErrorType::BadInput(LexError::ImproperSymbol("hey".to_string(), "".to_string()))
+        ParseErrorType::BadInput(LexError::ImproperSymbol("hey".to_string(), String::new()))
     );
 
     Ok(())

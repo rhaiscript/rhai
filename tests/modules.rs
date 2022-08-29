@@ -1,8 +1,8 @@
 #![cfg(not(feature = "no_module"))]
 use rhai::{
     module_resolvers::{DummyModuleResolver, StaticModuleResolver},
-    Dynamic, Engine, EvalAltResult, FnNamespace, ImmutableString, Module, ParseError,
-    ParseErrorType, Scope, INT,
+    Dynamic, Engine, EvalAltResult, FnNamespace, FnPtr, ImmutableString, Module, NativeCallContext,
+    ParseError, ParseErrorType, Scope, Shared, INT,
 };
 
 #[test]
@@ -459,10 +459,10 @@ fn test_module_str() -> Result<(), Box<EvalAltResult>> {
 #[cfg(not(feature = "no_function"))]
 #[test]
 fn test_module_ast_namespace() -> Result<(), Box<EvalAltResult>> {
-    let script = r#"
+    let script = "
         fn foo(x) { x + 1 }
         fn bar(x) { foo(x) }
-    "#;
+    ";
 
     let mut engine = Engine::new();
 
@@ -499,11 +499,11 @@ fn test_module_ast_namespace() -> Result<(), Box<EvalAltResult>> {
 fn test_module_ast_namespace2() -> Result<(), Box<EvalAltResult>> {
     use rhai::{Engine, Module, Scope};
 
-    const MODULE_TEXT: &str = r#"
+    const MODULE_TEXT: &str = "
         fn run_function(function) {
             call(function)
         }
-    "#;
+    ";
 
     const SCRIPT: &str = r#"
         import "test_module" as test;
@@ -523,6 +523,76 @@ fn test_module_ast_namespace2() -> Result<(), Box<EvalAltResult>> {
     engine.set_module_resolver(static_modules);
 
     engine.run(SCRIPT)?;
+
+    Ok(())
+}
+
+#[cfg(not(feature = "no_function"))]
+#[cfg(feature = "internals")]
+#[test]
+fn test_module_context() -> Result<(), Box<EvalAltResult>> {
+    let script = "fn bar() { calc(|x| x + 1) }";
+
+    let mut engine = Engine::new();
+
+    let ast = engine.compile(script)?;
+
+    let module = Module::eval_ast_as_new(Scope::new(), &ast, &engine)?;
+
+    let mut resolver = StaticModuleResolver::new();
+    resolver.insert("testing", module);
+    engine.set_module_resolver(resolver);
+
+    engine.register_fn(
+        "calc",
+        |context: NativeCallContext, fp: FnPtr| -> Result<INT, Box<EvalAltResult>> {
+            // Store fields for later use
+            let engine = context.engine();
+            let fn_name = context.fn_name().to_string();
+            let source = context.source().map(|s| s.to_string());
+            let global = context.global_runtime_state().unwrap().clone();
+            let pos = context.position();
+            let call_level = context.call_level();
+
+            // Store the paths of the stack of call modules up to this point
+            let modules_list: Vec<String> = context
+                .iter_namespaces()
+                .map(|m| m.id().unwrap_or("testing"))
+                .filter(|id| !id.is_empty())
+                .map(|id| id.to_string())
+                .collect();
+
+            // Recreate the 'NativeCallContext' - requires the 'internals' feature
+            let mut libraries = Vec::<Shared<Module>>::new();
+
+            for path in modules_list {
+                // Recreate the stack of call modules by resolving each path with
+                // the module resolver.
+                let module = engine.module_resolver().resolve(engine, None, &path, pos)?;
+
+                libraries.push(module);
+            }
+
+            let lib: Vec<&Module> = libraries.iter().map(|m| m.as_ref()).collect();
+
+            let new_context = NativeCallContext::new_with_all_fields(
+                engine,
+                &fn_name,
+                source.as_ref().map(|s| s.as_str()),
+                &global,
+                &lib,
+                pos,
+                call_level,
+            );
+
+            fp.call_within_context(&new_context, (41 as INT,))
+        },
+    );
+
+    assert_eq!(
+        engine.eval::<INT>(r#"import "testing" as t; t::bar()"#)?,
+        42
+    );
 
     Ok(())
 }
@@ -598,7 +668,7 @@ fn test_module_dynamic() -> Result<(), Box<EvalAltResult>> {
     let mut static_modules = rhai::module_resolvers::StaticModuleResolver::new();
     static_modules.insert("test", module);
     engine.set_module_resolver(static_modules);
-    engine.register_result_fn("test2", test_fn);
+    engine.register_fn("test2", test_fn);
 
     assert_eq!(engine.eval::<INT>(r#"test2("test", 38);"#)?, 42);
 

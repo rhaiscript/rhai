@@ -36,7 +36,7 @@ pub struct ScriptFnDef {
     /// Encapsulated AST environment, if any.
     #[cfg(not(feature = "no_module"))]
     #[cfg(not(feature = "no_function"))]
-    pub environ: Option<EncapsulatedEnviron>,
+    pub environ: Option<crate::Shared<EncapsulatedEnviron>>,
     /// Function name.
     pub name: ImmutableString,
     /// Function access mode.

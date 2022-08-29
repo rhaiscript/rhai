@@ -227,7 +227,7 @@ impl<'a> NativeCallContext<'a> {
     #[cfg(not(feature = "no_module"))]
     #[inline]
     pub fn iter_imports(&self) -> impl Iterator<Item = (&str, &Module)> {
-        self.global.iter().flat_map(|&m| m.iter_imports())
+        self.global.iter().flat_map(|&g| g.iter_imports())
     }
     /// Get an iterator over the current set of modules imported via `import` statements in reverse order.
     #[cfg(not(feature = "no_module"))]
@@ -236,7 +236,7 @@ impl<'a> NativeCallContext<'a> {
     pub(crate) fn iter_imports_raw(
         &self,
     ) -> impl Iterator<Item = (&crate::ImmutableString, &Shared<Module>)> {
-        self.global.iter().flat_map(|&m| m.iter_imports_raw())
+        self.global.iter().flat_map(|&g| g.iter_imports_raw())
     }
     /// _(internals)_ The current [`GlobalRuntimeState`], if any.
     /// Exported under the `internals` feature only.
@@ -249,12 +249,12 @@ impl<'a> NativeCallContext<'a> {
         self.global
     }
     /// Get an iterator over the namespaces containing definitions of all script-defined functions
-    /// in reverse order.
+    /// in reverse order (i.e. parent namespaces are iterated after child namespaces).
     #[inline]
     pub fn iter_namespaces(&self) -> impl Iterator<Item = &Module> {
-        self.lib.iter().rev().copied()
+        self.lib.iter().copied()
     }
-    /// _(internals)_ The current set of namespaces containing definitions of all script-defined functions.
+    /// _(internals)_ The current stack of namespaces containing definitions of all script-defined functions.
     /// Exported under the `internals` feature only.
     #[cfg(feature = "internals")]
     #[inline(always)]
@@ -426,10 +426,11 @@ pub type FnBuiltin = fn(NativeCallContext, &mut FnCallArgs) -> RhaiResult;
 
 /// Function that gets an iterator from a type.
 #[cfg(not(feature = "sync"))]
-pub type IteratorFn = dyn Fn(Dynamic) -> Box<dyn Iterator<Item = Dynamic>>;
+pub type IteratorFn = dyn Fn(Dynamic) -> Box<dyn Iterator<Item = RhaiResultOf<Dynamic>>>;
 /// Function that gets an iterator from a type.
 #[cfg(feature = "sync")]
-pub type IteratorFn = dyn Fn(Dynamic) -> Box<dyn Iterator<Item = Dynamic>> + Send + Sync;
+pub type IteratorFn =
+    dyn Fn(Dynamic) -> Box<dyn Iterator<Item = RhaiResultOf<Dynamic>>> + Send + Sync;
 
 #[cfg(not(feature = "sync"))]
 pub type FnPlugin = dyn PluginFunction;

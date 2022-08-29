@@ -25,7 +25,11 @@ mod map_functions {
     pub fn len(map: &mut Map) -> INT {
         map.len() as INT
     }
-
+    /// Return true if the map is empty.
+    #[rhai_fn(pure)]
+    pub fn is_empty(map: &mut Map) -> bool {
+        map.len() == 0
+    }
     /// Get the value of the `property` in the object map and return a copy.
     ///
     /// If `property` does not exist in the object map, `()` is returned.

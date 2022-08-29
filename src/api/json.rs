@@ -72,16 +72,13 @@ impl Engine {
                         Token::LeftBrace => Token::MapStart,
                         // Disallowed syntax
                         t @ (Token::Unit | Token::MapStart) => Token::LexError(
-                            LexError::ImproperSymbol(
-                                t.literal_syntax().to_string(),
-                                "".to_string(),
-                            )
-                            .into(),
+                            LexError::ImproperSymbol(t.literal_syntax().to_string(), String::new())
+                                .into(),
                         ),
                         Token::InterpolatedString(..) => Token::LexError(
                             LexError::ImproperSymbol(
                                 "interpolated string".to_string(),
-                                "".to_string(),
+                                String::new(),
                             )
                             .into(),
                         ),
@@ -93,7 +90,7 @@ impl Engine {
                 Some(&|token, _, _| {
                     match token {
                         Token::Reserved(s) if &*s == "null" => Token::LexError(
-                            LexError::ImproperSymbol("null".to_string(), "".to_string()).into(),
+                            LexError::ImproperSymbol("null".to_string(), String::new()).into(),
                         ),
                         // `{` => `#{`
                         Token::LeftBrace => Token::MapStart,
