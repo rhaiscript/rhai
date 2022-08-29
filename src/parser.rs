@@ -1295,6 +1295,7 @@ impl Engine {
         input: &mut TokenStream,
         state: &mut ParseState,
         lib: &mut FnLib,
+        is_property: bool,
         settings: ParseSettings,
     ) -> ParseResult<Expr> {
         #[cfg(not(feature = "unchecked"))]
@@ -1435,11 +1436,11 @@ impl Engine {
                     |crate::ast::Ident { name, pos }| {
                         let (index, is_func) = state.access_var(name, lib, *pos);
 
-                        if settings.options.contains(LangOptions::STRICT_VAR)
-                            && !settings.in_closure
+                        if !is_func
                             && index.is_none()
+                            && !settings.in_closure
+                            && settings.options.contains(LangOptions::STRICT_VAR)
                             && !state.scope.contains(name)
-                            && !is_func
                         {
                             // If the parent scope is not inside another capturing closure
                             // then we can conclude that the captured variable doesn't exist.
@@ -1572,20 +1573,18 @@ impl Engine {
                             // Once the identifier consumed we must enable next variables capturing
                             state.allow_capture = true;
                         }
-                        Expr::Variable(
-                            (None, ns, 0, state.get_interned_string(s)).into(),
-                            None,
-                            settings.pos,
-                        )
+                        let name = state.get_interned_string(s);
+                        Expr::Variable((None, ns, 0, name).into(), None, settings.pos)
                     }
                     // Normal variable access
                     _ => {
                         let (index, is_func) = state.access_var(&s, lib, settings.pos);
 
-                        if settings.options.contains(LangOptions::STRICT_VAR)
-                            && index.is_none()
-                            && !state.scope.contains(&s)
+                        if !is_property
                             && !is_func
+                            && index.is_none()
+                            && settings.options.contains(LangOptions::STRICT_VAR)
+                            && !state.scope.contains(&s)
                         {
                             return Err(
                                 PERR::VariableUndefined(s.to_string()).into_err(settings.pos)
@@ -1599,11 +1598,8 @@ impl Engine {
                                 None
                             }
                         });
-                        Expr::Variable(
-                            (index, ns, 0, state.get_interned_string(s)).into(),
-                            short_index,
-                            settings.pos,
-                        )
+                        let name = state.get_interned_string(s);
+                        Expr::Variable((index, ns, 0, name).into(), short_index, settings.pos)
                     }
                 }
             }
@@ -1790,7 +1786,7 @@ impl Engine {
                         (.., pos) => return Err(PERR::PropertyExpected.into_err(*pos)),
                     }
 
-                    let rhs = self.parse_primary(input, state, lib, settings.level_up())?;
+                    let rhs = self.parse_primary(input, state, lib, true, settings.level_up())?;
                     let op_flags = match op {
                         Token::Period => ASTFlags::NONE,
                         Token::Elvis => ASTFlags::NEGATED,
@@ -1960,7 +1956,7 @@ impl Engine {
             // <EOF>
             Token::EOF => Err(PERR::UnexpectedEOF.into_err(settings.pos)),
             // All other tokens
-            _ => self.parse_primary(input, state, lib, settings.level_up()),
+            _ => self.parse_primary(input, state, lib, false, settings.level_up()),
         }
     }
 
