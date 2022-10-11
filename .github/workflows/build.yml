@@ -116,6 +116,7 @@ jobs:
     strategy:
       matrix:
         flags:
+          - "--features js"
           - "--no-default-features --features wasm-bindgen"
           - "--no-default-features --features wasm-bindgen,wasm-std"
           - "--no-default-features --features wasm-std"

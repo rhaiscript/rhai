@@ -34,6 +34,7 @@ serde_json = { version = "1.0", default-features = false, features = ["alloc"], 
 unicode-xid = { version = "0.2", default-features = false, optional = true }
 rust_decimal = { version = "1.16", default-features = false, features = ["maths"], optional = true }
 rustyline = { version = "10", optional = true }
+getrandom = { version = "0.2", features = ["js"], optional=true }
 
 [dev-dependencies]
 serde_bytes = "0.11"
@@ -44,6 +45,8 @@ default = ["std"]
 # ideally, we could make cargo choose between std and wasm-std based on the target
 std = ["ahash/std", "ahash/runtime-rng", "num-traits/std", "smartstring/std"]
 wasm-std = ["ahash/std", "ahash/compile-time-rng", "num-traits/std", "smartstring/std"]
+# wasm builds for the browser can use 'js' feature along with defaults (std not wasm-std)
+js = ["getrandom/js", "ahash/runtime-rng"]
 unchecked = []                  # unchecked arithmetic
 sync = []                       # restrict to only types that implement Send + Sync
 no_position = []                # do not track position in the parser
