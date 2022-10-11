@@ -42,6 +42,7 @@ serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 [features]
 default = ["std", "ahash/runtime-rng"]  # ahash/runtime-rng trumps ahash/compile-time-rng
 std = ["ahash/std", "num-traits/std", "smartstring/std"]
+no_time = []                    # remove all time-related imports
 unchecked = []                  # unchecked arithmetic
 sync = []                       # restrict to only types that implement Send + Sync
 no_position = []                # do not track position in the parser
@@ -64,7 +65,7 @@ debugging = ["internals"]       # enable debugging
 serde = ["dep:serde", "smartstring/serde", "smallvec/serde"] # implement serde for rhai types
 
 # compiling for no-std
-no_std = ["no-std-compat", "num-traits/libm", "core-error", "libm", "hashbrown"]
+no_std = ["no_time", "no-std-compat", "num-traits/libm", "core-error", "libm", "hashbrown"]
 
 # compiling for WASM
 wasm-bindgen = ["instant/wasm-bindgen"]

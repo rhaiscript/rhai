@@ -26,7 +26,7 @@ def_package! {
             #[cfg(not(feature = "no_index"))] BasicArrayPackage,
             #[cfg(not(feature = "no_index"))] BasicBlobPackage,
             #[cfg(not(feature = "no_object"))] BasicMapPackage,
-            #[cfg(not(feature = "no_std"))] BasicTimePackage,
+            #[cfg(not(feature = "no_time"))] BasicTimePackage,
             MoreStringPackage
     {
         lib.standard = true;

@@ -38,7 +38,7 @@ pub use pkg_core::CorePackage;
 pub use pkg_std::StandardPackage;
 pub use string_basic::BasicStringPackage;
 pub use string_more::MoreStringPackage;
-#[cfg(not(feature = "no_std"))]
+#[cfg(not(feature = "no_time"))]
 pub use time_basic::BasicTimePackage;
 
 /// Trait that all packages must implement.

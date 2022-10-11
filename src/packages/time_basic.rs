@@ -1,4 +1,4 @@
-#![cfg(not(feature = "no_std"))]
+#![cfg(not(feature = "no_time"))]
 
 use super::arithmetic::make_err as make_arithmetic_err;
 use crate::plugin::*;
