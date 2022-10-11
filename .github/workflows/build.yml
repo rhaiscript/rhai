@@ -42,32 +42,32 @@ jobs:
         os: [ubuntu-latest]
         flags:
           - ""
-          - "--features debugging"
-          - "--features metadata,serde,internals"
-          - "--features unchecked,serde,metadata,internals,debugging"
-          - "--features sync,serde,metadata,internals,debugging"
-          - "--features no_position,serde,metadata,internals,debugging"
-          - "--features no_optimize,serde,metadata,internals,debugging"
-          - "--features no_float,serde,metadata,internals,debugging"
-          - "--features f32_float,serde,metadata,internals,debugging"
-          - "--features decimal,serde,metadata,internals,debugging"
-          - "--features no_custom_syntax,serde,metadata,internals,debugging"
-          - "--features no_float,decimal"
-          - "--tests --features only_i32,serde,metadata,internals,debugging"
-          - "--features only_i64,serde,metadata,internals,debugging"
-          - "--features no_index,serde,metadata,internals,debugging"
-          - "--features no_object,serde,metadata,internals,debugging"
-          - "--features no_function,serde,metadata,internals,debugging"
-          - "--features no_module,serde,metadata,internals,debugging"
-          - "--features no_closure,serde,metadata,internals,debugging"
-          - "--features unicode-xid-ident,serde,metadata,internals,debugging"
-          - "--features sync,no_function,no_float,no_position,no_optimize,no_module,no_closure,no_custom_syntax,metadata,serde,unchecked,debugging"
-          - "--features no_function,no_float,no_position,no_index,no_object,no_optimize,no_module,no_closure,no_custom_syntax,unchecked"
+#          - "--features debugging"
+#          - "--features metadata,serde,internals"
+#          - "--features unchecked,serde,metadata,internals,debugging"
+#          - "--features sync,serde,metadata,internals,debugging"
+#          - "--features no_position,serde,metadata,internals,debugging"
+#          - "--features no_optimize,serde,metadata,internals,debugging"
+#          - "--features no_float,serde,metadata,internals,debugging"
+#          - "--features f32_float,serde,metadata,internals,debugging"
+#          - "--features decimal,serde,metadata,internals,debugging"
+#          - "--features no_custom_syntax,serde,metadata,internals,debugging"
+#          - "--features no_float,decimal"
+#          - "--tests --features only_i32,serde,metadata,internals,debugging"
+#          - "--features only_i64,serde,metadata,internals,debugging"
+#          - "--features no_index,serde,metadata,internals,debugging"
+#          - "--features no_object,serde,metadata,internals,debugging"
+#          - "--features no_function,serde,metadata,internals,debugging"
+#          - "--features no_module,serde,metadata,internals,debugging"
+#          - "--features no_closure,serde,metadata,internals,debugging"
+#          - "--features unicode-xid-ident,serde,metadata,internals,debugging"
+#          - "--features sync,no_function,no_float,no_position,no_optimize,no_module,no_closure,no_custom_syntax,metadata,serde,unchecked,debugging"
+#          - "--features no_function,no_float,no_position,no_index,no_object,no_optimize,no_module,no_closure,no_custom_syntax,unchecked"
         toolchain: [stable]
         experimental: [false]
         include:
           # smoketests for different toolchains
-          - {toolchain: stable, os: windows-latest, experimental: false, flags: ""}
+#          - {toolchain: stable, os: windows-latest, experimental: false, flags: ""}
           - {toolchain: stable, os: macos-latest, experimental: false, flags: ""}
           # data structure size changes - wait for beta to become stable and uncomment
           #- {toolchain: beta, os: ubuntu-latest, experimental: false, flags: ""}
@@ -86,30 +86,30 @@ jobs:
       with:
         command: test
         args: ${{matrix.flags}}
-  # no-std builds are a bit more extensive to test
-  no_std_build:
-    name: NoStdBuild
-    runs-on: ${{matrix.os}}
-    continue-on-error: ${{matrix.experimental}}
-    strategy:
-      matrix:
-        include:
-          - {os: ubuntu-latest, flags: "--profile unix", experimental: false}
-          - {os: windows-latest, flags: "--profile windows", experimental: true}
-          - {os: macos-latest, flags: "--profile macos", experimental: false}
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v2
-    - name: Setup Toolchain
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
-        override: true
-    - name: Build Project
-      uses: actions-rs/cargo@v1
-      with:
-        command: build
-        args: --manifest-path=no_std/no_std_test/Cargo.toml ${{matrix.flags}}
+#  # no-std builds are a bit more extensive to test
+#  no_std_build:
+#    name: NoStdBuild
+#    runs-on: ${{matrix.os}}
+#    continue-on-error: ${{matrix.experimental}}
+#    strategy:
+#      matrix:
+#        include:
+#          - {os: ubuntu-latest, flags: "--profile unix", experimental: false}
+#          - {os: windows-latest, flags: "--profile windows", experimental: true}
+#          - {os: macos-latest, flags: "--profile macos", experimental: false}
+#    steps:
+#    - name: Checkout
+#      uses: actions/checkout@v2
+#    - name: Setup Toolchain
+#      uses: actions-rs/toolchain@v1
+#      with:
+#        toolchain: nightly
+#        override: true
+#    - name: Build Project
+#      uses: actions-rs/cargo@v1
+#      with:
+#        command: build
+#        args: --manifest-path=no_std/no_std_test/Cargo.toml ${{matrix.flags}}
   wasm:
     name: Check Wasm build
     runs-on: ubuntu-latest
@@ -136,48 +136,48 @@ jobs:
           command: build
           args: --target wasm32-unknown-unknown ${{matrix.flags}}
 
-  rustfmt:
-    name: Check Formatting
-    runs-on: windows-latest
-    continue-on-error: true
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v2
-    - name: Setup Toolchain
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
-        override: true
-        components: rustfmt, clippy
-    - name: Run Rustfmt
-      uses: actions-rs/cargo@v1
-      with:
-        command: fmt
-        args: --all -- --check
-    - name: Run Clippy
-      uses: actions-rs/cargo@v1
-      with:
-        command: clippy
-        args: --all -- -Aclippy::all -Dclippy::perf
-  codegen_build:
-    name: Codegen Build
-    runs-on: ${{matrix.os}}
-    continue-on-error: ${{matrix.experimental}}
-    strategy:
-      matrix:
-        include:
-          - {toolchain: nightly, os: ubuntu-latest, experimental: false, flags: "--features metadata"}
-          - {toolchain: nightly, os: windows-latest, experimental: false, flags: "--features metadata"}
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v2
-    - name: Setup Toolchain
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: ${{matrix.toolchain}}
-        override: true
-    - name: Build Project
-      uses: actions-rs/cargo@v1
-      with:
-        command: test
-        args: --manifest-path=codegen/Cargo.toml ${{matrix.flags}}
+#  rustfmt:
+#    name: Check Formatting
+#    runs-on: windows-latest
+#    continue-on-error: true
+#    steps:
+#    - name: Checkout
+#      uses: actions/checkout@v2
+#    - name: Setup Toolchain
+#      uses: actions-rs/toolchain@v1
+#      with:
+#        toolchain: nightly
+#        override: true
+#        components: rustfmt, clippy
+#    - name: Run Rustfmt
+#      uses: actions-rs/cargo@v1
+#      with:
+#        command: fmt
+#        args: --all -- --check
+#    - name: Run Clippy
+#      uses: actions-rs/cargo@v1
+#      with:
+#        command: clippy
+#        args: --all -- -Aclippy::all -Dclippy::perf
+#  codegen_build:
+#    name: Codegen Build
+#    runs-on: ${{matrix.os}}
+#    continue-on-error: ${{matrix.experimental}}
+#    strategy:
+#      matrix:
+#        include:
+#          - {toolchain: nightly, os: ubuntu-latest, experimental: false, flags: "--features metadata"}
+#          - {toolchain: nightly, os: windows-latest, experimental: false, flags: "--features metadata"}
+#    steps:
+#    - name: Checkout
+#      uses: actions/checkout@v2
+#    - name: Setup Toolchain
+#      uses: actions-rs/toolchain@v1
+#      with:
+#        toolchain: ${{matrix.toolchain}}
+#        override: true
+#    - name: Build Project
+#      uses: actions-rs/cargo@v1
+#      with:
+#        command: test
+#        args: --manifest-path=codegen/Cargo.toml ${{matrix.flags}}
