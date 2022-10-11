@@ -41,7 +41,9 @@ serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 
 [features]
 default = ["std"]
+# ideally, we could make cargo choose between std and wasm-std based on the target
 std = ["ahash/std", "ahash/runtime-rng", "num-traits/std", "smartstring/std"]
+wasm-std = ["ahash/std", "ahash/compile-time-rng", "num-traits/std", "smartstring/std"]
 unchecked = []                  # unchecked arithmetic
 sync = []                       # restrict to only types that implement Send + Sync
 no_position = []                # do not track position in the parser

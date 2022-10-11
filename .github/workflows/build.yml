@@ -116,10 +116,9 @@ jobs:
     strategy:
       matrix:
         flags:
-          - ""
-          - "--no-default-features"
-          - "--features wasm-bindgen"
           - "--no-default-features --features wasm-bindgen"
+          - "--no-default-features --features wasm-bindgen,wasm-std"
+          - "--no-default-features --features wasm-std"
       fail-fast: false
     steps:
       - name: Checkout
