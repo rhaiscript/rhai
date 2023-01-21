@@ -9,6 +9,7 @@ pub fn main() {
 pub fn main() {
     use rhai::{CallFnOptions, Dynamic, Engine, Scope, AST};
     use std::io::{stdin, stdout, Write};
+    use std::path::Path;
 
     const SCRIPT_FILE: &str = "event_handler_main/script.rhai";
 
@@ -69,7 +70,7 @@ pub fn main() {
     // Compile the handler script.
     println!("> Loading script file: {path}");
 
-    let ast = match engine.compile_file_with_scope(&mut scope, path.into()) {
+    let ast = match engine.compile_file_with_scope(&mut scope, &Path::new(path)) {
         Ok(ast) => ast,
         Err(err) => {
             eprintln!("! Error: {}", err);

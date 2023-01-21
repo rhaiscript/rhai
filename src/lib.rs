@@ -26,6 +26,7 @@
 //!
 //! ```no_run
 //! use rhai::{Engine, EvalAltResult};
+//! use std::path::Path;
 //!
 //! fn main() -> Result<(), Box<EvalAltResult>>
 //! {
@@ -44,7 +45,7 @@
 //! #   #[cfg(not(target_family = "wasm"))]
 //! #   
 //!     // Evaluate the script, expecting a 'bool' result
-//!     let result: bool = engine.eval_file("my_script.rhai".into())?;
+//!     let result: bool = engine.eval_file(Path::new("my_script.rhai"))?;
 //!
 //!     assert_eq!(result, true);
 //!

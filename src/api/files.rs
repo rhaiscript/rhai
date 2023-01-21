@@ -9,7 +9,7 @@ use std::prelude::v1::*;
 use std::{
     fs::File,
     io::Read,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 impl Engine {
@@ -57,8 +57,7 @@ impl Engine {
     /// let engine = Engine::new();
     ///
     /// // Compile a script file to an AST and store it for later evaluation.
-    /// // Notice that a PathBuf is required which can easily be constructed from a string.
-    /// let ast = engine.compile_file("script.rhai".into())?;
+    /// let ast = engine.compile_file("script.rhai")?;
     ///
     /// for _ in 0..42 {
     ///     engine.eval_ast::<i64>(&ast)?;
@@ -67,7 +66,7 @@ impl Engine {
     /// # }
     /// ```
     #[inline(always)]
-    pub fn compile_file(&self, path: PathBuf) -> RhaiResultOf<AST> {
+    pub fn compile_file(&self, path: impl AsRef<Path>) -> RhaiResultOf<AST> {
         self.compile_file_with_scope(&Scope::new(), path)
     }
     /// Compile a script file into an [`AST`] using own scope, which can be used later for evaluation.
@@ -96,8 +95,7 @@ impl Engine {
     /// scope.push_constant("x", 42_i64);   // 'x' is a constant
     ///
     /// // Compile a script to an AST and store it for later evaluation.
-    /// // Notice that a PathBuf is required which can easily be constructed from a string.
-    /// let ast = engine.compile_file_with_scope(&mut scope, "script.rhai".into())?;
+    /// let ast = engine.compile_file_with_scope(&mut scope, "script.rhai")?;
     ///
     /// let result = engine.eval_ast::<i64>(&ast)?;
     /// # }
@@ -105,10 +103,10 @@ impl Engine {
     /// # }
     /// ```
     #[inline]
-    pub fn compile_file_with_scope(&self, scope: &Scope, path: PathBuf) -> RhaiResultOf<AST> {
+    pub fn compile_file_with_scope(&self, scope: &Scope, path: impl AsRef<Path>) -> RhaiResultOf<AST> {
         Self::read_file(&path).and_then(|contents| {
             let mut ast = self.compile_with_scope(scope, contents)?;
-            ast.set_source(path.to_string_lossy().as_ref());
+            ast.set_source(path.as_ref().to_string_lossy().as_ref());
             Ok(ast)
         })
     }
@@ -125,12 +123,12 @@ impl Engine {
     /// let engine = Engine::new();
     ///
     /// // Notice that a PathBuf is required which can easily be constructed from a string.
-    /// let result = engine.eval_file::<i64>("script.rhai".into())?;
+    /// let result = engine.eval_file::<i64>("script.rhai")?;
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    pub fn eval_file<T: Variant + Clone>(&self, path: PathBuf) -> RhaiResultOf<T> {
+    pub fn eval_file<T: Variant + Clone>(&self, path: impl AsRef<Path>) -> RhaiResultOf<T> {
         Self::read_file(path).and_then(|contents| self.eval::<T>(&contents))
     }
     /// Evaluate a script file with own scope, returning the result value or an error.
@@ -157,7 +155,7 @@ impl Engine {
     /// scope.push("x", 42_i64);
     ///
     /// // Notice that a PathBuf is required which can easily be constructed from a string.
-    /// let result = engine.eval_file_with_scope::<i64>(&mut scope, "script.rhai".into())?;
+    /// let result = engine.eval_file_with_scope::<i64>(&mut scope, "script.rhai")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -165,7 +163,7 @@ impl Engine {
     pub fn eval_file_with_scope<T: Variant + Clone>(
         &self,
         scope: &mut Scope,
-        path: PathBuf,
+        path: impl AsRef<Path>,
     ) -> RhaiResultOf<T> {
         Self::read_file(path).and_then(|contents| self.eval_with_scope(scope, &contents))
     }
@@ -182,12 +180,12 @@ impl Engine {
     /// let engine = Engine::new();
     ///
     /// // Notice that a PathBuf is required which can easily be constructed from a string.
-    /// engine.run_file("script.rhai".into())?;
+    /// engine.run_file("script.rhai")?;
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    pub fn run_file(&self, path: PathBuf) -> RhaiResultOf<()> {
+    pub fn run_file(&self, path: impl AsRef<Path>) -> RhaiResultOf<()> {
         Self::read_file(path).and_then(|contents| self.run(&contents))
     }
     /// Evaluate a file with own scope.
@@ -213,13 +211,12 @@ impl Engine {
     /// let mut scope = Scope::new();
     /// scope.push("x", 42_i64);
     ///
-    /// // Notice that a PathBuf is required which can easily be constructed from a string.
-    /// engine.run_file_with_scope(&mut scope, "script.rhai".into())?;
+    /// engine.run_file_with_scope(&mut scope, "script.rhai")?;
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    pub fn run_file_with_scope(&self, scope: &mut Scope, path: PathBuf) -> RhaiResultOf<()> {
+    pub fn run_file_with_scope(&self, scope: &mut Scope, path: impl AsRef<Path>) -> RhaiResultOf<()> {
         Self::read_file(path).and_then(|contents| self.run_with_scope(scope, &contents))
     }
 }
