@@ -12,6 +12,7 @@ use std::{
     iter::FromIterator,
     ops::{Add, AddAssign, Deref, Sub, SubAssign},
     str::FromStr,
+    path::Path,
 };
 
 /// The system immutable string type.
@@ -140,6 +141,13 @@ impl From<ImmutableString> for SmartString {
     #[inline(always)]
     fn from(mut value: ImmutableString) -> Self {
         std::mem::take(shared_make_mut(&mut value.0))
+    }
+}
+impl From<&Path> for ImmutableString {
+    #[inline(always)]
+    fn from(value: &Path) -> Self {
+        let value: SmartString = value.to_str().expect("UTF-8 encoding is expected").into();
+        Self(value.into())
     }
 }
 
