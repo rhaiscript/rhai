@@ -1,4 +1,4 @@
-//! _(serde)_ Serialization and deserialization support for [`serde`](https://crates.io/crates/serde).
+//! Serialization and deserialization support for [`serde`](https://crates.io/crates/serde).
 //! Exported under the `serde` feature only.
 
 mod de;

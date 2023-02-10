@@ -60,6 +60,7 @@
 //!
 //! See [The Rhai Book](https://rhai.rs/book) for details on the Rhai scripting engine and language.
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(feature = "no_std", no_std)]
 #![deny(missing_docs)]
 // #![warn(clippy::all)]
@@ -112,6 +113,7 @@ mod optimizer;
 pub mod packages;
 mod parser;
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 pub mod serde;
 mod tests;
 mod tokenizer;
@@ -215,6 +217,7 @@ type InclusiveRange = std::ops::RangeInclusive<INT>;
 #[allow(deprecated)]
 pub use api::build_type::{CustomType, TypeBuilder};
 #[cfg(not(feature = "no_custom_syntax"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_custom_syntax"))))]
 pub use api::custom_syntax::Expression;
 #[cfg(not(feature = "no_std"))]
 #[cfg(not(target_family = "wasm"))]
@@ -229,15 +232,17 @@ pub use module::{FnNamespace, Module};
 use restore::RestoreOnDrop;
 pub use rhai_codegen::*;
 #[cfg(not(feature = "no_time"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_time"))))]
 pub use types::Instant;
 pub use types::{
     Dynamic, EvalAltResult, FnPtr, ImmutableString, LexError, ParseError, ParseErrorType, Position,
     Scope,
 };
 
-/// _(debugging)_ Module containing types for debugging.
+/// Module containing types for debugging.
 /// Exported under the `debugging` feature only.
 #[cfg(feature = "debugging")]
+#[cfg_attr(docsrs, doc(cfg(feature = "debugging")))]
 pub mod debugger {
     #[cfg(not(feature = "no_function"))]
     pub use super::eval::CallStackFrame;
@@ -247,6 +252,7 @@ pub mod debugger {
 /// An identifier in Rhai. [`SmartString`](https://crates.io/crates/smartstring) is used because most
 /// identifiers are ASCII and short, fewer than 23 characters, so they can be stored inline.
 #[cfg(not(feature = "internals"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "internals"))))]
 type Identifier = SmartString;
 
 /// An identifier in Rhai. [`SmartString`](https://crates.io/crates/smartstring) is used because most
@@ -264,24 +270,29 @@ pub use func::Locked;
 type SharedModule = Shared<Module>;
 
 #[cfg(not(feature = "no_function"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_function"))))]
 pub use func::Func;
 
 #[cfg(not(feature = "no_function"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_function"))))]
 pub use ast::ScriptFnMetadata;
 
 #[cfg(not(feature = "no_function"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_function"))))]
 pub use api::call_fn::CallFnOptions;
 
 /// Variable-sized array of [`Dynamic`] values.
 ///
 /// Not available under `no_index`.
 #[cfg(not(feature = "no_index"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_index"))))]
 pub type Array = Vec<Dynamic>;
 
 /// Variable-sized array of [`u8`] values (byte array).
 ///
 /// Not available under `no_index`.
 #[cfg(not(feature = "no_index"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_index"))))]
 pub type Blob = Vec<u8>;
 
 /// A dictionary of [`Dynamic`] values with string keys.
@@ -291,16 +302,20 @@ pub type Blob = Vec<u8>;
 /// [`SmartString`](https://crates.io/crates/smartstring) is used as the key type because most
 /// property names are ASCII and short, fewer than 23 characters, so they can be stored inline.
 #[cfg(not(feature = "no_object"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_object"))))]
 pub type Map = std::collections::BTreeMap<Identifier, Dynamic>;
 
 #[cfg(not(feature = "no_object"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_object"))))]
 pub use api::json::format_map_as_json;
 
 #[cfg(not(feature = "no_module"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_module"))))]
 pub use module::ModuleResolver;
 
 /// Module containing all built-in _module resolvers_ available to Rhai.
 #[cfg(not(feature = "no_module"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_module"))))]
 pub use module::resolvers as module_resolvers;
 
 #[cfg(not(feature = "no_optimize"))]
@@ -313,15 +328,21 @@ pub type OptimizationLevel = ();
 // Expose internal data structures.
 
 #[cfg(feature = "internals")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
 pub use types::dynamic::{AccessMode, DynamicReadLock, DynamicWriteLock, Variant};
 
-#[cfg(all(feature = "internals", not(feature = "no_float")))]
+#[cfg(feature = "internals")]
+#[cfg(not(feature = "no_float"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_float"))))]
 pub use types::FloatWrapper;
 
 #[cfg(feature = "internals")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
 pub use types::{Span, StringsInterner};
 
 #[cfg(feature = "internals")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
 pub use tokenizer::{
     get_next_token, is_valid_function_name, is_valid_identifier, parse_string_literal, InputStream,
     MultiInputsStream, Token, TokenIterator, TokenizeState, TokenizerControl,
@@ -329,9 +350,11 @@ pub use tokenizer::{
 };
 
 #[cfg(feature = "internals")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
 pub use parser::ParseState;
 
 #[cfg(feature = "internals")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
 pub use ast::{
     ASTFlags, ASTNode, BinaryExpr, ConditionalExpr, Expr, FlowControl, FnCallExpr, FnCallHashes,
     Ident, OpAssignment, RangeCase, ScriptFnDef, Stmt, StmtBlock, SwitchCasesCollection,
@@ -339,24 +362,33 @@ pub use ast::{
 
 #[cfg(feature = "internals")]
 #[cfg(not(feature = "no_custom_syntax"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_custom_syntax"))))]
 pub use ast::CustomExpr;
 
 #[cfg(feature = "internals")]
 #[cfg(not(feature = "no_module"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_module"))))]
 pub use ast::Namespace;
 
 #[cfg(feature = "internals")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
 pub use func::EncapsulatedEnviron;
 
 #[cfg(feature = "internals")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
 pub use eval::{Caches, FnResolutionCache, FnResolutionCacheEntry, GlobalRuntimeState};
 
 #[cfg(feature = "internals")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
 #[allow(deprecated)]
 pub use func::{locked_read, locked_write, CallableFunction, NativeCallContextStore};
 
 #[cfg(feature = "internals")]
 #[cfg(feature = "metadata")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "metadata")))]
 pub use api::definitions::Definitions;
 
 /// Number of items to keep inline for [`StaticVec`].
@@ -394,6 +426,7 @@ const STATIC_VEC_INLINE_SIZE: usize = 3;
 /// most scripts load fewer than 4 external modules; most module paths contain fewer than 4 levels
 /// (e.g. `std::collections::map::HashMap` is 4 levels and it is just about as long as they get).
 #[cfg(not(feature = "internals"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "internals"))))]
 type StaticVec<T> = smallvec::SmallVec<[T; STATIC_VEC_INLINE_SIZE]>;
 
 /// _(internals)_ Alias to [`smallvec::SmallVec<[T; 3]>`](https://crates.io/crates/smallvec),
@@ -429,10 +462,12 @@ type StaticVec<T> = smallvec::SmallVec<[T; STATIC_VEC_INLINE_SIZE]>;
 /// most scripts load fewer than 4 external modules; most module paths contain fewer than 4 levels
 /// (e.g. `std::collections::map::HashMap` is 4 levels and it is just about as long as they get).
 #[cfg(feature = "internals")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
 pub type StaticVec<T> = smallvec::SmallVec<[T; STATIC_VEC_INLINE_SIZE]>;
 
 /// Number of items to keep inline for [`FnArgsVec`].
 #[cfg(not(feature = "no_closure"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_closure"))))]
 const FN_ARGS_VEC_INLINE_SIZE: usize = 5;
 
 /// Inline arguments storage for function calls.
@@ -448,11 +483,13 @@ const FN_ARGS_VEC_INLINE_SIZE: usize = 5;
 ///
 /// Under `no_closure`, this type aliases to [`StaticVec`][crate::StaticVec] instead.
 #[cfg(not(feature = "no_closure"))]
+#[cfg_attr(docsrs, doc(cfg(not(feature = "no_closure"))))]
 type FnArgsVec<T> = smallvec::SmallVec<[T; FN_ARGS_VEC_INLINE_SIZE]>;
 
 /// Inline arguments storage for function calls.
 /// This type aliases to [`StaticVec`][crate::StaticVec].
 #[cfg(feature = "no_closure")]
+#[cfg_attr(docsrs, doc(cfg(feature = "no_closure")))]
 type FnArgsVec<T> = crate::StaticVec<T>;
 
 type SmartString = smartstring::SmartString<smartstring::LazyCompact>;

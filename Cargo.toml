@@ -147,6 +147,7 @@ instant = { version = "0.1.10" } # WASM implementation of std::time::Instant
 
 [package.metadata.docs.rs]
 features = ["document-features", "metadata", "serde", "internals", "decimal", "debugging"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [patch.crates-io]
 # Notice that a custom modified version of `rustyline` is used which supports bracketed paste on Windows.

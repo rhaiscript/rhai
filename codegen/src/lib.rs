@@ -235,7 +235,7 @@ pub fn exported_module(module_path: proc_macro::TokenStream) -> proc_macro::Toke
 /// Functions and variables in the plugin module overrides any existing similarly-named
 /// functions and variables in the target module.
 ///
-/// This call is intended to be used within the [`def_package!`][crate::def_package] macro to define
+/// This call is intended to be used within the [`def_package!`](https://docs.rs/rhai/1.12.0/rhai/macro.def_package.html) macro to define
 /// a custom package based on a plugin module.
 ///
 /// All sub-modules, if any, in the plugin module are _flattened_ and their functions/variables
