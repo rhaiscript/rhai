@@ -1,21 +1,15 @@
 [package]
 name = "rhai_codegen"
 version = "1.5.0"
-rust-version.workspace = true
-edition.workspace = true
 authors = ["jhwgh1968", "Stephen Chung"]
-description = "Procedural macros support package for Rhai, a scripting language and engine for Rust"
-keywords = [
-    "scripting",
-    "scripting-engine",
-    "scripting-language",
-    "embedded",
-    "plugin",
-]
 categories = ["no-std", "embedded", "wasm", "parser-implementations"]
+edition.workspace = true
 homepage = "https://rhai.rs/book/plugins/index.html"
-repository = "https://github.com/rhaiscript/rhai"
+keywords = ["scripting", "scripting-engine", "scripting-language", "embedded", "plugin"]
 license = "MIT OR Apache-2.0"
+repository.workspace = true
+rust-version.workspace = true
+description = "Procedural macros support package for Rhai, a scripting language and engine for Rust"
 
 [lib]
 proc-macro = true
@@ -25,16 +19,25 @@ default = []
 metadata = []
 
 [dependencies]
-proc-macro2 = "1.0.66"
-syn = { version = "2.0.27", features = [
+proc-macro2 = { version = "1.0.66", default-features = false, features = ["proc-macro"] }
+quote = { version = "1.0.32", default-features = false, features = ["proc-macro"] }
+
+[dependencies.syn]
+version = "2.0.27"
+default-features = false
+features = [
     "full",
     "parsing",
     "printing",
     "proc-macro",
     "extra-traits",
-] }
-quote = "1.0.32"
+    "derive",
+    "parsing",
+    "printing",
+    "clone-impls",
+    "proc-macro"
+]
 
 [dev-dependencies]
 rhai = { workspace = true, features = ["metadata"] }
-trybuild = "1.0.82"
+trybuild = { version = "1.0.82", default-features = false }

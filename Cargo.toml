@@ -1,57 +1,57 @@
-[workspace]
-resolver = "2"
-members = [".", "codegen"]
+[package]
+name = "rhai"
+version = "1.16.0"
+authors = ["Jonathan Turner", "Lukáš Hozda", "Stephen Chung", "jhwgh1968"]
+categories = ["no-std", "embedded", "wasm", "parser-implementations"]
+edition.workspace = true
+homepage = "https://rhai.rs"
+include = ["/src/**/*", "/Cargo.toml", "/README.md", "LICENSE*"]
+keywords = ["scripting", "scripting-engine", "scripting-language", "embedded"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+description = "Embedded scripting for Rust"
 
-[workspace.package]
-rust-version = "1.61.0"
-edition = "2021"
+[package.metadata.docs.rs]
+features = ["document-features", "metadata", "serde", "internals", "decimal", "debugging"]
+
+[workspace]
+members = [".", "codegen"]
+resolver = "2"
 
 [workspace.dependencies]
 rhai = { path = "." }
 rhai_codegen = { path = "codegen" }
 
-[package]
-name = "rhai"
-version = "1.16.0"
-rust-version.workspace = true
-edition.workspace = true
-authors = ["Jonathan Turner", "Lukáš Hozda", "Stephen Chung", "jhwgh1968"]
-description = "Embedded scripting for Rust"
-homepage = "https://rhai.rs"
-repository = "https://github.com/rhaiscript"
-readme = "README.md"
-license = "MIT OR Apache-2.0"
-include = ["/src/**/*", "/Cargo.toml", "/README.md", "LICENSE*"]
-keywords = ["scripting", "scripting-engine", "scripting-language", "embedded"]
-categories = ["no-std", "embedded", "wasm", "parser-implementations"]
+[workspace.package]
+rust-version = "1.61.0"
+edition = "2021"
+repository = "https://github.com/rhaiscript/rhai"
 
 [dependencies]
-smallvec = { version = "1.11.0", default-features = false, features = ["union", "const_new", "const_generics"] }
 ahash = { version = "0.8.3", default-features = false, features = ["compile-time-rng"] }
+bitflags = { version = "2.3.3", default-features = false }
+document-features = { version = "0.2.7", default-features = false, optional = true }
+getrandom = { version = "0.2.10", default-features = false, optional = true }
+libm = { version = "0.2.7", default-features = false, optional = true }
 num-traits = { version = "0.2.16", default-features = false }
 once_cell = { version = "1.18.0", default-features = false, features = ["race"] }
-bitflags = { version = "2.3.3", default-features = false }
-smartstring = { version = "1.0.1", default-features = false }
 rhai_codegen = { workspace = true, default-features = false }
-
-libm = { version = "0.2.7", default-features = false, optional = true }
-hashbrown = { version = "0.14.0", default-features = false, features = [
-    "ahash",
-    "inline-more",
-    "allocator-api2",
-], optional = true }
-core-error = { version = "0.0.1-rc4", default-features = false, features = ["alloc"], optional = true }
-serde = { version = "1.0.176", default-features = false, features = ["derive", "alloc"], optional = true }
-serde_json = { version = "1.0.104", default-features = false, features = ["alloc"], optional = true }
+smartstring = { version = "1.0.1", default-features = false }
 unicode-xid = { version = "0.2.4", default-features = false, optional = true }
-rust_decimal = { version = "1.30.0", default-features = false, features = ["maths"], optional = true }
-getrandom = { version = "0.2.10", default-features = false, optional = true }
-rustyline = { version = "12.0.0", default-features = false, features = [
-    "custom-bindings",
-    "with-dirs",
-    "with-file-history"
-], optional = true }
-document-features = { version = "0.2.7", default-features = false, optional = true }
+
+[dependencies.core-error]
+version = "0.0.1-rc4"
+default-features = false
+features = ["alloc"]
+optional = true
+
+[dependencies.hashbrown]
+version = "0.14.0"
+default-features = false
+features = ["ahash", "inline-more", "allocator-api2"]
+optional = true
 
 [dependencies.no-std-compat]
 version = "0.4.1"
@@ -59,6 +59,35 @@ git = "https://gitlab.com/jD91mZM2/no-std-compat"
 default-features = false
 features = ["alloc"]
 optional = true
+
+[dependencies.rust_decimal]
+version = "1.30.0"
+default-features = false
+features = ["maths"]
+optional = true
+
+[dependencies.rustyline]
+version = "12.0.0"
+default-features = false
+features = ["custom-bindings", "with-dirs", "with-file-history"]
+optional = true
+
+[dependencies.serde]
+version = "1.0.176"
+default-features = false
+features = ["derive", "alloc"]
+optional = true
+
+[dependencies.serde_json]
+version = "1.0.104"
+default-features = false
+features = ["alloc"]
+optional = true
+
+[dependencies.smallvec]
+version = "1.11.0"
+default-features = false
+features = ["union", "const_new", "const_generics"]
 
 [dev-dependencies]
 rmp-serde = { version = "1.1.2", default-features = false }
@@ -171,10 +200,7 @@ codegen-units = 1
 #panic = 'abort'     # remove stack backtrace for no-std
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-instant = { version = "0.1.10" } # WASM implementation of std::time::Instant
-
-[package.metadata.docs.rs]
-features = ["document-features", "metadata", "serde", "internals", "decimal", "debugging"]
+instant = { version = "0.1.12", default-features = false } # WASM implementation of std::time::Instant
 
 [patch.crates-io]
 # Notice that a custom modified version of `rustyline` is used which supports bracketed paste on Windows.
