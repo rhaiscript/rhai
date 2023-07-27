@@ -1,12 +1,20 @@
 [workspace]
+resolver = "2"
 members = [".", "codegen"]
+
+[workspace.package]
+rust-version = "1.61.0"
+edition = "2021"
+
+[workspace.dependencies]
+rhai = { path = "." }
+rhai_codegen = { path = "codegen" }
 
 [package]
 name = "rhai"
 version = "1.16.0"
-rust-version = "1.61.0"
-edition = "2018"
-resolver = "2"
+rust-version.workspace = true
+edition.workspace = true
 authors = ["Jonathan Turner", "Lukáš Hozda", "Stephen Chung", "jhwgh1968"]
 description = "Embedded scripting for Rust"
 homepage = "https://rhai.rs"
@@ -18,34 +26,48 @@ keywords = ["scripting", "scripting-engine", "scripting-language", "embedded"]
 categories = ["no-std", "embedded", "wasm", "parser-implementations"]
 
 [dependencies]
-smallvec = { version = "1.7", default-features = false, features = ["union", "const_new", "const_generics"] }
-ahash = { version = "0.8.2", default-features = false, features = ["compile-time-rng"] }
-num-traits = { version = "0.2", default-features = false }
-once_cell = { version = "1", default-features = false, features = ["race"] }
-bitflags = { version = "2", default-features = false }
-smartstring = { version = "1", default-features = false }
-rhai_codegen = { version = "1.5.0", path = "codegen", default-features = false }
+smallvec = { version = "1.11.0", default-features = false, features = ["union", "const_new", "const_generics"] }
+ahash = { version = "0.8.3", default-features = false, features = ["compile-time-rng"] }
+num-traits = { version = "0.2.16", default-features = false }
+once_cell = { version = "1.18.0", default-features = false, features = ["race"] }
+bitflags = { version = "2.3.3", default-features = false }
+smartstring = { version = "1.0.1", default-features = false }
+rhai_codegen = { workspace = true, default-features = false }
 
-no-std-compat = { git = "https://gitlab.com/jD91mZM2/no-std-compat", version = "0.4.1", default-features = false, features = ["alloc"], optional = true }
-libm = { version = "0.2", default-features = false, optional = true }
-hashbrown = { version = "0.13", optional = true }
-core-error = { version = "0.0", default-features = false, features = ["alloc"], optional = true }
-serde = { version = "1.0", default-features = false, features = ["derive", "alloc"], optional = true }
-serde_json = { version = "1.0", default-features = false, features = ["alloc"], optional = true }
-unicode-xid = { version = "0.2", default-features = false, optional = true }
-rust_decimal = { version = "1.16", default-features = false, features = ["maths"], optional = true }
-getrandom = { version = "0.2", optional = true }
-rustyline = { version = "11", optional = true }
-document-features = { version = "0.2", optional = true }
+libm = { version = "0.2.7", default-features = false, optional = true }
+hashbrown = { version = "0.14.0", default-features = false, features = [
+    "ahash",
+    "inline-more",
+    "allocator-api2",
+], optional = true }
+core-error = { version = "0.0.1-rc4", default-features = false, features = ["alloc"], optional = true }
+serde = { version = "1.0.176", default-features = false, features = ["derive", "alloc"], optional = true }
+serde_json = { version = "1.0.104", default-features = false, features = ["alloc"], optional = true }
+unicode-xid = { version = "0.2.4", default-features = false, optional = true }
+rust_decimal = { version = "1.30.0", default-features = false, features = ["maths"], optional = true }
+getrandom = { version = "0.2.10", default-features = false, optional = true }
+rustyline = { version = "12.0.0", default-features = false, features = [
+    "custom-bindings",
+    "with-dirs",
+    "with-file-history"
+], optional = true }
+document-features = { version = "0.2.7", default-features = false, optional = true }
+
+[dependencies.no-std-compat]
+version = "0.4.1"
+git = "https://gitlab.com/jD91mZM2/no-std-compat"
+default-features = false
+features = ["alloc"]
+optional = true
 
 [dev-dependencies]
-rmp-serde = "1.1"
-serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+rmp-serde = { version = "1.1.2", default-features = false }
+serde_json = { version = "1.0.104", default-features = false, features = ["alloc"] }
 
 [features]
 
 ## Default features: `std`, uses runtime random numbers for hashing.
-default = ["std", "ahash/runtime-rng"]  # ahash/runtime-rng trumps ahash/compile-time-rng
+default = ["std", "ahash/runtime-rng"] # ahash/runtime-rng trumps ahash/compile-time-rng
 ## Standard features: uses compile-time random number for hashing.
 std = ["once_cell/std", "ahash/std", "num-traits/std", "smartstring/std"]
 

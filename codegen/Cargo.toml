@@ -1,11 +1,17 @@
 [package]
 name = "rhai_codegen"
 version = "1.5.0"
-edition = "2018"
-resolver = "2"
+rust-version.workspace = true
+edition.workspace = true
 authors = ["jhwgh1968", "Stephen Chung"]
 description = "Procedural macros support package for Rhai, a scripting language and engine for Rust"
-keywords = ["scripting", "scripting-engine", "scripting-language", "embedded", "plugin"]
+keywords = [
+    "scripting",
+    "scripting-engine",
+    "scripting-language",
+    "embedded",
+    "plugin",
+]
 categories = ["no-std", "embedded", "wasm", "parser-implementations"]
 homepage = "https://rhai.rs/book/plugins/index.html"
 repository = "https://github.com/rhaiscript/rhai"
@@ -19,10 +25,16 @@ default = []
 metadata = []
 
 [dependencies]
-proc-macro2 = "1"
-syn = { version = "1.0", features = ["full", "parsing", "printing", "proc-macro", "extra-traits"] }
-quote = "1"
+proc-macro2 = "1.0.66"
+syn = { version = "2.0.27", features = [
+    "full",
+    "parsing",
+    "printing",
+    "proc-macro",
+    "extra-traits",
+] }
+quote = "1.0.32"
 
 [dev-dependencies]
-rhai = { path = "..", version = "1.12", features = ["metadata"] }
-trybuild = "1"
+rhai = { workspace = true, features = ["metadata"] }
+trybuild = "1.0.82"
