@@ -7,13 +7,29 @@ use std::prelude::v1::*;
 #[derive(Debug, Clone, Hash)]
 pub struct VarDefInfo<'a> {
     /// Name of the variable to be declared.
-    name: &'a str,
+    #[deprecated(
+        since = "1.16.0",
+        note = "VarDefInfo fields will be private in the next major version. Use the methods instead."
+    )]
+    pub name: &'a str,
     /// `true` if the statement is `const`, otherwise it is `let`.
-    is_const: bool,
+    #[deprecated(
+        since = "1.16.0",
+        note = "VarDefInfo fields will be private in the next major version. Use the methods instead."
+    )]
+    pub is_const: bool,
     /// The current nesting level, with zero being the global level.
-    nesting_level: usize,
+    #[deprecated(
+        since = "1.16.0",
+        note = "VarDefInfo fields will be private in the next major version. Use the methods instead."
+    )]
+    pub nesting_level: usize,
     /// Will the variable _shadow_ an existing variable?
-    will_shadow: bool,
+    #[deprecated(
+        since = "1.16.0",
+        note = "VarDefInfo fields will be private in the next major version. Use the methods instead."
+    )]
+    pub will_shadow: bool,
 }
 
 impl<'a> VarDefInfo<'a> {
