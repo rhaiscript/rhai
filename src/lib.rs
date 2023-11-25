@@ -314,7 +314,7 @@ pub type Blob = Vec<u8>;
 /// property names are ASCII and short, fewer than 23 characters, so they can be stored inline.
 #[cfg(not(feature = "no_object"))]
 #[cfg(feature = "indexmap")]
-pub type Map = std::collections::BTreeMap<Identifier, Dynamic>;
+pub type Map = indexmap::IndexMap<Identifier, Dynamic>;
 
 /// A dictionary of [`Dynamic`] values with string keys.
 ///

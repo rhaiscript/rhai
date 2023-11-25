@@ -476,11 +476,24 @@ impl Expr {
             }
 
             #[cfg(not(feature = "no_object"))]
+            #[cfg(not(feature = "indexmap"))]
             Self::Map(x, ..) if self.is_constant() => {
                 let mut map = x.1.clone();
 
                 for (k, v) in &x.0 {
                     *map.get_mut(k.as_str()).unwrap() = v.get_literal_value().unwrap();
+                }
+
+                Dynamic::from_map(map)
+            }
+
+            #[cfg(not(feature = "no_object"))]
+            #[cfg(feature = "indexmap")]
+            Self::Map(x, ..) if self.is_constant() => {
+                let mut map = crate::Map::with_capacity(x.0.len());
+
+                for (k, v) in &x.0 {
+                    map.insert(k.as_str().into(), v.get_literal_value().unwrap());
                 }
 
                 Dynamic::from_map(map)

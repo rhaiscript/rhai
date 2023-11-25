@@ -386,6 +386,14 @@ impl Dynamic {
     }
 }
 
+fn hash_indexmap<H: Hasher>(m: &Box<crate::Map>, state: &mut H) {
+    let mut m = m.iter().collect::<Vec<_>>();
+    m.sort_unstable_by_key(|x| x.0);
+    for kv in m.into_iter() {
+        kv.hash(state);
+    }
+}
+
 impl Hash for Dynamic {
     /// Hash the [`Dynamic`] value.
     ///
@@ -410,7 +418,11 @@ impl Hash for Dynamic {
             #[cfg(not(feature = "no_index"))]
             Union::Blob(ref a, ..) => a.hash(state),
             #[cfg(not(feature = "no_object"))]
+            #[cfg(not(feature = "indexmap"))]
             Union::Map(ref m, ..) => m.hash(state),
+            #[cfg(not(feature = "no_object"))]
+            #[cfg(feature = "indexmap")]
+            Union::Map(ref m, ..) => hash_indexmap(m, state),
             Union::FnPtr(ref f, ..) => f.hash(state),
 
             #[cfg(not(feature = "no_closure"))]
@@ -2204,6 +2216,23 @@ impl<K: Into<crate::Identifier>, T: Variant + Clone> From<std::collections::BTre
 {
     #[inline]
     fn from(value: std::collections::BTreeMap<K, T>) -> Self {
+        Self(Union::Map(
+            Box::new(
+                value
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), Self::from(v)))
+                    .collect(),
+            ),
+            DEFAULT_TAG_VALUE,
+            ReadWrite,
+        ))
+    }
+}
+#[cfg(not(feature = "no_object"))]
+#[cfg(feature = "indexmap")]
+impl<K: Into<crate::Identifier>, T: Variant + Clone> From<indexmap::IndexMap<K, T>> for Dynamic {
+    #[inline]
+    fn from(value: indexmap::IndexMap<K, T>) -> Self {
         Self(Union::Map(
             Box::new(
                 value
