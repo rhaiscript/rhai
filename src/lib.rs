@@ -454,6 +454,11 @@ type StaticVec<T> = smallvec::SmallVec<[T; STATIC_VEC_INLINE_SIZE]>;
 #[cfg(feature = "internals")]
 pub type StaticVec<T> = smallvec::SmallVec<[T; STATIC_VEC_INLINE_SIZE]>;
 
+/// _(internals)_ Alias to [`thin_vec::ThinVec<T>`](https://crates.io/crates/thin_vec).
+/// Exported under the `internals` feature only.
+#[cfg(feature = "internals")]
+pub type ThinVec<T> = thin_vec::ThinVec<T>;
+
 /// Number of items to keep inline for [`FnArgsVec`].
 #[cfg(not(feature = "no_closure"))]
 const FN_ARGS_VEC_INLINE_SIZE: usize = 5;

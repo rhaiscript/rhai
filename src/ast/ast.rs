@@ -1,7 +1,7 @@
 //! Module defining the AST (abstract syntax tree).
 
 use super::{ASTFlags, Expr, FnAccess, Stmt};
-use crate::{Dynamic, FnNamespace, ImmutableString, Position};
+use crate::{Dynamic, FnNamespace, ImmutableString, Position, ThinVec};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{
@@ -11,7 +11,6 @@ use std::{
     ops::{Add, AddAssign},
     ptr,
 };
-use thin_vec::ThinVec;
 
 /// Compiled AST (abstract syntax tree) of a Rhai script.
 ///

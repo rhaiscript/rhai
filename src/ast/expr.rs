@@ -6,7 +6,7 @@ use crate::tokenizer::Token;
 use crate::types::dynamic::Union;
 use crate::{
     calc_fn_hash, Dynamic, FnArgsVec, FnPtr, Identifier, ImmutableString, Position, SmartString,
-    StaticVec, INT,
+    StaticVec, ThinVec, INT,
 };
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -19,7 +19,6 @@ use std::{
     mem,
     num::{NonZeroU8, NonZeroUsize},
 };
-use thin_vec::ThinVec;
 
 /// _(internals)_ A binary expression.
 /// Exported under the `internals` feature only.
