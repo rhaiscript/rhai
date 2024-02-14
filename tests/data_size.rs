@@ -1,11 +1,11 @@
 #![cfg(not(feature = "unchecked"))]
-use spo_rhai::{Engine, EvalAltResult, ParseErrorType, INT};
+use rhai::{Engine, EvalAltResult, ParseErrorType, INT};
 
 #[cfg(not(feature = "no_index"))]
-use spo_rhai::Array;
+use rhai::Array;
 
 #[cfg(not(feature = "no_object"))]
-use spo_rhai::Map;
+use rhai::Map;
 
 #[test]
 fn test_max_string_size() {

@@ -3,7 +3,7 @@
 ///! Test evaluating expressions
 extern crate test;
 
-use spo_rhai::{Array, Engine, Map, INT};
+use rhai::{Array, Engine, Map, INT};
 use test::Bencher;
 
 #[bench]
@@ -18,7 +18,7 @@ fn bench_engine_new_raw(bench: &mut Bencher) {
 
 #[bench]
 fn bench_engine_new_raw_core(bench: &mut Bencher) {
-    use spo_rhai::packages::*;
+    use rhai::packages::*;
     let package = CorePackage::new();
 
     bench.iter(|| {

@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_object"))]
-use spo_rhai::{Engine, EvalAltResult, Map, ParseErrorType, Scope, INT};
+use rhai::{Engine, EvalAltResult, Map, ParseErrorType, Scope, INT};
 
 #[test]
 fn test_map_indexing() {

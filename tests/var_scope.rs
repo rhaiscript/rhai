@@ -1,4 +1,4 @@
-use spo_rhai::{Dynamic, Engine, EvalAltResult, Module, ParseErrorType, Position, Scope, INT};
+use rhai::{Dynamic, Engine, EvalAltResult, Module, ParseErrorType, Position, Scope, INT};
 
 #[test]
 fn test_var_scope() {

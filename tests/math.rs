@@ -1,7 +1,7 @@
-use spo_rhai::{Engine, EvalAltResult, INT};
+use rhai::{Engine, EvalAltResult, INT};
 
 #[cfg(not(feature = "no_float"))]
-use spo_rhai::FLOAT;
+use rhai::FLOAT;
 
 #[test]
 fn test_math() {

@@ -1,4 +1,4 @@
-use spo_rhai::{Engine, ParseErrorType, INT};
+use rhai::{Engine, ParseErrorType, INT};
 
 #[test]
 fn test_loop() {

@@ -1,4 +1,4 @@
-use spo_rhai::{Engine, LexError, ParseErrorType, Scope, INT};
+use rhai::{Engine, LexError, ParseErrorType, Scope, INT};
 
 #[test]
 fn test_eval() {

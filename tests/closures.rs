@@ -1,12 +1,12 @@
 #![cfg(not(feature = "no_function"))]
-use spo_rhai::{Dynamic, Engine, EvalAltResult, FnPtr, ParseErrorType, Scope, INT};
+use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, ParseErrorType, Scope, INT};
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::mem::take;
 use std::rc::Rc;
 
 #[cfg(not(feature = "no_object"))]
-use spo_rhai::Map;
+use rhai::Map;
 
 #[test]
 fn test_fn_ptr_curry_call() {

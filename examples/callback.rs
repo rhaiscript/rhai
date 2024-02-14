@@ -1,6 +1,6 @@
 //! This example stores a Rhai closure for later use as a callback.
 
-use spo_rhai::{Engine, EvalAltResult, FnPtr};
+use rhai::{Engine, EvalAltResult, FnPtr};
 
 // To call a Rhai closure at a later time, you'd need three things:
 // 1) an `Engine` (with all needed functions registered),

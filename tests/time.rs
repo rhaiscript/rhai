@@ -1,9 +1,9 @@
 #![cfg(not(feature = "no_time"))]
-use spo_rhai::Engine;
+use rhai::Engine;
 #[cfg(not(feature = "no_float"))]
-use spo_rhai::FLOAT;
+use rhai::FLOAT;
 #[cfg(feature = "no_float")]
-use spo_rhai::INT;
+use rhai::INT;
 
 #[test]
 fn test_timestamp() {

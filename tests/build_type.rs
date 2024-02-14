@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_object"))]
-use spo_rhai::{CustomType, Engine, EvalAltResult, Position, TypeBuilder, INT};
+use rhai::{CustomType, Engine, EvalAltResult, Position, TypeBuilder, INT};
 
 #[test]
 fn test_build_type() {

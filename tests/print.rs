@@ -1,4 +1,4 @@
-use spo_rhai::{Engine, Scope, INT};
+use rhai::{Engine, Scope, INT};
 use std::sync::{Arc, RwLock};
 
 #[cfg(not(feature = "only_i32"))]

@@ -1,6 +1,6 @@
 //! A simple example that evaluates an expression and prints the result.
 
-use spo_rhai::{Engine, EvalAltResult};
+use rhai::{Engine, EvalAltResult};
 
 fn main() -> Result<(), Box<EvalAltResult>> {
     let engine = Engine::new();

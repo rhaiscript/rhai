@@ -3,7 +3,7 @@
 ///! Test evaluating expressions
 extern crate test;
 
-use spo_rhai::{Engine, OptimizationLevel, Scope, INT};
+use rhai::{Engine, OptimizationLevel, Scope, INT};
 use test::Bencher;
 
 #[derive(Debug, Clone)]

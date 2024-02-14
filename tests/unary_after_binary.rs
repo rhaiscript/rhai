@@ -1,4 +1,4 @@
-use spo_rhai::{Engine, INT};
+use rhai::{Engine, INT};
 
 #[test]
 // TODO also add test case for unary after compound

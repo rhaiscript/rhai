@@ -1,4 +1,4 @@
-use spo_rhai::{Engine, INT};
+use rhai::{Engine, INT};
 
 #[test]
 fn test_if() {

@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_object"))]
-use spo_rhai::{Engine, EvalAltResult, INT};
+use rhai::{Engine, EvalAltResult, INT};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct TestStruct {
@@ -38,7 +38,7 @@ fn test_method_call_style() {
 fn test_method_call_with_full_optimization() {
     let mut engine = Engine::new();
 
-    engine.set_optimization_level(spo_rhai::OptimizationLevel::Full);
+    engine.set_optimization_level(rhai::OptimizationLevel::Full);
 
     engine
         .register_fn("new_ts", TestStruct::new)

@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_function"))]
-use spo_rhai::{Dynamic, Engine, EvalAltResult, FnNamespace, FuncRegistration, Module, NativeCallContext, ParseErrorType, Shared, INT};
+use rhai::{Dynamic, Engine, EvalAltResult, FnNamespace, FuncRegistration, Module, NativeCallContext, ParseErrorType, Shared, INT};
 
 #[test]
 fn test_functions() {
@@ -135,7 +135,7 @@ fn test_functions_global_module() {
             if matches!(&*err, EvalAltResult::ErrorVariableNotFound(v, ..) if v == "global::ANSWER")
     ));
 
-    engine.register_fn("do_stuff", |context: NativeCallContext, callback: spo_rhai::FnPtr| -> Result<INT, _> { callback.call_within_context(&context, ()) });
+    engine.register_fn("do_stuff", |context: NativeCallContext, callback: rhai::FnPtr| -> Result<INT, _> { callback.call_within_context(&context, ()) });
 
     #[cfg(not(feature = "no_closure"))]
     assert!(matches!(*engine.run(

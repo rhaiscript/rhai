@@ -7,7 +7,7 @@ pub fn main() {
 
 #[cfg(not(feature = "no_function"))]
 pub fn main() {
-    use spo_rhai::{CallFnOptions, Dynamic, Engine, Scope, AST};
+    use rhai::{CallFnOptions, Dynamic, Engine, Scope, AST};
     use std::io::{stdin, stdout, Write};
 
     const SCRIPT_FILE: &str = "event_handler_main/script.rhai";

@@ -1,4 +1,4 @@
-use spo_rhai::{Engine, Scope, INT};
+use rhai::{Engine, Scope, INT};
 
 #[test]
 fn test_expressions() {

@@ -1,5 +1,5 @@
 #![cfg(not(feature = "unchecked"))]
-use spo_rhai::{Dynamic, Engine, EvalAltResult, ParseErrorType, INT};
+use rhai::{Dynamic, Engine, EvalAltResult, ParseErrorType, INT};
 
 #[test]
 #[cfg(not(feature = "no_function"))]

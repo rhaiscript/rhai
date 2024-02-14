@@ -1,7 +1,7 @@
 #![cfg(not(feature = "no_index"))]
 #![cfg(not(feature = "no_module"))]
-use spo_rhai::plugin::*;
-use spo_rhai::{Engine, Module, INT};
+use rhai::plugin::*;
+use rhai::{Engine, Module, INT};
 
 pub fn add_generic<T: std::ops::Add<Output = T>>(x: T, y: T) -> T {
     x + y
@@ -16,7 +16,7 @@ macro_rules! generate_ops {
         pub mod $op_name {
             $(
                 pub mod $type_names {
-                    use spo_rhai::plugin::*;
+                    use rhai::plugin::*;
                     use super::super::$op_fn;
                     #[export_fn]
                     pub fn op(x: $type_names, y: $type_names) -> $type_names {

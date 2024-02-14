@@ -1,7 +1,7 @@
-use spo_rhai::{Engine, INT};
+use rhai::{Engine, INT};
 
 #[cfg(not(feature = "no_float"))]
-use spo_rhai::FLOAT;
+use rhai::FLOAT;
 
 #[cfg(not(feature = "no_float"))]
 const EPSILON: FLOAT = FLOAT::EPSILON;

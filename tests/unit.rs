@@ -1,4 +1,4 @@
-use spo_rhai::Engine;
+use rhai::Engine;
 
 #[test]
 fn test_unit() {

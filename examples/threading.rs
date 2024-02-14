@@ -1,7 +1,7 @@
 //! An advanced example showing how to communicate with an `Engine` running in a separate thread via
 //! an MPSC channel.
 
-use spo_rhai::Engine;
+use rhai::Engine;
 
 #[cfg(feature = "sync")]
 use std::sync::Mutex;

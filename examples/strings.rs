@@ -1,7 +1,7 @@
 //! An example that registers a variety of functions that operate on strings.
 //! Remember to use `ImmutableString` or `&str` instead of `String` as parameters.
 
-use spo_rhai::{Engine, EvalAltResult, ImmutableString, Scope};
+use rhai::{Engine, EvalAltResult, ImmutableString, Scope};
 use std::io::{stdin, stdout, Write};
 
 /// Trim whitespace from a string. The original string argument is changed.

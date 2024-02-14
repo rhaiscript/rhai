@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_object"))]
-use spo_rhai::{Engine, EvalAltResult, NativeCallContext, Scope, INT};
+use rhai::{Engine, EvalAltResult, NativeCallContext, Scope, INT};
 
 #[test]
 fn test_get_set() {
@@ -239,7 +239,7 @@ fn test_get_set_indexer() {
     engine
         .register_type_with_name::<MyMap>("MyMap")
         .register_fn("new_map", MyMap::new)
-        .register_indexer_get(|map: &mut MyMap, index: &str| -> Result<_, Box<EvalAltResult>> { map.get(index).cloned().ok_or_else(|| EvalAltResult::ErrorIndexNotFound(index.into(), spo_rhai::Position::NONE).into()) })
+        .register_indexer_get(|map: &mut MyMap, index: &str| -> Result<_, Box<EvalAltResult>> { map.get(index).cloned().ok_or_else(|| EvalAltResult::ErrorIndexNotFound(index.into(), rhai::Position::NONE).into()) })
         .register_indexer_set(|map: &mut MyMap, index: &str, value: INT| {
             map.insert(index.to_string(), value);
         });

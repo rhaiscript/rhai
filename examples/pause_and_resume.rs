@@ -5,7 +5,7 @@ fn main() {
     panic!("This example does not run under 'unchecked'.");
 }
 
-use spo_rhai::{Dynamic, Engine};
+use rhai::{Dynamic, Engine};
 
 #[cfg(feature = "sync")]
 use std::sync::Mutex;

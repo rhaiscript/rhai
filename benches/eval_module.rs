@@ -3,7 +3,7 @@
 ///! Test evaluating with scope
 extern crate test;
 
-use spo_rhai::{Engine, Module, OptimizationLevel, Scope};
+use rhai::{Engine, Module, OptimizationLevel, Scope};
 use test::Bencher;
 
 #[bench]

@@ -1,6 +1,6 @@
 //! An example that evaluates two pieces of code in separate runs, but using a common `Scope`.
 
-use spo_rhai::{Engine, EvalAltResult, Scope};
+use rhai::{Engine, EvalAltResult, Scope};
 
 fn main() -> Result<(), Box<EvalAltResult>> {
     let engine = Engine::new();

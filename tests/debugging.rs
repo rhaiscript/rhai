@@ -1,11 +1,11 @@
 #![cfg(feature = "debugging")]
-use spo_rhai::{Engine, INT};
+use rhai::{Engine, INT};
 
 #[cfg(not(feature = "no_index"))]
-use spo_rhai::Array;
+use rhai::Array;
 
 #[cfg(not(feature = "no_object"))]
-use spo_rhai::Map;
+use rhai::Map;
 
 #[test]
 fn test_debugging() {

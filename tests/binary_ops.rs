@@ -1,4 +1,4 @@
-use spo_rhai::{Engine, INT};
+use rhai::{Engine, INT};
 
 #[test]
 fn test_binary_ops() {
@@ -39,7 +39,7 @@ fn test_binary_ops() {
 
     #[cfg(not(feature = "no_float"))]
     {
-        use spo_rhai::FLOAT;
+        use rhai::FLOAT;
 
         assert_eq!(engine.eval::<FLOAT>("10.0 + 4.0").unwrap(), 14.0);
         assert_eq!(engine.eval::<FLOAT>("10.0 - 4.0").unwrap(), 6.0);
