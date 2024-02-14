@@ -1,5 +1,5 @@
 [package]
-name = "spo-rhai_codegen"
+name = "rhai_codegen"
 version = "2.0.0"
 edition = "2018"
 resolver = "2"
@@ -24,5 +24,5 @@ syn = { version = "2.0.0", features = ["full", "parsing", "printing", "proc-macr
 quote = "1.0.0"
 
 [dev-dependencies]
-rhai = { path = "..", features = ["metadata"], package = "spo-rhai" }
+rhai = { path = "..", features = ["metadata"], package = "rhai" }
 trybuild = "1.0.0"

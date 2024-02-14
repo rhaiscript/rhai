@@ -2,7 +2,7 @@
 members = [".", "codegen"]
 
 [package]
-name = "spo-rhai"
+name = "rhai"
 version = "1.17.2"
 rust-version = "1.66.0"
 edition = "2018"
@@ -25,7 +25,7 @@ num-traits = { version = "0.2.0", default-features = false }
 once_cell = { version = "1.7.0", default-features = false, features = ["race"] }
 bitflags = { version = "2.0.0", default-features = false }
 smartstring = { version = "1.0.0", default-features = false }
-rhai_codegen = { version = "2.0.0", path = "codegen", package = "spo-rhai_codegen" }
+rhai_codegen = { version = "2.0.0", path = "codegen", package = "rhai_codegen" }
 
 no-std-compat = { git = "https://gitlab.com/jD91mZM2/no-std-compat", version = "0.4.1", default-features = false, features = ["alloc"], optional = true }
 libm = { version = "0.2.0", default-features = false, optional = true }
