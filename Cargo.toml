@@ -144,10 +144,6 @@ name = "rhai-run"
 name = "rhai-dbg"
 required-features = ["debugging"]
 
-[[example]]
-name = "definitions"
-required-features = ["metadata", "internals"]
-
 [profile.release]
 lto = "fat"
 codegen-units = 1
