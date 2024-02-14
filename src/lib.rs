@@ -308,6 +308,17 @@ pub type Blob = Vec<u8>;
 /// [`SmartString`](https://crates.io/crates/smartstring) is used as the key type because most
 /// property names are ASCII and short, fewer than 23 characters, so they can be stored inline.
 #[cfg(not(feature = "no_object"))]
+#[cfg(feature = "indexmap")]
+pub type Map = indexmap::IndexMap<Identifier, Dynamic>;
+
+/// A dictionary of [`Dynamic`] values with string keys.
+///
+/// Not available under `no_object`.
+///
+/// [`SmartString`](https://crates.io/crates/smartstring) is used as the key type because most
+/// property names are ASCII and short, fewer than 23 characters, so they can be stored inline.
+#[cfg(not(feature = "no_object"))]
+#[cfg(not(feature = "indexmap"))]
 pub type Map = std::collections::BTreeMap<Identifier, Dynamic>;
 
 #[cfg(not(feature = "no_object"))]

@@ -314,6 +314,7 @@ impl Engine {
             }
 
             #[cfg(not(feature = "no_object"))]
+            #[cfg(not(feature = "indexmap"))]
             Expr::Map(x, ..) => {
                 let mut map = x.1.clone();
 
@@ -338,6 +339,37 @@ impl Engine {
                     }
 
                     *map.get_mut(key.as_str()).unwrap() = value;
+                }
+
+                Ok(Dynamic::from_map(map))
+            }
+
+            #[cfg(not(feature = "no_object"))]
+            #[cfg(feature = "indexmap")]
+            Expr::Map(x, ..) => {
+                let mut map = crate::Map::with_capacity(x.0.len());
+
+                #[cfg(not(feature = "unchecked"))]
+                let mut total_data_sizes = (0, 0, 0);
+
+                for (key, value_expr) in &x.0 {
+                    let value = self
+                        .eval_expr(global, caches, scope, this_ptr.as_deref_mut(), value_expr)?
+                        .flatten();
+
+                    #[cfg(not(feature = "unchecked"))]
+                    if self.has_data_size_limit() {
+                        let delta = crate::eval::calc_data_sizes(&value, true);
+                        total_data_sizes = (
+                            total_data_sizes.0 + delta.0,
+                            total_data_sizes.1 + delta.1 + 1,
+                            total_data_sizes.2 + delta.2,
+                        );
+                        self.throw_on_size(total_data_sizes)
+                            .map_err(|err| err.fill_position(value_expr.position()))?;
+                    }
+
+                    map.insert(key.as_str().into(), value);
                 }
 
                 Ok(Dynamic::from_map(map))
