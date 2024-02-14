@@ -78,11 +78,9 @@ impl ExportedParams for ExportedModParams {
             }
         }
 
-        Ok(ExportedModParams {
-            name,
-            skip,
-            scope: scope.unwrap_or_default(),
-        })
+        let scope = scope.unwrap_or_default();
+
+        Ok(ExportedModParams { name, skip, scope })
     }
 }
 

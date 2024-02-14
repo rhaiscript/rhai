@@ -5,11 +5,12 @@ fn main() {
     panic!("This example does not run under 'no_object'.");
 }
 
-use rhai::{Engine, EvalAltResult};
+use rhai::{CustomType, Engine, EvalAltResult, TypeBuilder};
 
 #[cfg(not(feature = "no_object"))]
 fn main() -> Result<(), Box<EvalAltResult>> {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, CustomType)]
+    #[rhai_type(extra = Self::build_extra)]
     struct TestStruct {
         x: i64,
     }
@@ -24,22 +25,18 @@ fn main() -> Result<(), Box<EvalAltResult>> {
         pub fn calculate(&mut self, data: i64) -> i64 {
             self.x * data
         }
-        pub fn get_x(&mut self) -> i64 {
-            self.x
-        }
-        pub fn set_x(&mut self, value: i64) {
-            self.x = value;
+
+        fn build_extra(builder: &mut TypeBuilder<Self>) {
+            builder
+                .with_fn("new_ts", TestStruct::new)
+                .with_fn("update", TestStruct::update)
+                .with_fn("calc", TestStruct::calculate);
         }
     }
 
     let mut engine = Engine::new();
 
-    engine
-        .register_type_with_name::<TestStruct>("TestStruct")
-        .register_fn("new_ts", TestStruct::new)
-        .register_fn("update", TestStruct::update)
-        .register_fn("calc", TestStruct::calculate)
-        .register_get_set("x", TestStruct::get_x, TestStruct::set_x);
+    engine.build_type::<TestStruct>();
 
     #[cfg(feature = "metadata")]
     {

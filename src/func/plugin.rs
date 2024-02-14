@@ -1,10 +1,10 @@
 //! Module defining macros for developing _plugins_.
 
-pub use super::CallableFunction;
 use super::FnCallArgs;
+pub use super::RhaiFunc;
 pub use crate::{
-    Dynamic, Engine, EvalAltResult, FnAccess, FnNamespace, ImmutableString, Module,
-    NativeCallContext, Position,
+    Dynamic, Engine, EvalAltResult, FnAccess, FnNamespace, FuncRegistration, ImmutableString,
+    Module, NativeCallContext, Position,
 };
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -20,7 +20,7 @@ pub use rhai_codegen::*;
 ///
 /// This trait should not be used directly.
 /// Use the `#[export_module]` and `#[export_fn]` procedural attributes instead.
-pub trait PluginFunction {
+pub trait PluginFunc {
     /// Call the plugin function with the arguments provided.
     fn call(&self, context: Option<NativeCallContext>, args: &mut FnCallArgs) -> RhaiResult;
 
@@ -34,11 +34,23 @@ pub trait PluginFunction {
 
     /// Is this plugin function pure?
     ///
-    /// This defaults to `true` such that any old implementation that has constant-checking code
-    /// inside the function itself will continue to work.
+    /// Defaults to `true` such that any old implementation that has constant-checking code inside
+    /// the function itself will continue to work.
     #[inline(always)]
     #[must_use]
     fn is_pure(&self) -> bool {
+        true
+    }
+
+    /// Is this plugin function volatile?
+    ///
+    /// A volatile function is not guaranteed to return the same result for the same input(s).
+    ///
+    /// Defaults to `true` such that any old implementation that has constant-checking code inside
+    /// the function itself will continue to work.
+    #[inline(always)]
+    #[must_use]
+    fn is_volatile(&self) -> bool {
         true
     }
 }

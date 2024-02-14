@@ -1,10 +1,11 @@
 //! Serialization of functions metadata.
 #![cfg(feature = "metadata")]
 
-use crate::api::formatting::format_type;
-use crate::module::{calc_native_fn_hash, FuncInfo, ModuleFlags};
+use crate::api::formatting::format_param_type_for_display;
+use crate::func::RhaiFunc;
+use crate::module::{calc_native_fn_hash, FuncMetadata, ModuleFlags};
 use crate::types::custom_types::CustomTypeInfo;
-use crate::{calc_fn_hash, Engine, FnAccess, SmartString, AST};
+use crate::{calc_fn_hash, Engine, FnAccess, SmartString, ThinVec, AST};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -31,8 +32,8 @@ struct FnParam<'a> {
 struct CustomTypeMetadata<'a> {
     pub type_name: &'a str,
     pub display_name: &'a str,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub doc_comments: Vec<&'a str>,
+    #[serde(default, skip_serializing_if = "ThinVec::is_empty")]
+    pub doc_comments: ThinVec<&'a str>,
 }
 
 impl PartialOrd for CustomTypeMetadata<'_> {
@@ -77,13 +78,13 @@ struct FnMetadata<'a> {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub this_type: Option<&'a str>,
     pub num_params: usize,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub params: Vec<FnParam<'a>>,
+    #[serde(default, skip_serializing_if = "ThinVec::is_empty")]
+    pub params: ThinVec<FnParam<'a>>,
     #[serde(default, skip_serializing_if = "str::is_empty")]
     pub return_type: Cow<'a, str>,
     pub signature: SmartString,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub doc_comments: Vec<&'a str>,
+    #[serde(default, skip_serializing_if = "ThinVec::is_empty")]
+    pub doc_comments: ThinVec<&'a str>,
 }
 
 impl PartialOrd for FnMetadata<'_> {
@@ -101,15 +102,29 @@ impl Ord for FnMetadata<'_> {
     }
 }
 
-impl<'a> From<&'a FuncInfo> for FnMetadata<'a> {
-    fn from(info: &'a FuncInfo) -> Self {
-        let base_hash = calc_fn_hash(None, &info.metadata.name, info.metadata.num_params);
-        let (typ, full_hash) = if info.func.is_script() {
-            (FnType::Script, base_hash)
+impl<'a> From<(&'a RhaiFunc, &'a FuncMetadata)> for FnMetadata<'a> {
+    fn from(info: (&'a RhaiFunc, &'a FuncMetadata)) -> Self {
+        let (f, m) = info;
+        let base_hash = calc_fn_hash(None, &m.name, m.num_params);
+        let (typ, full_hash, _this_type) = if f.is_script() {
+            (
+                FnType::Script,
+                base_hash,
+                #[cfg(not(feature = "no_function"))]
+                #[cfg(not(feature = "no_object"))]
+                f.get_script_fn_def()
+                    .unwrap()
+                    .this_type
+                    .as_ref()
+                    .map(|s| s.as_str()),
+                #[cfg(any(feature = "no_object", feature = "no_function"))]
+                None::<&str>,
+            )
         } else {
             (
                 FnType::Native,
-                calc_native_fn_hash(None, &info.metadata.name, &info.metadata.param_types),
+                calc_native_fn_hash(None, &m.name, &m.param_types),
+                None::<&str>,
             )
         };
 
@@ -117,17 +132,16 @@ impl<'a> From<&'a FuncInfo> for FnMetadata<'a> {
             base_hash,
             full_hash,
             #[cfg(not(feature = "no_module"))]
-            namespace: info.metadata.namespace,
-            access: info.metadata.access,
-            name: &info.metadata.name,
+            namespace: m.namespace,
+            access: m.access,
+            name: &m.name,
             #[cfg(not(feature = "no_function"))]
-            is_anonymous: crate::parser::is_anonymous_fn(&info.metadata.name),
+            is_anonymous: crate::parser::is_anonymous_fn(&m.name),
             typ,
             #[cfg(not(feature = "no_object"))]
-            this_type: info.metadata.this_type.as_deref(),
-            num_params: info.metadata.num_params,
-            params: info
-                .metadata
+            this_type: _this_type,
+            num_params: m.num_params,
+            params: m
                 .params_info
                 .iter()
                 .map(|s| {
@@ -136,26 +150,25 @@ impl<'a> From<&'a FuncInfo> for FnMetadata<'a> {
                         "_" => None,
                         s => Some(s),
                     };
-                    let typ = seg.next().map(|s| format_type(s, false));
+                    let typ = seg.next().map(|s| format_param_type_for_display(s, false));
                     FnParam { name, typ }
                 })
                 .collect(),
-            return_type: format_type(&info.metadata.return_type, true),
-            signature: info.gen_signature().into(),
-            doc_comments: if info.func.is_script() {
+            return_type: format_param_type_for_display(&m.return_type, true),
+            signature: m.gen_signature(|s| s.into()).into(),
+            doc_comments: if f.is_script() {
                 #[cfg(feature = "no_function")]
                 unreachable!("script-defined functions should not exist under no_function");
 
                 #[cfg(not(feature = "no_function"))]
-                info.func
-                    .get_script_fn_def()
-                    .expect("script-defined function")
+                f.get_script_fn_def()
+                    .expect("`ScriptFuncDef`")
                     .comments
                     .iter()
                     .map(<_>::as_ref)
                     .collect()
             } else {
-                info.metadata.comments.iter().map(<_>::as_ref).collect()
+                m.comments.iter().map(<_>::as_ref).collect()
             },
         }
     }
@@ -166,22 +179,22 @@ impl<'a> From<&'a FuncInfo> for FnMetadata<'a> {
 struct ModuleMetadata<'a> {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub modules: BTreeMap<&'a str, Self>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub custom_types: Vec<CustomTypeMetadata<'a>>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub functions: Vec<FnMetadata<'a>>,
+    #[serde(default, skip_serializing_if = "ThinVec::is_empty")]
+    pub custom_types: ThinVec<CustomTypeMetadata<'a>>,
+    #[serde(default, skip_serializing_if = "ThinVec::is_empty")]
+    pub functions: ThinVec<FnMetadata<'a>>,
     #[serde(default, skip_serializing_if = "str::is_empty")]
     pub doc: &'a str,
 }
 
 impl ModuleMetadata<'_> {
     #[inline(always)]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             doc: "",
             modules: BTreeMap::new(),
-            custom_types: Vec::new(),
-            functions: Vec::new(),
+            custom_types: ThinVec::new(),
+            functions: ThinVec::new(),
         }
     }
 }
@@ -196,10 +209,10 @@ impl<'a> From<&'a crate::Module> for ModuleMetadata<'a> {
         let mut custom_types = module
             .iter_custom_types()
             .map(Into::into)
-            .collect::<Vec<_>>();
+            .collect::<ThinVec<_>>();
         custom_types.sort();
 
-        let mut functions = module.iter_fn().map(Into::into).collect::<Vec<_>>();
+        let mut functions = module.iter_fn().map(Into::into).collect::<ThinVec<_>>();
         functions.sort();
 
         Self {
@@ -235,7 +248,7 @@ pub fn gen_metadata_to_json(
     engine
         .global_modules
         .iter()
-        .filter(|m| !m.flags.contains(exclude_flags))
+        .filter(|&m| !m.flags.intersects(exclude_flags))
         .for_each(|m| {
             if !m.doc().is_empty() {
                 if !global_doc.is_empty() {

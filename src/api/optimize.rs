@@ -58,7 +58,7 @@ impl Engine {
             #[cfg(not(feature = "no_function"))]
             ast.shared_lib()
                 .iter_fn()
-                .map(|f| f.func.get_script_fn_def().cloned().expect("`ScriptFnDef"))
+                .map(|(f, _)| f.get_script_fn_def().cloned().expect("`ScriptFuncDef`"))
                 .collect(),
             optimization_level,
         );

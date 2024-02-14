@@ -754,7 +754,7 @@ impl ImmutableString {
     pub fn make_mut(&mut self) -> &mut SmartString {
         shared_make_mut(&mut self.0)
     }
-    /// Return a mutable reference to the [`SmartString`] wrapped by the [`ImmutableString`]
+    /// Return a mutable reference to the [` SmartString`] wrapped by the [`ImmutableString`]
     /// if there are no other outstanding references to it.
     #[inline(always)]
     pub fn get_mut(&mut self) -> Option<&mut SmartString> {

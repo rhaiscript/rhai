@@ -5,7 +5,6 @@ use crate::engine::OP_EQUALS;
 use crate::eval::{calc_index, calc_offset_len};
 use crate::module::ModuleFlags;
 use crate::plugin::*;
-
 use crate::{
     def_package, Array, Dynamic, ExclusiveRange, FnPtr, InclusiveRange, NativeCallContext,
     Position, RhaiResultOf, ERR, INT, MAX_USIZE_INT,
@@ -1272,7 +1271,7 @@ pub mod array_functions {
     pub fn dedup(ctx: NativeCallContext, array: &mut Array) {
         let comparer = FnPtr {
             name: ctx.engine().get_interned_string(OP_EQUALS),
-            curry: Vec::new(),
+            curry: <_>::default(),
             environ: None,
             #[cfg(not(feature = "no_function"))]
             fn_def: None,
@@ -1526,9 +1525,18 @@ pub mod array_functions {
     ///
     /// ## Return Value
     ///
-    /// * Any integer > 0 if `element1 > element2`
-    /// * Zero if `element1 == element2`
-    /// * Any integer < 0 if `element1 < element2`
+    /// An integer number:
+    ///
+    /// * Any positive integer if `element1 > element2`
+    /// * 0 if `element1 == element2`
+    /// * Any negative integer if `element1 < element2`
+    ///
+    /// or a boolean value:
+    ///
+    /// * `true` if `element1 <= element2`
+    /// * `false` if `element1 > element2`
+    ///
+    /// Any other return value type will yield unpredictable order.
     ///
     /// # Example
     ///
@@ -1549,7 +1557,11 @@ pub mod array_functions {
             comparer
                 .call_raw(&ctx, None, [x.clone(), y.clone()])
                 .ok()
-                .and_then(|v| v.as_int().ok())
+                .and_then(|v| {
+                    v.as_int()
+                        .or_else(|_| v.as_bool().map(|v| v.then_some(-1).unwrap_or(1)))
+                        .ok()
+                })
                 .map_or_else(
                     || x.type_id().cmp(&y.type_id()),
                     |v| match v {
@@ -1602,16 +1614,16 @@ pub mod array_functions {
 
         if type_id == TypeId::of::<INT>() {
             array.sort_by(|a, b| {
-                let a = a.as_int().expect("`INT`");
-                let b = b.as_int().expect("`INT`");
+                let a = a.as_int().unwrap();
+                let b = b.as_int().unwrap();
                 a.cmp(&b)
             });
             return Ok(());
         }
         if type_id == TypeId::of::<char>() {
             array.sort_by(|a, b| {
-                let a = a.as_char().expect("char");
-                let b = b.as_char().expect("char");
+                let a = a.as_char().unwrap();
+                let b = b.as_char().unwrap();
                 a.cmp(&b)
             });
             return Ok(());
@@ -1619,16 +1631,16 @@ pub mod array_functions {
         #[cfg(not(feature = "no_float"))]
         if type_id == TypeId::of::<crate::FLOAT>() {
             array.sort_by(|a, b| {
-                let a = a.as_float().expect("`FLOAT`");
-                let b = b.as_float().expect("`FLOAT`");
+                let a = a.as_float().unwrap();
+                let b = b.as_float().unwrap();
                 a.partial_cmp(&b).unwrap_or(Ordering::Equal)
             });
             return Ok(());
         }
         if type_id == TypeId::of::<ImmutableString>() {
             array.sort_by(|a, b| {
-                let a = &*a.read_lock::<ImmutableString>().expect("`ImmutableString`");
-                let b = &*b.read_lock::<ImmutableString>().expect("`ImmutableString`");
+                let a = &*a.read_lock::<ImmutableString>().unwrap();
+                let b = &*b.read_lock::<ImmutableString>().unwrap();
                 a.cmp(b)
             });
             return Ok(());
@@ -1636,16 +1648,16 @@ pub mod array_functions {
         #[cfg(feature = "decimal")]
         if type_id == TypeId::of::<rust_decimal::Decimal>() {
             array.sort_by(|a, b| {
-                let a = a.as_decimal().expect("`Decimal`");
-                let b = b.as_decimal().expect("`Decimal`");
+                let a = a.as_decimal().unwrap();
+                let b = b.as_decimal().unwrap();
                 a.cmp(&b)
             });
             return Ok(());
         }
         if type_id == TypeId::of::<bool>() {
             array.sort_by(|a, b| {
-                let a = a.as_bool().expect("`bool`");
-                let b = b.as_bool().expect("`bool`");
+                let a = a.as_bool().unwrap();
+                let b = b.as_bool().unwrap();
                 a.cmp(&b)
             });
             return Ok(());

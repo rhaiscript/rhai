@@ -3,7 +3,7 @@
 use super::call::FnCallArgs;
 use crate::ast::FnCallHashes;
 use crate::eval::{Caches, GlobalRuntimeState};
-use crate::plugin::PluginFunction;
+use crate::plugin::PluginFunc;
 use crate::tokenizer::{is_valid_function_name, Token, TokenizeState};
 use crate::types::dynamic::Variant;
 use crate::{
@@ -445,6 +445,7 @@ impl<'a> NativeCallContext<'a> {
                     calc_fn_hash(None, fn_name, args_len),
                     args,
                     is_ref_mut,
+                    false,
                     Position::NONE,
                 )
                 .map(|(r, ..)| r);
@@ -521,10 +522,12 @@ pub fn shared_try_take<T>(value: Shared<T>) -> Result<T, Shared<T>> {
 #[must_use]
 #[allow(dead_code)]
 pub fn shared_take<T>(value: Shared<T>) -> T {
-    shared_try_take(value).ok().expect("not shared")
+    shared_try_take(value)
+        .ok()
+        .unwrap_or_else(|| panic!("`value` is shared (i.e. has outstanding references)"))
 }
 
-/// _(internals)_ Lock a [`Locked`] resource for mutable access.
+/// _(internals)_ Lock a [`Locked`] resource for immutable access.
 /// Exported under the `internals` feature only.
 #[inline(always)]
 #[must_use]
@@ -565,18 +568,18 @@ pub type FnBuiltin = (
 
 /// Function that gets an iterator from a type.
 #[cfg(not(feature = "sync"))]
-pub type IteratorFn = dyn Fn(Dynamic) -> Box<dyn Iterator<Item = RhaiResultOf<Dynamic>>>;
+pub type FnIterator = dyn Fn(Dynamic) -> Box<dyn Iterator<Item = RhaiResultOf<Dynamic>>>;
 /// Function that gets an iterator from a type.
 #[cfg(feature = "sync")]
-pub type IteratorFn =
+pub type FnIterator =
     dyn Fn(Dynamic) -> Box<dyn Iterator<Item = RhaiResultOf<Dynamic>>> + Send + Sync;
 
 /// Plugin function trait object.
 #[cfg(not(feature = "sync"))]
-pub type FnPlugin = dyn PluginFunction;
+pub type FnPlugin = dyn PluginFunc;
 /// Plugin function trait object.
 #[cfg(feature = "sync")]
-pub type FnPlugin = dyn PluginFunction + Send + Sync;
+pub type FnPlugin = dyn PluginFunc + Send + Sync;
 
 /// Callback function for progress reporting.
 #[cfg(not(feature = "unchecked"))]

@@ -37,6 +37,7 @@ mod time_functions {
     ///
     /// print(now.elapsed);     // prints 10.???
     /// ```
+    #[rhai_fn(volatile)]
     pub fn timestamp() -> Instant {
         Instant::now()
     }
@@ -189,41 +190,49 @@ mod time_functions {
         }
     }
 
-    #[allow(clippy::cast_sign_loss)]
-    fn add_impl(timestamp: Instant, seconds: INT) -> RhaiResultOf<Instant> {
-        if seconds < 0 {
-            return subtract_impl(timestamp, -seconds);
-        }
+    #[inline(always)]
+    fn add_inner(timestamp: Instant, seconds: u64) -> Option<Instant> {
         if cfg!(not(feature = "unchecked")) {
-            timestamp
-                .checked_add(Duration::from_secs(seconds as u64))
-                .ok_or_else(|| {
-                    make_arithmetic_err(format!(
-                        "Timestamp overflow when adding {seconds} second(s)"
-                    ))
-                })
+            timestamp.checked_add(Duration::from_secs(seconds))
         } else {
-            Ok(timestamp + Duration::from_secs(seconds as u64))
+            Some(timestamp + Duration::from_secs(seconds))
         }
     }
-    #[allow(clippy::cast_sign_loss)]
+    #[inline]
+    fn add_impl(timestamp: Instant, seconds: INT) -> RhaiResultOf<Instant> {
+        if seconds < 0 {
+            subtract_inner(timestamp, seconds.unsigned_abs() as u64)
+        } else {
+            #[allow(clippy::cast_sign_loss)]
+            add_inner(timestamp, seconds as u64)
+        }
+        .ok_or_else(|| {
+            make_arithmetic_err(format!(
+                "Timestamp overflow when adding {seconds} second(s)"
+            ))
+        })
+    }
+    #[inline(always)]
+    fn subtract_inner(timestamp: Instant, seconds: u64) -> Option<Instant> {
+        if cfg!(not(feature = "unchecked")) {
+            timestamp.checked_sub(Duration::from_secs(seconds))
+        } else {
+            Some(timestamp - Duration::from_secs(seconds))
+        }
+    }
+    #[inline]
     fn subtract_impl(timestamp: Instant, seconds: INT) -> RhaiResultOf<Instant> {
         if seconds < 0 {
-            return add_impl(timestamp, -seconds);
-        }
-        if cfg!(not(feature = "unchecked")) {
-            timestamp
-                .checked_sub(Duration::from_secs(seconds as u64))
-                .ok_or_else(|| {
-                    make_arithmetic_err(format!(
-                        "Timestamp overflow when subtracting {seconds} second(s)"
-                    ))
-                })
+            add_inner(timestamp, seconds.unsigned_abs() as u64)
         } else {
-            Ok(timestamp
-                .checked_sub(Duration::from_secs(seconds as u64))
-                .unwrap())
+            #[allow(clippy::cast_sign_loss)]
+            subtract_inner(timestamp, seconds as u64)
         }
+        .ok_or_else(|| {
+            make_arithmetic_err(format!(
+                "Timestamp overflow when subtracting {seconds} second(s)"
+            ))
+        })
     }
 
     /// Add the specified number of `seconds` to the timestamp and return it as a new timestamp.

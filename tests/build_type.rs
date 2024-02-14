@@ -2,7 +2,7 @@
 use rhai::{CustomType, Engine, EvalAltResult, Position, TypeBuilder, INT};
 
 #[test]
-fn build_type() {
+fn test_build_type() {
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct Vec3 {
         x: INT,
@@ -154,5 +154,68 @@ fn build_type() {
             )
             .unwrap(),
         6,
+    );
+}
+
+#[test]
+fn test_build_type_macro() {
+    #[derive(Debug, Clone, Eq, PartialEq, CustomType)]
+    #[rhai_type(name = "MyFoo", extra = Self::build_extra)]
+    struct Foo {
+        #[rhai_type(skip)]
+        dummy: i64,
+        #[rhai_type(readonly)]
+        bar: i64,
+        #[rhai_type(name = "emphasize")]
+        baz: bool,
+        #[rhai_type(set = Self::set_hello)]
+        hello: String,
+    }
+
+    impl Foo {
+        pub fn set_hello(&mut self, value: String) {
+            self.hello = if self.baz {
+                let mut s = self.hello.clone();
+                s.push_str(&value);
+                for _ in 0..self.bar {
+                    s.push('!');
+                }
+                s
+            } else {
+                value
+            };
+        }
+        fn build_extra(builder: &mut TypeBuilder<Self>) {
+            builder.with_fn("new_foo", || Self {
+                dummy: 0,
+                bar: 5,
+                baz: false,
+                hello: "hey".to_string(),
+            });
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.build_type::<Foo>();
+
+    assert_eq!(
+        engine
+            .eval::<Foo>(
+                r#"
+                    let foo = new_foo();
+                    foo.hello = "this should not be seen";
+                    foo.hello = "world!";
+                    foo.emphasize = true;
+                    foo.hello = "yo";
+                    foo
+                "#
+            )
+            .unwrap(),
+        Foo {
+            dummy: 0,
+            bar: 5,
+            baz: true,
+            hello: "world!yo!!!!!".into()
+        }
     );
 }

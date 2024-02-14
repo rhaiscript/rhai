@@ -6,7 +6,7 @@ use crate::tokenizer::Token;
 use crate::types::dynamic::Union;
 use crate::{
     calc_fn_hash, Dynamic, FnArgsVec, FnPtr, Identifier, ImmutableString, Position, SmartString,
-    StaticVec, INT,
+    StaticVec, ThinVec, INT,
 };
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -22,7 +22,7 @@ use std::{
 
 /// _(internals)_ A binary expression.
 /// Exported under the `internals` feature only.
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, Default)]
 pub struct BinaryExpr {
     /// LHS expression.
     pub lhs: Expr,
@@ -38,9 +38,9 @@ pub struct BinaryExpr {
 #[derive(Debug, Clone, Hash)]
 pub struct CustomExpr {
     /// List of keywords.
-    pub inputs: Box<[Expr]>,
+    pub inputs: FnArgsVec<Expr>,
     /// List of tokens actually parsed.
-    pub tokens: Box<[ImmutableString]>,
+    pub tokens: FnArgsVec<ImmutableString>,
     /// State value.
     pub state: Dynamic,
     /// Is the current [`Scope`][crate::Scope] possibly modified by this custom statement
@@ -175,8 +175,7 @@ impl FnCallHashes {
     #[inline(always)]
     #[must_use]
     pub fn script(&self) -> u64 {
-        debug_assert!(self.script.is_some());
-        self.script.unwrap()
+        self.script.expect("native-only hash")
     }
 }
 
@@ -191,7 +190,7 @@ pub struct FnCallExpr {
     /// Pre-calculated hashes.
     pub hashes: FnCallHashes,
     /// List of function call argument expressions.
-    pub args: Box<[Expr]>,
+    pub args: FnArgsVec<Expr>,
     /// Does this function call capture the parent scope?
     pub capture_parent_scope: bool,
     /// Is this function call a native operator?
@@ -267,9 +266,9 @@ pub enum Expr {
     /// [String][ImmutableString] constant.
     StringConstant(ImmutableString, Position),
     /// An interpolated [string][ImmutableString].
-    InterpolatedString(Box<FnArgsVec<Expr>>, Position),
+    InterpolatedString(ThinVec<Expr>, Position),
     /// [ expr, ... ]
-    Array(Box<FnArgsVec<Expr>>, Position),
+    Array(ThinVec<Expr>, Position),
     /// #{ name:expr, ... }
     Map(
         Box<(StaticVec<(Ident, Expr)>, BTreeMap<Identifier, Dynamic>)>,

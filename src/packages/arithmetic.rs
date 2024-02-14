@@ -381,7 +381,7 @@ mod f32_functions {
                 "Number raised to too large an index: {x} ** {y}"
             )))
         } else {
-            #[allow(clippy::cast_possible_truncation)]
+            #[allow(clippy::cast_possible_truncation, clippy::unnecessary_cast)]
             Ok(x.powi(y as i32))
         }
     }
@@ -532,6 +532,11 @@ pub mod decimal_functions {
         }
         #[rhai_fn(return_raw)]
         pub fn power(x: Decimal, y: Decimal) -> RhaiResultOf<Decimal> {
+            // Raising to a very large power can take exponential time, so limit it to 1 million.
+            // TODO: Remove this limit when `rust-decimal` is updated with the fix.
+            if std::convert::TryInto::<u32>::try_into(y.round()).map_or(true, |v| v > 1000000) {
+                return Err(make_err(format!("Exponential overflow: {x} ** {y}")));
+            }
             x.checked_powd(y)
                 .ok_or_else(|| make_err(format!("Exponential overflow: {x} ** {y}")))
         }

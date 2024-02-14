@@ -66,16 +66,19 @@ mod string_functions {
 
     // The following are needed in order to override the generic versions with `Dynamic` parameters.
 
-    #[rhai_fn(name = "+", pure)]
-    pub fn add_append_str(
-        string1: &mut ImmutableString,
-        string2: ImmutableString,
-    ) -> ImmutableString {
-        &*string1 + string2
+    #[rhai_fn(name = "+")]
+    pub fn add_append_str(string1: &str, string2: &str) -> ImmutableString {
+        let mut buf = SmartString::new_const();
+        buf.push_str(string1);
+        buf.push_str(string2);
+        buf.into()
     }
-    #[rhai_fn(name = "+", pure)]
-    pub fn add_append_char(string: &mut ImmutableString, character: char) -> ImmutableString {
-        &*string + character
+    #[rhai_fn(name = "+")]
+    pub fn add_append_char(string: &str, character: char) -> ImmutableString {
+        let mut buf = SmartString::new_const();
+        buf.push_str(string);
+        buf.push(character);
+        buf.into()
     }
     #[rhai_fn(name = "+")]
     pub fn add_prepend_char(character: char, string: &str) -> ImmutableString {
@@ -112,22 +115,21 @@ mod string_functions {
     pub mod blob_functions {
         use crate::Blob;
 
-        #[rhai_fn(name = "+", pure)]
-        pub fn add_append(string: &mut ImmutableString, utf8: Blob) -> ImmutableString {
+        #[rhai_fn(name = "+")]
+        pub fn add_append(string: ImmutableString, utf8: Blob) -> ImmutableString {
             if utf8.is_empty() {
-                return string.clone();
+                return string;
             }
 
             let s = String::from_utf8_lossy(&utf8);
 
             if string.is_empty() {
                 match s {
-                    std::borrow::Cow::Borrowed(_) => String::from_utf8(utf8).unwrap(),
-                    std::borrow::Cow::Owned(_) => s.into_owned(),
+                    std::borrow::Cow::Borrowed(_) => String::from_utf8(utf8).unwrap().into(),
+                    std::borrow::Cow::Owned(_) => s.into_owned().into(),
                 }
-                .into()
             } else {
-                let mut x = <ImmutableString as AsRef<SmartString>>::as_ref(string).clone();
+                let mut x = string.into_owned();
                 x.push_str(s.as_ref());
                 x.into()
             }
@@ -383,10 +385,9 @@ mod string_functions {
     ///
     /// print(text);                // prints "hello, world!"
     /// ```
-    #[rhai_fn(pure)]
-    pub fn to_upper(string: &mut ImmutableString) -> ImmutableString {
+    pub fn to_upper(string: ImmutableString) -> ImmutableString {
         if string.chars().all(char::is_uppercase) {
-            return string.clone();
+            return string;
         }
 
         string.to_uppercase().into()
@@ -420,10 +421,9 @@ mod string_functions {
     ///
     /// print(text);                // prints "HELLO, WORLD!"
     /// ```
-    #[rhai_fn(pure)]
-    pub fn to_lower(string: &mut ImmutableString) -> ImmutableString {
+    pub fn to_lower(string: ImmutableString) -> ImmutableString {
         if string.is_empty() || string.chars().all(char::is_lowercase) {
-            return string.clone();
+            return string;
         }
 
         string.to_lowercase().into()

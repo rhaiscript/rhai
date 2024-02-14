@@ -14,8 +14,15 @@ use std::prelude::v1::*;
 /// Map the name of a standard type into a friendly form.
 #[inline]
 #[must_use]
-fn map_std_type_name(name: &str, shorthands: bool) -> &str {
+pub fn map_std_type_name(name: &str, shorthands: bool) -> &str {
     let name = name.trim();
+
+    match name {
+        "INT" => return type_name::<crate::INT>(),
+        #[cfg(not(feature = "no_float"))]
+        "FLOAT" => return type_name::<crate::FLOAT>(),
+        _ => (),
+    }
 
     if name == type_name::<String>() {
         return if shorthands { "string" } else { "String" };
@@ -111,7 +118,7 @@ fn map_std_type_name(name: &str, shorthands: bool) -> &str {
         .map_or(name, |s| map_std_type_name(s, shorthands))
 }
 
-/// Format a Rust type to be display-friendly.
+/// Format a Rust parameter type to be display-friendly.
 ///
 /// * `rhai::` prefix is cleared.
 /// * `()` is cleared.
@@ -119,7 +126,7 @@ fn map_std_type_name(name: &str, shorthands: bool) -> &str {
 /// * `INT` and `FLOAT` are expanded.
 /// * [`RhaiResult`][crate::RhaiResult] and [`RhaiResultOf<T>`][crate::RhaiResultOf] are expanded.
 #[cfg(feature = "metadata")]
-pub fn format_type(typ: &str, is_return_type: bool) -> std::borrow::Cow<str> {
+pub fn format_param_type_for_display(typ: &str, is_return_type: bool) -> std::borrow::Cow<str> {
     const RESULT_TYPE: &str = "Result<";
     const ERROR_TYPE: &str = ",Box<EvalAltResult>>";
     const RHAI_RESULT_TYPE: &str = "RhaiResult";
@@ -136,9 +143,9 @@ pub fn format_type(typ: &str, is_return_type: bool) -> std::borrow::Cow<str> {
     let typ = typ.trim();
 
     if let Some(x) = typ.strip_prefix("rhai::") {
-        return format_type(x, is_return_type);
+        return format_param_type_for_display(x, is_return_type);
     } else if let Some(x) = typ.strip_prefix("&mut ") {
-        let r = format_type(x, false);
+        let r = format_param_type_for_display(x, false);
         return if r == x {
             typ.into()
         } else {
@@ -146,7 +153,7 @@ pub fn format_type(typ: &str, is_return_type: bool) -> std::borrow::Cow<str> {
         };
     } else if typ.contains(' ') {
         let typ = typ.replace(' ', "");
-        let r = format_type(&typ, is_return_type);
+        let r = format_param_type_for_display(&typ, is_return_type);
         return r.into_owned().into();
     }
 
@@ -165,25 +172,25 @@ pub fn format_type(typ: &str, is_return_type: bool) -> std::borrow::Cow<str> {
         ty if ty.starts_with(RHAI_RANGE_TYPE) && ty.ends_with('>') => {
             let inner = &ty[RHAI_RANGE_TYPE.len()..ty.len() - 1];
             RHAI_RANGE_EXPAND
-                .replace("{}", format_type(inner, false).trim())
+                .replace("{}", format_param_type_for_display(inner, false).trim())
                 .into()
         }
         ty if ty.starts_with(RHAI_INCLUSIVE_RANGE_TYPE) && ty.ends_with('>') => {
             let inner = &ty[RHAI_INCLUSIVE_RANGE_TYPE.len()..ty.len() - 1];
             RHAI_INCLUSIVE_RANGE_EXPAND
-                .replace("{}", format_type(inner, false).trim())
+                .replace("{}", format_param_type_for_display(inner, false).trim())
                 .into()
         }
         ty if ty.starts_with(RHAI_RESULT_OF_TYPE) && ty.ends_with('>') => {
             let inner = &ty[RHAI_RESULT_OF_TYPE.len()..ty.len() - 1];
             RHAI_RESULT_OF_TYPE_EXPAND
-                .replace("{}", format_type(inner, false).trim())
+                .replace("{}", format_param_type_for_display(inner, false).trim())
                 .into()
         }
         ty if ty.starts_with(RESULT_TYPE) && ty.ends_with(ERROR_TYPE) => {
             let inner = &ty[RESULT_TYPE.len()..ty.len() - ERROR_TYPE.len()];
             RHAI_RESULT_OF_TYPE_EXPAND
-                .replace("{}", format_type(inner, false).trim())
+                .replace("{}", format_param_type_for_display(inner, false).trim())
                 .into()
         }
         ty => ty.into(),
@@ -195,10 +202,6 @@ impl Engine {
     ///
     /// If a type is registered via [`register_type_with_name`][Engine::register_type_with_name],
     /// the type name provided for the registration will be used.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the type name is `&mut`.
     #[inline]
     #[must_use]
     pub fn map_type_name<'a>(&'a self, name: &'a str) -> &'a str {
@@ -218,41 +221,24 @@ impl Engine {
             .unwrap_or_else(|| map_std_type_name(name, true))
     }
 
-    /// Format a type name.
+    /// Format a Rust parameter type.
     ///
     /// If a type is registered via [`register_type_with_name`][Engine::register_type_with_name],
     /// the type name provided for the registration will be used.
+    ///
+    /// This method properly handles type names beginning with `&mut`.
     #[cfg(feature = "metadata")]
     #[inline]
     #[must_use]
-    pub(crate) fn format_type_name<'a>(&'a self, name: &'a str) -> std::borrow::Cow<'a, str> {
+    pub(crate) fn format_param_type<'a>(&'a self, name: &'a str) -> std::borrow::Cow<'a, str> {
         if let Some(x) = name.strip_prefix("&mut ") {
-            return match self.format_type_name(x) {
+            return match self.format_param_type(x) {
                 r if r == x => name.into(),
                 r => format!("&mut {r}").into(),
             };
         }
 
-        self.global_modules
-            .iter()
-            .find_map(|m| m.get_custom_type_display_by_name(name))
-            .or_else(|| {
-                #[cfg(not(feature = "no_module"))]
-                return self
-                    .global_sub_modules
-                    .values()
-                    .find_map(|m| m.get_custom_type_display_by_name(name));
-
-                #[cfg(feature = "no_module")]
-                return None;
-            })
-            .unwrap_or_else(|| match name {
-                "INT" => type_name::<crate::INT>(),
-                #[cfg(not(feature = "no_float"))]
-                "FLOAT" => type_name::<crate::FLOAT>(),
-                _ => map_std_type_name(name, false),
-            })
-            .into()
+        self.map_type_name(name).into()
     }
 
     /// Make a `Box<`[`EvalAltResult<ErrorMismatchDataType>`][ERR::ErrorMismatchDataType]`>`.

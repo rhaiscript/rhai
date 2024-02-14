@@ -2,9 +2,8 @@
 #![cfg(not(feature = "no_function"))]
 
 use super::call::FnCallArgs;
-use crate::ast::ScriptFnDef;
+use crate::ast::{EncapsulatedEnviron, ScriptFuncDef};
 use crate::eval::{Caches, GlobalRuntimeState};
-use crate::func::EncapsulatedEnviron;
 use crate::{Dynamic, Engine, Position, RhaiResult, Scope, ERR};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -29,7 +28,7 @@ impl Engine {
         scope: &mut Scope,
         mut this_ptr: Option<&mut Dynamic>,
         _environ: Option<&EncapsulatedEnviron>,
-        fn_def: &ScriptFnDef,
+        fn_def: &ScriptFuncDef,
         args: &mut FnCallArgs,
         rewind_scope: bool,
         pos: Position,
@@ -80,7 +79,10 @@ impl Engine {
         #[cfg(feature = "debugging")]
         if self.is_debugger_registered() {
             let fn_name = fn_def.name.clone();
-            let args = scope.iter().skip(orig_scope_len).map(|(.., v)| v);
+            let args = scope
+                .iter_inner()
+                .skip(orig_scope_len)
+                .map(|(.., v)| v.flatten_clone());
             let source = global.source.clone();
 
             global
@@ -207,6 +209,10 @@ impl Engine {
     }
 
     // Does a script-defined function exist?
+    ///
+    /// # Note
+    ///
+    /// If the scripted function is not found, this information is cached for future look-ups.
     #[must_use]
     pub(crate) fn has_script_fn(
         &self,
@@ -216,27 +222,27 @@ impl Engine {
     ) -> bool {
         let cache = caches.fn_resolution_cache_mut();
 
-        if let Some(result) = cache.map.get(&hash_script).map(Option::is_some) {
+        if let Some(result) = cache.dict.get(&hash_script).map(Option::is_some) {
             return result;
         }
 
         // First check script-defined functions
-        let r = global.lib.iter().any(|m| m.contains_fn(hash_script))
+        let res = global.lib.iter().any(|m| m.contains_fn(hash_script))
             // Then check the global namespace and packages
             || self.global_modules.iter().any(|m| m.contains_fn(hash_script));
 
         #[cfg(not(feature = "no_module"))]
-        let r = r ||
+        let res = res ||
             // Then check imported modules
             global.contains_qualified_fn(hash_script)
             // Then check sub-modules
             || self.global_sub_modules.values().any(|m| m.contains_qualified_fn(hash_script));
 
-        if !r && !cache.filter.is_absent_and_set(hash_script) {
+        if !res && !cache.filter.is_absent_and_set(hash_script) {
             // Do not cache "one-hit wonders"
-            cache.map.insert(hash_script, None);
+            cache.dict.insert(hash_script, None);
         }
 
-        r
+        res
     }
 }

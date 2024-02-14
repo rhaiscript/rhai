@@ -56,6 +56,7 @@ fn test_switch() {
             .unwrap(),
         3
     );
+    assert_eq!(engine.eval::<bool>("let x = 1..42; switch x { 1 => (), 2 => 'a', 1..42 => true }").unwrap(), true);
 
     assert_eq!(engine.eval_with_scope::<INT>(&mut scope, "switch 42 { 42 => 123, 42 => 999 }").unwrap(), 123);
 

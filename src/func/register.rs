@@ -6,7 +6,7 @@
 #![allow(unused_variables)]
 
 use super::call::FnCallArgs;
-use super::callable_function::CallableFunction;
+use super::function::RhaiFunc;
 use super::native::{SendSync, Shared};
 use crate::types::dynamic::{DynamicWriteLock, Union, Variant};
 use crate::{Dynamic, Identifier, NativeCallContext, RhaiResultOf};
@@ -25,13 +25,13 @@ use std::{
 ///
 /// # Examples
 ///
-/// `RegisterNativeFunction<(Mut<A>, B, Ref<C>), 3, false, R, false>` = `Fn(&mut A, B, &C) -> R`
+/// `RhaiNativeFunc<(Mut<A>, B, Ref<C>), 3, false, R, false>` = `Fn(&mut A, B, &C) -> R`
 ///
-/// `RegisterNativeFunction<(Mut<A>, B, Ref<C>), 3, true,  R, false>` = `Fn(NativeCallContext, &mut A, B, &C) -> R`
+/// `RhaiNativeFunc<(Mut<A>, B, Ref<C>), 3, true,  R, false>` = `Fn(NativeCallContext, &mut A, B, &C) -> R`
 ///
-/// `RegisterNativeFunction<(Mut<A>, B, Ref<C>), 3, false, R, true>`  = `Fn(&mut A, B, &C) -> Result<R, Box<EvalAltResult>>`
+/// `RhaiNativeFunc<(Mut<A>, B, Ref<C>), 3, false, R, true>`  = `Fn(&mut A, B, &C) -> Result<R, Box<EvalAltResult>>`
 ///
-/// `RegisterNativeFunction<(Mut<A>, B, Ref<C>), 3, true,  R, true>`  = `Fn(NativeCallContext, &mut A, B, &C) -> Result<R, Box<EvalAltResult>>`
+/// `RhaiNativeFunc<(Mut<A>, B, Ref<C>), 3, true,  R, true>`  = `Fn(NativeCallContext, &mut A, B, &C) -> Result<R, Box<EvalAltResult>>`
 ///
 /// These types are not actually used anywhere.
 pub struct Mut<T>(T);
@@ -41,7 +41,7 @@ pub struct Mut<T>(T);
 #[inline(always)]
 pub fn by_ref<T: Variant + Clone>(data: &mut Dynamic) -> DynamicWriteLock<T> {
     // Directly cast the &mut Dynamic into DynamicWriteLock to access the underlying data.
-    data.write_lock::<T>().expect("checked")
+    data.write_lock::<T>().unwrap()
 }
 
 /// Dereference into value.
@@ -61,7 +61,7 @@ pub fn by_value<T: Variant + Clone>(data: &mut Dynamic) -> T {
     }
     if TypeId::of::<T>() == TypeId::of::<String>() {
         // If T is `String`, data must be `ImmutableString`, so map directly to it
-        return reify! { data.take().into_string().expect("`ImmutableString`") => !!! T };
+        return reify! { data.take().into_string().unwrap() => !!! T };
     }
 
     // We consume the argument and then replace it with () - the argument is not supposed to be used again.
@@ -78,17 +78,10 @@ pub fn by_value<T: Variant + Clone>(data: &mut Dynamic) -> T {
 /// * `X` - a constant boolean generic indicating whether there is a `NativeCallContext` parameter.
 /// * `R` - return type of the function; if the function returns `Result`, it is the unwrapped inner value type.
 /// * `F` - a constant boolean generic indicating whether the function is fallible (i.e. returns `Result<T, Box<EvalAltResult>>`).
-pub trait RegisterNativeFunction<
-    A: 'static,
-    const N: usize,
-    const X: bool,
-    R: 'static,
-    const F: bool,
->
-{
-    /// Convert this function into a [`CallableFunction`].
+pub trait RhaiNativeFunc<A: 'static, const N: usize, const X: bool, R: 'static, const F: bool> {
+    /// Convert this function into a [`RhaiFunc`].
     #[must_use]
-    fn into_callable_function(self, name: Identifier, is_pure: bool) -> CallableFunction;
+    fn into_rhai_function(self, is_pure: bool, is_volatile: bool) -> RhaiFunc;
     /// Get the type ID's of this function's parameters.
     #[must_use]
     fn param_types() -> [TypeId; N];
@@ -148,11 +141,11 @@ macro_rules! def_register {
             FN: Fn($($param),*) -> RET + SendSync + 'static,
             $($par: Variant + Clone,)*
             RET: Variant + Clone,
-        > RegisterNativeFunction<($($mark,)*), $n, false, RET, false> for FN {
+        > RhaiNativeFunc<($($mark,)*), $n, false, RET, false> for FN {
             #[inline(always)] fn param_types() -> [TypeId;$n] { [$(TypeId::of::<$par>()),*] }
             #[cfg(feature = "metadata")] #[inline(always)] fn param_names() -> [&'static str;$n] { [$(type_name::<$param>()),*] }
-            #[inline(always)] fn into_callable_function(self, fn_name: Identifier, is_pure: bool) -> CallableFunction {
-                CallableFunction::$abi { func: Shared::new(move |_, args: &mut FnCallArgs| {
+            #[inline(always)] fn into_rhai_function(self, is_pure: bool, is_volatile: bool) -> RhaiFunc {
+                RhaiFunc::$abi { func: Shared::new(move |_, args: &mut FnCallArgs| {
                     // The arguments are assumed to be of the correct number and types!
                     let mut drain = args.iter_mut();
                     $(let mut $par = $clone(drain.next().unwrap()); )*
@@ -162,7 +155,7 @@ macro_rules! def_register {
 
                     // Map the result
                     Ok(Dynamic::from(r))
-                }), has_context: false, is_pure }
+                }), has_context: false, is_pure, is_volatile }
             }
         }
 
@@ -170,11 +163,11 @@ macro_rules! def_register {
             FN: for<'a> Fn(NativeCallContext<'a>, $($param),*) -> RET + SendSync + 'static,
             $($par: Variant + Clone,)*
             RET: Variant + Clone,
-        > RegisterNativeFunction<($($mark,)*), $n, true, RET, false> for FN {
+        > RhaiNativeFunc<($($mark,)*), $n, true, RET, false> for FN {
             #[inline(always)] fn param_types() -> [TypeId;$n] { [$(TypeId::of::<$par>()),*] }
             #[cfg(feature = "metadata")] #[inline(always)] fn param_names() -> [&'static str;$n] { [$(type_name::<$param>()),*] }
-            #[inline(always)] fn into_callable_function(self, fn_name: Identifier, is_pure: bool) -> CallableFunction {
-                CallableFunction::$abi { func: Shared::new(move |ctx: Option<NativeCallContext>, args: &mut FnCallArgs| {
+            #[inline(always)] fn into_rhai_function(self, is_pure: bool, is_volatile: bool) -> RhaiFunc {
+                RhaiFunc::$abi { func: Shared::new(move |ctx: Option<NativeCallContext>, args: &mut FnCallArgs| {
                     let ctx = ctx.unwrap();
 
                     // The arguments are assumed to be of the correct number and types!
@@ -186,7 +179,7 @@ macro_rules! def_register {
 
                     // Map the result
                     Ok(Dynamic::from(r))
-                }), has_context: true, is_pure }
+                }), has_context: true, is_pure, is_volatile }
             }
         }
 
@@ -194,19 +187,19 @@ macro_rules! def_register {
             FN: Fn($($param),*) -> RhaiResultOf<RET> + SendSync + 'static,
             $($par: Variant + Clone,)*
             RET: Variant + Clone
-        > RegisterNativeFunction<($($mark,)*), $n, false, RET, true> for FN {
+        > RhaiNativeFunc<($($mark,)*), $n, false, RET, true> for FN {
             #[inline(always)] fn param_types() -> [TypeId;$n] { [$(TypeId::of::<$par>()),*] }
             #[cfg(feature = "metadata")] #[inline(always)] fn param_names() -> [&'static str;$n] { [$(type_name::<$param>()),*] }
             #[cfg(feature = "metadata")] #[inline(always)] fn return_type_name() -> &'static str { type_name::<RhaiResultOf<RET>>() }
-            #[inline(always)] fn into_callable_function(self, fn_name: Identifier, is_pure: bool) -> CallableFunction {
-                CallableFunction::$abi { func: Shared::new(move |_, args: &mut FnCallArgs| {
+            #[inline(always)] fn into_rhai_function(self, is_pure: bool, is_volatile: bool) -> RhaiFunc {
+                RhaiFunc::$abi { func: Shared::new(move |_, args: &mut FnCallArgs| {
                     // The arguments are assumed to be of the correct number and types!
                     let mut drain = args.iter_mut();
                     $(let mut $par = $clone(drain.next().unwrap()); )*
 
                     // Call the function with each argument value
                     self($($arg),*).map(Dynamic::from)
-                }), has_context: false, is_pure }
+                }), has_context: false, is_pure, is_volatile }
             }
         }
 
@@ -214,12 +207,12 @@ macro_rules! def_register {
             FN: for<'a> Fn(NativeCallContext<'a>, $($param),*) -> RhaiResultOf<RET> + SendSync + 'static,
             $($par: Variant + Clone,)*
             RET: Variant + Clone
-        > RegisterNativeFunction<($($mark,)*), $n, true, RET, true> for FN {
+        > RhaiNativeFunc<($($mark,)*), $n, true, RET, true> for FN {
             #[inline(always)] fn param_types() -> [TypeId;$n] { [$(TypeId::of::<$par>()),*] }
             #[cfg(feature = "metadata")] #[inline(always)] fn param_names() -> [&'static str;$n] { [$(type_name::<$param>()),*] }
             #[cfg(feature = "metadata")] #[inline(always)] fn return_type_name() -> &'static str { type_name::<RhaiResultOf<RET>>() }
-            #[inline(always)] fn into_callable_function(self, fn_name: Identifier, is_pure: bool) -> CallableFunction {
-                CallableFunction::$abi { func: Shared::new(move |ctx: Option<NativeCallContext>, args: &mut FnCallArgs| {
+            #[inline(always)] fn into_rhai_function(self, is_pure: bool, is_volatile: bool) -> RhaiFunc {
+                RhaiFunc::$abi { func: Shared::new(move |ctx: Option<NativeCallContext>, args: &mut FnCallArgs| {
                     let ctx = ctx.unwrap();
 
                     // The arguments are assumed to be of the correct number and types!
@@ -228,7 +221,7 @@ macro_rules! def_register {
 
                     // Call the function with each argument value
                     self(ctx, $($arg),*).map(Dynamic::from)
-                }), has_context: true, is_pure }
+                }), has_context: true, is_pure, is_volatile }
             }
         }
 
@@ -237,7 +230,7 @@ macro_rules! def_register {
     ($p0:ident:$n0:expr $(, $p:ident: $n:expr)*) => {
         def_register!(imp Pure   : $n0 ; $p0 => $p0      => $p0      => $p0      => by_value $(, $p => $p => $p => $p => by_value)*);
         def_register!(imp Method : $n0 ; $p0 => &mut $p0 => Mut<$p0> => &mut $p0 => by_ref   $(, $p => $p => $p => $p => by_value)*);
-        //                ^ CallableFunction constructor
+        //                ^ RhaiFunc constructor
         //                         ^ number of arguments                            ^ first parameter passed through
         //                                                                                       ^ others passed by value (by_value)
 

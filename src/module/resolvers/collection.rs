@@ -159,7 +159,7 @@ impl ModuleResolver for ModuleResolversCollection {
                 Err(err) => match *err {
                     ERR::ErrorModuleNotFound(..) => continue,
                     ERR::ErrorInModule(_, err, _) => return Err(err),
-                    _ => panic!("ModuleResolver::resolve returns error that is not ErrorModuleNotFound or ErrorInModule"),
+                    _ => unreachable!("ModuleResolver::resolve returns error that is not ErrorModuleNotFound or ErrorInModule"),
                 },
             }
         }

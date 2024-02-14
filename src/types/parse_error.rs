@@ -177,6 +177,8 @@ pub enum ParseErrorType {
     ModuleUndefined(String),
     /// Expression exceeding the maximum levels of complexity.
     ExprTooDeep,
+    /// Number of scripted functions over maximum limit.
+    TooManyFunctions,
     /// Literal exceeding the maximum size. Wrapped values are the data type name and the maximum size.
     LiteralTooLarge(String, usize),
     /// Break statement not inside a loop.
@@ -246,6 +248,7 @@ impl fmt::Display for ParseErrorType {
             Self::WrongDocComment => f.write_str("Doc-comment must be followed immediately by a function definition"),
             Self::WrongExport => f.write_str("Export statement can only appear at global level"),
             Self::ExprTooDeep => f.write_str("Expression exceeds maximum complexity"),
+            Self::TooManyFunctions => f.write_str("Number of functions defined exceeds maximum limit"),
             Self::LoopBreak => f.write_str("Break statement should only be used inside a loop"),
 
             #[allow(deprecated)]

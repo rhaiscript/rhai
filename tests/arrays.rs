@@ -17,6 +17,11 @@ fn test_arrays() {
     assert_eq!(engine.eval::<INT>("let y = [1, 2, 3]; y[0]").unwrap(), 1);
     assert_eq!(engine.eval::<INT>("let y = [1, 2, 3]; y[-1]").unwrap(), 3);
     assert_eq!(engine.eval::<INT>("let y = [1, 2, 3]; y[-3]").unwrap(), 1);
+    assert!(engine.eval::<INT>("let y = []; y[-3]").is_err());
+    assert!(engine.eval::<INT>("let y = []; y[0]").is_err());
+    assert!(engine.eval::<INT>("let y = []; y[1]").is_err());
+    assert!(engine.eval::<INT>("let y = [1, 2, 3]; y[3]").is_err());
+    assert!(engine.eval::<INT>("let y = [1, 2, 3]; y[-4]").is_err());
     assert!(engine.eval::<bool>("let y = [1, 2, 3]; 2 in y").unwrap());
     assert!(engine.eval::<bool>("let y = [1, 2, 3]; 42 !in y").unwrap());
     assert_eq!(engine.eval::<INT>("let y = [1, 2, 3]; y += 4; y[3]").unwrap(), 4);

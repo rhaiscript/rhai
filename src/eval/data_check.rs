@@ -126,33 +126,21 @@ impl Engine {
     /// and should be set afterwards.
     #[cfg(not(feature = "unchecked"))]
     pub(crate) fn throw_on_size(&self, (_arr, _map, s): (usize, usize, usize)) -> RhaiResultOf<()> {
-        if self
-            .limits
-            .max_string_len
-            .map_or(false, |max| s > max.get())
-        {
+        if self.limits.string_len.map_or(false, |max| s > max.get()) {
             return Err(
                 ERR::ErrorDataTooLarge("Length of string".to_string(), Position::NONE).into(),
             );
         }
 
         #[cfg(not(feature = "no_index"))]
-        if self
-            .limits
-            .max_array_size
-            .map_or(false, |max| _arr > max.get())
-        {
+        if self.limits.array_size.map_or(false, |max| _arr > max.get()) {
             return Err(
                 ERR::ErrorDataTooLarge("Size of array/BLOB".to_string(), Position::NONE).into(),
             );
         }
 
         #[cfg(not(feature = "no_object"))]
-        if self
-            .limits
-            .max_map_size
-            .map_or(false, |max| _map > max.get())
-        {
+        if self.limits.map_size.map_or(false, |max| _map > max.get()) {
             return Err(
                 ERR::ErrorDataTooLarge("Size of object map".to_string(), Position::NONE).into(),
             );

@@ -1,9 +1,7 @@
 #![cfg(not(feature = "no_time"))]
 use rhai::Engine;
-
 #[cfg(not(feature = "no_float"))]
 use rhai::FLOAT;
-
 #[cfg(feature = "no_float")]
 use rhai::INT;
 
@@ -118,4 +116,8 @@ fn test_timestamp_op() {
             .unwrap(),
         42
     );
+
+    // Check edge case for crashes
+    #[cfg(not(feature = "unchecked"))]
+    let _ = engine.run("timestamp()-24>>-60");
 }

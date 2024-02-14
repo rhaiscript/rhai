@@ -6,7 +6,7 @@ use crate::func::StraightHashMap;
 use crate::tokenizer::Token;
 use crate::types::dynamic::Union;
 use crate::types::Span;
-use crate::{calc_fn_hash, Dynamic, Position, INT};
+use crate::{calc_fn_hash, Dynamic, FnArgsVec, Position, StaticVec, INT};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{
@@ -103,7 +103,8 @@ impl OpAssignment {
     #[must_use]
     #[inline(always)]
     pub fn new_op_assignment(name: &str, pos: Position) -> Self {
-        let op = Token::lookup_symbol_from_syntax(name).expect("operator");
+        let op = Token::lookup_symbol_from_syntax(name)
+            .unwrap_or_else(|| panic!("{} is not an op-assignment operator", name));
         Self::new_op_assignment_from_token(op, pos)
     }
     /// Create a new [`OpAssignment`] from a [`Token`].
@@ -115,7 +116,7 @@ impl OpAssignment {
     pub fn new_op_assignment_from_token(op_assign: Token, pos: Position) -> Self {
         let op = op_assign
             .get_base_op_from_assignment()
-            .expect("op-assignment operator");
+            .unwrap_or_else(|| panic!("{:?} is not an op-assignment operator", op_assign));
 
         let op_assign_syntax = op_assign.literal_syntax();
         let op_syntax = op.literal_syntax();
@@ -138,7 +139,8 @@ impl OpAssignment {
     #[must_use]
     #[inline(always)]
     pub fn new_op_assignment_from_base(name: &str, pos: Position) -> Self {
-        let op = Token::lookup_symbol_from_syntax(name).expect("operator");
+        let op = Token::lookup_symbol_from_syntax(name)
+            .unwrap_or_else(|| panic!("{} cannot be converted into an op-operator", name));
         Self::new_op_assignment_from_base_token(&op, pos)
     }
     /// Convert a [`Token`] into a new [`OpAssignment`].
@@ -149,7 +151,11 @@ impl OpAssignment {
     #[inline(always)]
     #[must_use]
     pub fn new_op_assignment_from_base_token(op: &Token, pos: Position) -> Self {
-        Self::new_op_assignment_from_token(op.convert_to_op_assignment().expect("operator"), pos)
+        Self::new_op_assignment_from_token(
+            op.convert_to_op_assignment()
+                .unwrap_or_else(|| panic!("{:?} cannot be converted into an op-operator", op)),
+            pos,
+        )
     }
 }
 
@@ -168,55 +174,8 @@ impl fmt::Debug for OpAssignment {
                 .field("pos", &self.pos)
                 .finish()
         } else {
-            fmt::Debug::fmt(&self.pos, f)
+            write!(f, "{} @ {:?}", Token::Equals, self.pos)
         }
-    }
-}
-
-/// _(internals)_ An expression with a condition.
-/// Exported under the `internals` feature only.
-///
-/// The condition may simply be [`Expr::BoolConstant`] with `true` if there is actually no condition.
-#[derive(Debug, Clone, Default, Hash)]
-pub struct ConditionalExpr {
-    /// Condition.
-    pub condition: Expr,
-    /// Expression.
-    pub expr: Expr,
-}
-
-impl<E: Into<Expr>> From<E> for ConditionalExpr {
-    #[inline(always)]
-    fn from(value: E) -> Self {
-        Self {
-            condition: Expr::BoolConstant(true, Position::NONE),
-            expr: value.into(),
-        }
-    }
-}
-
-impl<E: Into<Expr>> From<(Expr, E)> for ConditionalExpr {
-    #[inline(always)]
-    fn from(value: (Expr, E)) -> Self {
-        Self {
-            condition: value.0,
-            expr: value.1.into(),
-        }
-    }
-}
-
-impl ConditionalExpr {
-    /// Is the condition always `true`?
-    #[inline(always)]
-    #[must_use]
-    pub const fn is_always_true(&self) -> bool {
-        matches!(self.condition, Expr::BoolConstant(true, ..))
-    }
-    /// Is the condition always `false`?
-    #[inline(always)]
-    #[must_use]
-    pub const fn is_always_false(&self) -> bool {
-        matches!(self.condition, Expr::BoolConstant(false, ..))
     }
 }
 
@@ -349,7 +308,7 @@ impl RangeCase {
             Self::InclusiveInt(..) => true,
         }
     }
-    /// Get the index to the [`ConditionalExpr`].
+    /// Get the index to the list of expressions.
     #[inline(always)]
     #[must_use]
     pub const fn index(&self) -> usize {
@@ -357,7 +316,7 @@ impl RangeCase {
             Self::ExclusiveInt(.., n) | Self::InclusiveInt(.., n) => *n,
         }
     }
-    /// Set the index to the [`ConditionalExpr`].
+    /// Set the index to the list of expressions.
     #[inline(always)]
     pub fn set_index(&mut self, index: usize) {
         match self {
@@ -372,12 +331,12 @@ pub type CaseBlocksList = smallvec::SmallVec<[usize; 2]>;
 /// Exported under the `internals` feature only.
 #[derive(Debug, Clone)]
 pub struct SwitchCasesCollection {
-    /// List of [`ConditionalExpr`]'s.
-    pub expressions: Vec<ConditionalExpr>,
-    /// Dictionary mapping value hashes to [`ConditionalExpr`]'s.
+    /// List of conditional expressions: LHS = condition, RHS = expression.
+    pub expressions: FnArgsVec<BinaryExpr>,
+    /// Dictionary mapping value hashes to [`CaseBlocksList`]'s.
     pub cases: StraightHashMap<CaseBlocksList>,
     /// List of range cases.
-    pub ranges: Vec<RangeCase>,
+    pub ranges: StaticVec<RangeCase>,
     /// Statements block for the default case (there can be no condition for the default case).
     pub def_case: Option<usize>,
 }
@@ -895,20 +854,20 @@ impl Stmt {
                 expr.is_pure()
                     && sw.cases.values().flat_map(|cases| cases.iter()).all(|&c| {
                         let block = &sw.expressions[c];
-                        block.condition.is_pure() && block.expr.is_pure()
+                        block.lhs.is_pure() && block.rhs.is_pure()
                     })
                     && sw.ranges.iter().all(|r| {
                         let block = &sw.expressions[r.index()];
-                        block.condition.is_pure() && block.expr.is_pure()
+                        block.lhs.is_pure() && block.rhs.is_pure()
                     })
                     && sw.def_case.is_some()
-                    && sw.expressions[sw.def_case.unwrap()].expr.is_pure()
+                    && sw.expressions[sw.def_case.unwrap()].rhs.is_pure()
             }
 
             // Loops that exit can be pure because it can never be infinite.
             Self::While(x, ..) if matches!(x.expr, Expr::BoolConstant(false, ..)) => true,
             Self::Do(x, options, ..) if matches!(x.expr, Expr::BoolConstant(..)) => match x.expr {
-                Expr::BoolConstant(cond, ..) if cond == options.contains(ASTFlags::NEGATED) => {
+                Expr::BoolConstant(cond, ..) if cond == options.intersects(ASTFlags::NEGATED) => {
                     x.body.iter().all(Self::is_pure)
                 }
                 _ => false,
@@ -1052,10 +1011,10 @@ impl Stmt {
                     for &b in blocks {
                         let block = &sw.expressions[b];
 
-                        if !block.condition.walk(path, on_node) {
+                        if !block.lhs.walk(path, on_node) {
                             return false;
                         }
-                        if !block.expr.walk(path, on_node) {
+                        if !block.rhs.walk(path, on_node) {
                             return false;
                         }
                     }
@@ -1063,15 +1022,15 @@ impl Stmt {
                 for r in &sw.ranges {
                     let block = &sw.expressions[r.index()];
 
-                    if !block.condition.walk(path, on_node) {
+                    if !block.lhs.walk(path, on_node) {
                         return false;
                     }
-                    if !block.expr.walk(path, on_node) {
+                    if !block.rhs.walk(path, on_node) {
                         return false;
                     }
                 }
                 if let Some(index) = sw.def_case {
-                    if !sw.expressions[index].expr.walk(path, on_node) {
+                    if !sw.expressions[index].lhs.walk(path, on_node) {
                         return false;
                     }
                 }

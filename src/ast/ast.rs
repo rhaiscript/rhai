@@ -1,7 +1,7 @@
 //! Module defining the AST (abstract syntax tree).
 
 use super::{ASTFlags, Expr, FnAccess, Stmt};
-use crate::{Dynamic, FnNamespace, ImmutableString, Position};
+use crate::{Dynamic, FnNamespace, ImmutableString, Position, ThinVec};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{
@@ -22,7 +22,7 @@ pub struct AST {
     /// Source of the [`AST`].
     source: Option<ImmutableString>,
     /// Global statements.
-    body: Box<[Stmt]>,
+    body: ThinVec<Stmt>,
     /// Script-defined functions.
     #[cfg(not(feature = "no_function"))]
     lib: crate::SharedModule,
@@ -79,10 +79,7 @@ impl AST {
             source: None,
             #[cfg(feature = "metadata")]
             doc: crate::SmartString::new_const(),
-            body: statements
-                .into_iter()
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
+            body: statements.into_iter().collect(),
             #[cfg(not(feature = "no_function"))]
             lib: functions.into(),
             #[cfg(not(feature = "no_module"))]
@@ -102,10 +99,7 @@ impl AST {
             source: None,
             #[cfg(feature = "metadata")]
             doc: crate::SmartString::new_const(),
-            body: statements
-                .into_iter()
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
+            body: statements.into_iter().collect(),
             #[cfg(not(feature = "no_function"))]
             lib: functions.into(),
             #[cfg(not(feature = "no_module"))]
@@ -210,7 +204,7 @@ impl AST {
     #[cfg(not(feature = "internals"))]
     #[inline(always)]
     #[must_use]
-    pub(crate) const fn statements(&self) -> &[Stmt] {
+    pub(crate) fn statements(&self) -> &[Stmt] {
         &self.body
     }
     /// _(internals)_ Get the statements.
@@ -218,14 +212,14 @@ impl AST {
     #[cfg(feature = "internals")]
     #[inline(always)]
     #[must_use]
-    pub const fn statements(&self) -> &[Stmt] {
+    pub fn statements(&self) -> &[Stmt] {
         &self.body
     }
     /// Get the statements.
     #[inline(always)]
     #[must_use]
     #[allow(dead_code)]
-    pub(crate) fn statements_mut(&mut self) -> &mut Box<[Stmt]> {
+    pub(crate) fn statements_mut(&mut self) -> &mut ThinVec<Stmt> {
         &mut self.body
     }
     /// Does this [`AST`] contain script-defined functions?
@@ -643,12 +637,7 @@ impl AST {
         match (self.body.as_ref(), other.body.as_ref()) {
             (_, []) => (),
             ([], _) => self.body = other.body,
-            (_, _) => {
-                let mut body = self.body.to_vec();
-                let other = other.body.to_vec();
-                body.extend(other);
-                self.body = body.into_boxed_slice();
-            }
+            (_, _) => self.body.extend(other.body),
         }
 
         #[cfg(not(feature = "no_function"))]
@@ -711,7 +700,7 @@ impl AST {
     #[cfg(feature = "internals")]
     #[cfg(not(feature = "no_function"))]
     #[inline]
-    pub fn iter_fn_def(&self) -> impl Iterator<Item = &crate::Shared<super::ScriptFnDef>> {
+    pub fn iter_fn_def(&self) -> impl Iterator<Item = &crate::Shared<super::ScriptFuncDef>> {
         self.lib.iter_script_fn().map(|(.., fn_def)| fn_def)
     }
     /// Iterate through all function definitions.
@@ -721,7 +710,7 @@ impl AST {
     #[cfg(not(feature = "no_function"))]
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn iter_fn_def(&self) -> impl Iterator<Item = &crate::Shared<super::ScriptFnDef>> {
+    pub(crate) fn iter_fn_def(&self) -> impl Iterator<Item = &crate::Shared<super::ScriptFuncDef>> {
         self.lib.iter_script_fn().map(|(.., fn_def)| fn_def)
     }
     /// Iterate through all function definitions.
@@ -817,12 +806,12 @@ impl AST {
     ) -> impl Iterator<Item = (&str, bool, Dynamic)> {
         self.statements().iter().filter_map(move |stmt| match stmt {
             Stmt::Var(x, options, ..)
-                if options.contains(ASTFlags::CONSTANT) && include_constants
-                    || !options.contains(ASTFlags::CONSTANT) && include_variables =>
+                if options.intersects(ASTFlags::CONSTANT) && include_constants
+                    || !options.intersects(ASTFlags::CONSTANT) && include_variables =>
             {
                 let (name, expr, ..) = &**x;
                 expr.get_literal_value()
-                    .map(|value| (name.as_str(), options.contains(ASTFlags::CONSTANT), value))
+                    .map(|value| (name.as_str(), options.intersects(ASTFlags::CONSTANT), value))
             }
             _ => None,
         })
@@ -984,4 +973,24 @@ impl ASTNode<'_> {
             Self::Expr(expr) => expr.position(),
         }
     }
+}
+
+/// _(internals)_ Encapsulated AST environment.
+/// Exported under the `internals` feature only.
+///
+/// 1) functions defined within the same AST
+/// 2) the stack of imported [modules][crate::Module]
+/// 3) global constants
+#[derive(Debug, Clone)]
+pub struct EncapsulatedEnviron {
+    /// Functions defined within the same [`AST`][crate::AST].
+    #[cfg(not(feature = "no_function"))]
+    pub lib: crate::SharedModule,
+    /// Imported [modules][crate::Module].
+    #[cfg(not(feature = "no_module"))]
+    pub imports: crate::ThinVec<(ImmutableString, crate::SharedModule)>,
+    /// Globally-defined constants.
+    #[cfg(not(feature = "no_module"))]
+    #[cfg(not(feature = "no_function"))]
+    pub constants: Option<crate::eval::SharedGlobalConstants>,
 }

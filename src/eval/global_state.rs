@@ -25,14 +25,14 @@ pub type SharedGlobalConstants =
 pub struct GlobalRuntimeState {
     /// Names of imported [modules][crate::Module].
     #[cfg(not(feature = "no_module"))]
-    imports: Vec<ImmutableString>,
+    imports: crate::ThinVec<ImmutableString>,
     /// Stack of imported [modules][crate::Module].
     #[cfg(not(feature = "no_module"))]
-    modules: Vec<crate::SharedModule>,
+    modules: crate::ThinVec<crate::SharedModule>,
 
     /// The current stack of loaded [modules][crate::Module] containing script-defined functions.
     #[cfg(not(feature = "no_function"))]
-    pub lib: Vec<crate::SharedModule>,
+    pub lib: crate::ThinVec<crate::SharedModule>,
     /// Source of the current context.
     ///
     /// No source if the string is empty.
@@ -82,11 +82,11 @@ impl GlobalRuntimeState {
     pub fn new(engine: &Engine) -> Self {
         Self {
             #[cfg(not(feature = "no_module"))]
-            imports: Vec::new(),
+            imports: crate::ThinVec::new(),
             #[cfg(not(feature = "no_module"))]
-            modules: Vec::new(),
+            modules: crate::ThinVec::new(),
             #[cfg(not(feature = "no_function"))]
-            lib: Vec::new(),
+            lib: crate::ThinVec::new(),
             source: None,
             num_operations: 0,
             #[cfg(not(feature = "no_module"))]
@@ -176,7 +176,7 @@ impl GlobalRuntimeState {
     /// Not available under `no_module`.
     #[cfg(not(feature = "no_module"))]
     #[inline]
-    pub(crate) fn iter_imports_raw(
+    pub fn iter_imports_raw(
         &self,
     ) -> impl Iterator<Item = (&ImmutableString, &crate::SharedModule)> {
         self.imports.iter().rev().zip(self.modules.iter().rev())
@@ -224,7 +224,7 @@ impl GlobalRuntimeState {
         &self,
         hash: u64,
         global_namespace_only: bool,
-    ) -> Option<(&crate::func::CallableFunction, Option<&ImmutableString>)> {
+    ) -> Option<(&crate::func::RhaiFunc, Option<&ImmutableString>)> {
         if global_namespace_only {
             self.modules
                 .iter()
@@ -256,7 +256,7 @@ impl GlobalRuntimeState {
     #[cfg(not(feature = "no_module"))]
     #[inline]
     #[must_use]
-    pub fn get_iter(&self, id: std::any::TypeId) -> Option<&crate::func::IteratorFn> {
+    pub fn get_iter(&self, id: std::any::TypeId) -> Option<&crate::func::FnIterator> {
         self.modules
             .iter()
             .rev()

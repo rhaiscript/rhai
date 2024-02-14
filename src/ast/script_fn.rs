@@ -10,7 +10,7 @@ use std::{fmt, hash::Hash};
 /// _(internals)_ A type containing information on a script-defined function.
 /// Exported under the `internals` feature only.
 #[derive(Debug, Clone)]
-pub struct ScriptFnDef {
+pub struct ScriptFuncDef {
     /// Function body.
     pub body: StmtBlock,
     /// Function name.
@@ -37,10 +37,10 @@ pub struct ScriptFnDef {
     ///
     /// Each line in non-block doc-comments starts with `///`.
     #[cfg(feature = "metadata")]
-    pub comments: Box<[crate::SmartString]>,
+    pub comments: crate::StaticVec<crate::SmartString>,
 }
 
-impl fmt::Display for ScriptFnDef {
+impl fmt::Display for ScriptFuncDef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         #[cfg(not(feature = "no_object"))]
         let this_type = self
@@ -148,9 +148,9 @@ impl fmt::Display for ScriptFnMetadata<'_> {
     }
 }
 
-impl<'a> From<&'a ScriptFnDef> for ScriptFnMetadata<'a> {
+impl<'a> From<&'a ScriptFuncDef> for ScriptFnMetadata<'a> {
     #[inline]
-    fn from(value: &'a ScriptFnDef) -> Self {
+    fn from(value: &'a ScriptFuncDef) -> Self {
         Self {
             name: &value.name,
             params: value.params.iter().map(ImmutableString::as_str).collect(),

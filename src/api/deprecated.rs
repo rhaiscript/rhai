@@ -1,12 +1,13 @@
 //! Module containing all deprecated API that will be removed in the next major version.
 
-use crate::func::SendSync;
+use crate::func::{RhaiFunc, SendSync};
 use crate::types::dynamic::Variant;
 use crate::{
-    Dynamic, Engine, EvalAltResult, FnPtr, Identifier, ImmutableString, Module, NativeCallContext,
-    Position, RegisterNativeFunction, RhaiResult, RhaiResultOf, Scope, SharedModule, TypeBuilder,
-    AST,
+    Dynamic, Engine, EvalAltResult, FnAccess, FnNamespace, FnPtr, FuncRegistration, Identifier,
+    ImmutableString, Module, NativeCallContext, Position, RhaiNativeFunc, RhaiResult, RhaiResultOf,
+    Scope, SharedModule, TypeBuilder, AST,
 };
+use std::any::TypeId;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -195,10 +196,10 @@ impl Engine {
     /// This method will be removed in the next major version.
     #[deprecated(since = "1.9.1", note = "use `register_fn` instead")]
     #[inline(always)]
-    pub fn register_result_fn<A: 'static, const N: usize, const C: bool, R: Variant + Clone>(
+    pub fn register_result_fn<A: 'static, const N: usize, const X: bool, R: Variant + Clone>(
         &mut self,
         name: impl AsRef<str> + Into<Identifier>,
-        func: impl RegisterNativeFunction<A, N, C, R, true> + SendSync + 'static,
+        func: impl RhaiNativeFunc<A, N, X, R, true> + SendSync + 'static,
     ) -> &mut Self {
         self.register_fn(name, func)
     }
@@ -217,10 +218,10 @@ impl Engine {
     #[deprecated(since = "1.9.1", note = "use `register_get` instead")]
     #[cfg(not(feature = "no_object"))]
     #[inline(always)]
-    pub fn register_get_result<T: Variant + Clone, const C: bool, V: Variant + Clone>(
+    pub fn register_get_result<T: Variant + Clone, const X: bool, R: Variant + Clone>(
         &mut self,
         name: impl AsRef<str>,
-        get_fn: impl RegisterNativeFunction<(Mut<T>,), 1, C, V, true> + SendSync + 'static,
+        get_fn: impl RhaiNativeFunc<(Mut<T>,), 1, X, R, true> + SendSync + 'static,
     ) -> &mut Self {
         self.register_get(name, get_fn)
     }
@@ -237,10 +238,10 @@ impl Engine {
     #[deprecated(since = "1.9.1", note = "use `register_set` instead")]
     #[cfg(not(feature = "no_object"))]
     #[inline(always)]
-    pub fn register_set_result<T: Variant + Clone, V: Variant + Clone, const C: bool, S>(
+    pub fn register_set_result<T: Variant + Clone, V: Variant + Clone, const X: bool>(
         &mut self,
         name: impl AsRef<str>,
-        set_fn: impl RegisterNativeFunction<(Mut<T>, V), 2, C, (), true> + SendSync + 'static,
+        set_fn: impl RhaiNativeFunc<(Mut<T>, V), 2, X, (), true> + SendSync + 'static,
     ) -> &mut Self {
         self.register_set(name, set_fn)
     }
@@ -261,12 +262,12 @@ impl Engine {
     #[inline(always)]
     pub fn register_indexer_get_result<
         T: Variant + Clone,
-        X: Variant + Clone,
-        V: Variant + Clone,
-        const C: bool,
+        IDX: Variant + Clone,
+        R: Variant + Clone,
+        const X: bool,
     >(
         &mut self,
-        get_fn: impl RegisterNativeFunction<(Mut<T>, X), 2, C, V, true> + SendSync + 'static,
+        get_fn: impl RhaiNativeFunc<(Mut<T>, IDX), 2, X, R, true> + SendSync + 'static,
     ) -> &mut Self {
         self.register_indexer_get(get_fn)
     }
@@ -285,12 +286,12 @@ impl Engine {
     #[inline(always)]
     pub fn register_indexer_set_result<
         T: Variant + Clone,
-        X: Variant + Clone,
-        V: Variant + Clone,
-        const C: bool,
+        IDX: Variant + Clone,
+        R: Variant + Clone,
+        const X: bool,
     >(
         &mut self,
-        set_fn: impl RegisterNativeFunction<(Mut<T>, X, V), 3, C, (), true> + SendSync + 'static,
+        set_fn: impl RhaiNativeFunc<(Mut<T>, IDX, R), 3, X, (), true> + SendSync + 'static,
     ) -> &mut Self {
         self.register_indexer_set(set_fn)
     }
@@ -397,6 +398,19 @@ impl AST {
     #[must_use]
     pub fn lib(&self) -> &crate::Module {
         self.shared_lib()
+    }
+    /// Clear the documentation.
+    /// Exported under the `metadata` feature only.
+    ///
+    /// # Deprecated
+    ///
+    /// This method will be removed in the next major version.
+    #[deprecated(since = "1.17.0")]
+    #[cfg(feature = "metadata")]
+    #[inline(always)]
+    pub fn clear_doc(&mut self) -> &mut Self {
+        self.doc.clear();
+        self
     }
 }
 
@@ -537,7 +551,7 @@ impl Position {
 }
 
 #[allow(deprecated)]
-impl<'a, T: Variant + Clone> TypeBuilder<'a, T> {
+impl<T: Variant + Clone> TypeBuilder<'_, T> {
     /// Register a custom fallible function.
     ///
     /// # Deprecated
@@ -548,15 +562,15 @@ impl<'a, T: Variant + Clone> TypeBuilder<'a, T> {
     /// This method will be removed in the next major version.
     #[deprecated(since = "1.9.1", note = "use `with_fn` instead")]
     #[inline(always)]
-    pub fn with_result_fn<S, A: 'static, const N: usize, const C: bool, R, F>(
+    pub fn with_result_fn<S, A: 'static, const N: usize, const X: bool, R, FUNC>(
         &mut self,
         name: S,
-        method: F,
+        method: FUNC,
     ) -> &mut Self
     where
         S: AsRef<str> + Into<Identifier>,
         R: Variant + Clone,
-        F: RegisterNativeFunction<A, N, C, R, true> + SendSync + 'static,
+        FUNC: RhaiNativeFunc<A, N, X, R, true> + SendSync + 'static,
     {
         self.with_fn(name, method)
     }
@@ -576,10 +590,10 @@ impl<'a, T: Variant + Clone> TypeBuilder<'a, T> {
     #[deprecated(since = "1.9.1", note = "use `with_get` instead")]
     #[cfg(not(feature = "no_object"))]
     #[inline(always)]
-    pub fn with_get_result<V: Variant + Clone, const C: bool>(
+    pub fn with_get_result<const X: bool, R: Variant + Clone>(
         &mut self,
         name: impl AsRef<str>,
-        get_fn: impl RegisterNativeFunction<(Mut<T>,), 1, C, V, true> + SendSync + 'static,
+        get_fn: impl RhaiNativeFunc<(Mut<T>,), 1, X, R, true> + SendSync + 'static,
     ) -> &mut Self {
         self.with_get(name, get_fn)
     }
@@ -597,10 +611,10 @@ impl<'a, T: Variant + Clone> TypeBuilder<'a, T> {
     #[deprecated(since = "1.9.1", note = "use `with_set` instead")]
     #[cfg(not(feature = "no_object"))]
     #[inline(always)]
-    pub fn with_set_result<V: Variant + Clone, const C: bool>(
+    pub fn with_set_result<const X: bool, R: Variant + Clone>(
         &mut self,
         name: impl AsRef<str>,
-        set_fn: impl RegisterNativeFunction<(Mut<T>, V), 2, C, (), true> + SendSync + 'static,
+        set_fn: impl RhaiNativeFunc<(Mut<T>, R), 2, X, (), true> + SendSync + 'static,
     ) -> &mut Self {
         self.with_set(name, set_fn)
     }
@@ -620,9 +634,9 @@ impl<'a, T: Variant + Clone> TypeBuilder<'a, T> {
     #[deprecated(since = "1.9.1", note = "use `with_indexer_get` instead")]
     #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
     #[inline(always)]
-    pub fn with_indexer_get_result<X: Variant + Clone, V: Variant + Clone, const C: bool>(
+    pub fn with_indexer_get_result<IDX: Variant + Clone, R: Variant + Clone, const X: bool>(
         &mut self,
-        get_fn: impl RegisterNativeFunction<(Mut<T>, X), 2, C, V, true> + SendSync + 'static,
+        get_fn: impl RhaiNativeFunc<(Mut<T>, IDX), 2, X, R, true> + SendSync + 'static,
     ) -> &mut Self {
         self.with_indexer_get(get_fn)
     }
@@ -640,9 +654,9 @@ impl<'a, T: Variant + Clone> TypeBuilder<'a, T> {
     #[deprecated(since = "1.9.1", note = "use `with_indexer_set` instead")]
     #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
     #[inline(always)]
-    pub fn with_indexer_set_result<X: Variant + Clone, V: Variant + Clone, const C: bool>(
+    pub fn with_indexer_set_result<IDX: Variant + Clone, R: Variant + Clone, const X: bool>(
         &mut self,
-        set_fn: impl RegisterNativeFunction<(Mut<T>, X, V), 3, C, (), true> + SendSync + 'static,
+        set_fn: impl RhaiNativeFunc<(Mut<T>, IDX, R), 3, X, (), true> + SendSync + 'static,
     ) -> &mut Self {
         self.with_indexer_set(set_fn)
     }
@@ -680,6 +694,115 @@ impl Module {
     )]
     pub fn get_custom_type(&self, type_name: &str) -> Option<&str> {
         self.get_custom_type_display_by_name(type_name)
+    }
+
+    /// Set a native Rust function into the [`Module`], returning a [`u64`] hash key.
+    ///
+    /// If there is an existing Rust function of the same hash, it is replaced.
+    ///
+    /// # Deprecated
+    ///
+    /// This method is deprecated.
+    /// Use the [`FuncRegistration`] API instead.
+    ///
+    /// This method will be removed in the next major version.
+    #[deprecated(since = "1.17.0", note = "use the `FuncRegistration` API instead")]
+    #[inline(always)]
+    pub fn set_fn(
+        &mut self,
+        name: impl Into<Identifier>,
+        namespace: FnNamespace,
+        _access: FnAccess,
+        arg_names: Option<&[&str]>,
+        arg_types: impl AsRef<[TypeId]>,
+        func: RhaiFunc,
+    ) -> u64 {
+        let _arg_names = arg_names;
+
+        let fx = FuncRegistration::new(name).with_namespace(namespace);
+
+        #[cfg(feature = "metadata")]
+        let fx = if let Some(arg_names) = _arg_names {
+            fx.with_params_info(arg_names)
+        } else {
+            fx
+        };
+
+        fx.set_into_module_raw(self, arg_types, func).hash
+    }
+
+    /// _(metadata)_ Set a native Rust function into the [`Module`], returning a [`u64`] hash key.
+    /// Exported under the `metadata` feature only.
+    ///
+    /// If there is an existing Rust function of the same hash, it is replaced.
+    ///
+    /// # Deprecated
+    ///
+    /// This method is deprecated.
+    /// Use the [`FuncRegistration`] API instead.
+    ///
+    /// This method will be removed in the next major version.
+    #[deprecated(since = "1.17.0", note = "use the `FuncRegistration` API instead")]
+    #[cfg(feature = "metadata")]
+    #[inline(always)]
+    pub fn set_fn_with_comments<C: AsRef<str>>(
+        &mut self,
+        name: impl Into<Identifier>,
+        namespace: FnNamespace,
+        _access: FnAccess,
+        arg_names: Option<&[&str]>,
+        arg_types: impl AsRef<[TypeId]>,
+        comments: impl IntoIterator<Item = C>,
+        func: RhaiFunc,
+    ) -> u64 {
+        FuncRegistration::new(name)
+            .with_namespace(namespace)
+            .with_params_info(arg_names.unwrap_or(&[]))
+            .with_comments(comments)
+            .set_into_module_raw(self, arg_types, func)
+            .hash
+    }
+
+    /// _(metadata)_ Update the metadata (parameter names/types and return type) of a registered function.
+    /// Exported under the `metadata` feature only.
+    ///
+    /// The [`u64`] hash is returned by the [`set_native_fn`][Module::set_native_fn] call.
+    ///
+    /// # Deprecated
+    ///
+    /// This method is deprecated.
+    /// Use [`update_fn_metadata_with_comments`][`Module::update_fn_metadata_with_comments`] instead.
+    ///
+    /// This method will be removed in the next major version.
+    #[deprecated(
+        since = "1.17.0",
+        note = "use `update_fn_metadata_with_comments` instead"
+    )]
+    #[cfg(feature = "metadata")]
+    #[inline(always)]
+    #[allow(deprecated)]
+    pub fn update_fn_metadata<S: Into<Identifier>>(
+        &mut self,
+        hash_fn: u64,
+        arg_names: impl IntoIterator<Item = S>,
+    ) -> &mut Self {
+        self.update_fn_metadata_with_comments(hash_fn, arg_names, [""; 0])
+    }
+
+    /// _(metadata)_ Generate signatures for all the non-private functions in the [`Module`].
+    /// Exported under the `metadata` feature only.
+    ///
+    /// # Deprecated
+    ///
+    /// This method is deprecated.
+    /// Use [`gen_fn_signatures_with_mapper`][`Module::gen_fn_signatures_with_mapper`] instead.
+    ///
+    /// This method will be removed in the next major version.
+    #[deprecated(since = "1.17.0", note = "use `gen_fn_signatures_with_mapper` instead")]
+    #[cfg(feature = "metadata")]
+    #[inline(always)]
+    pub fn gen_fn_signatures(&self) -> impl Iterator<Item = String> + '_ {
+        self.gen_fn_signatures_with_mapper(|s| s.into())
     }
 }
 

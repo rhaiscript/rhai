@@ -2,8 +2,7 @@
 
 use super::{Caches, EvalContext, GlobalRuntimeState, Target};
 use crate::ast::{
-    ASTFlags, BinaryExpr, ConditionalExpr, Expr, FlowControl, OpAssignment, Stmt,
-    SwitchCasesCollection,
+    ASTFlags, BinaryExpr, Expr, FlowControl, OpAssignment, Stmt, SwitchCasesCollection,
 };
 use crate::eval::search_namespace;
 use crate::func::{get_builtin_op_assignment_fn, get_hasher};
@@ -18,9 +17,7 @@ use std::prelude::v1::*;
 #[inline(always)]
 fn intern_string(value: Dynamic, engine: &Engine) -> Dynamic {
     match value.0 {
-        Union::Str(..) => engine
-            .get_interned_string(value.into_immutable_string().expect("`ImmutableString`"))
-            .into(),
+        Union::Str(s, ..) => engine.get_interned_string(s).into(),
         _ => value,
     }
 }
@@ -74,7 +71,7 @@ impl Engine {
             let this_ptr = this_ptr.as_deref_mut();
 
             #[cfg(not(feature = "no_module"))]
-            let imports_len = global.num_imports();
+            let orig_imports_len = global.num_imports();
 
             let result =
                 self.eval_stmt(global, caches, scope, this_ptr, stmt, restore_orig_state)?;
@@ -85,7 +82,7 @@ impl Engine {
                 // Without global functions, the extra modules never affect function resolution.
                 if global
                     .scan_imports_raw()
-                    .skip(imports_len)
+                    .skip(orig_imports_len)
                     .any(|(.., m)| m.contains_indexed_global_functions())
                 {
                     // Different scenarios where the cache must be cleared - notice that this is
@@ -222,9 +219,9 @@ impl Engine {
                 let opx = Some(op_x);
                 let args = &mut [&mut *lock_guard, &mut new_val];
 
-                match self
-                    .exec_native_fn_call(global, caches, op_x_str, opx, hash_x, args, true, pos)
-                {
+                match self.exec_native_fn_call(
+                    global, caches, op_x_str, opx, hash_x, args, true, false, pos,
+                ) {
                     Ok(_) => (),
                     Err(err) if matches!(*err, ERR::ErrorFunctionNotFound(ref f, ..) if f.starts_with(op_x_str)) =>
                     {
@@ -232,7 +229,9 @@ impl Engine {
                         let op = Some(op);
 
                         *args[0] = self
-                            .exec_native_fn_call(global, caches, op_str, op, hash, args, true, pos)?
+                            .exec_native_fn_call(
+                                global, caches, op_str, op, hash, args, true, false, pos,
+                            )?
                             .0;
                     }
                     Err(err) => return Err(err),
@@ -391,12 +390,12 @@ impl Engine {
                 // Let/const statement
                 let (var_name, expr, index) = &**x;
 
-                let access = if options.contains(ASTFlags::CONSTANT) {
+                let access = if options.intersects(ASTFlags::CONSTANT) {
                     AccessMode::ReadOnly
                 } else {
                     AccessMode::ReadWrite
                 };
-                let export = options.contains(ASTFlags::EXPORTED);
+                let export = options.intersects(ASTFlags::EXPORTED);
 
                 // Check variable definition filter
                 if let Some(ref filter) = self.def_var_filter {
@@ -455,15 +454,11 @@ impl Engine {
                         .insert(var_name.name.clone(), value.clone());
                     }
 
-                    if export {
-                        Some(var_name)
-                    } else {
-                        None
-                    }
-                } else if export {
-                    unreachable!("exported variable not on global level");
-                } else {
+                    export.then_some(var_name)
+                } else if !export {
                     None
+                } else {
+                    unreachable!("exported variable not on global level");
                 };
 
                 match index {
@@ -530,7 +525,7 @@ impl Engine {
                         for &index in case_blocks_list {
                             let block = &expressions[index];
 
-                            let cond_result = match block.condition {
+                            let cond_result = match block.lhs {
                                 Expr::BoolConstant(b, ..) => b,
                                 ref c => self
                                     .eval_expr(global, caches, scope, this_ptr.as_deref_mut(), c)?
@@ -541,16 +536,16 @@ impl Engine {
                             };
 
                             if cond_result {
-                                result = Some(&block.expr);
+                                result = Some(&block.rhs);
                                 break;
                             }
                         }
                     } else if !ranges.is_empty() {
                         // Then check integer ranges
                         for r in ranges.iter().filter(|r| r.contains(&value)) {
-                            let ConditionalExpr { condition, expr } = &expressions[r.index()];
+                            let BinaryExpr { lhs, rhs } = &expressions[r.index()];
 
-                            let cond_result = match condition {
+                            let cond_result = match lhs {
                                 Expr::BoolConstant(b, ..) => *b,
                                 c => self
                                     .eval_expr(global, caches, scope, this_ptr.as_deref_mut(), c)?
@@ -561,7 +556,7 @@ impl Engine {
                             };
 
                             if cond_result {
-                                result = Some(expr);
+                                result = Some(rhs);
                                 break;
                             }
                         }
@@ -569,7 +564,7 @@ impl Engine {
                 }
 
                 result
-                    .or_else(|| def_case.as_ref().map(|&index| &expressions[index].expr))
+                    .or_else(|| def_case.as_ref().map(|&index| &expressions[index].rhs))
                     .map_or(Ok(Dynamic::UNIT), |expr| {
                         self.eval_expr(global, caches, scope, this_ptr, expr)
                     })
@@ -637,7 +632,7 @@ impl Engine {
             // Do loop
             Stmt::Do(x, options, ..) => {
                 let FlowControl { expr, body, .. } = &**x;
-                let is_while = !options.contains(ASTFlags::NEGATED);
+                let is_while = !options.intersects(ASTFlags::NEGATED);
 
                 loop {
                     if !body.is_empty() {
@@ -725,18 +720,18 @@ impl Engine {
                         self.track_operation(global, body.position())?;
                     }
                 } else {
-                    for (x, iter_value) in iter_func(iter_obj).enumerate() {
+                    for (i, iter_value) in iter_func(iter_obj).enumerate() {
                         // Increment counter
                         if let Some(counter_index) = counter_index {
                             // As the variable increments from 0, this should always work
                             // since any overflow will first be caught below.
-                            let index_value = x as INT;
+                            let index_value = i as INT;
 
                             #[cfg(not(feature = "unchecked"))]
                             #[allow(clippy::absurd_extreme_comparisons)]
                             if index_value > crate::MAX_USIZE_INT {
                                 return Err(ERR::ErrorArithmetic(
-                                    format!("for-loop counter overflow: {x}"),
+                                    format!("for-loop counter overflow: {i}"),
                                     counter.as_ref().unwrap().pos,
                                 )
                                 .into());
@@ -778,7 +773,7 @@ impl Engine {
 
             // Continue/Break statement
             Stmt::BreakLoop(expr, options, pos) => {
-                let is_break = options.contains(ASTFlags::BREAK);
+                let is_break = options.intersects(ASTFlags::BREAK);
 
                 let value = match expr {
                     Some(ref expr) => self.eval_expr(global, caches, scope, this_ptr, expr)?,
@@ -876,12 +871,12 @@ impl Engine {
             }
 
             // Throw value
-            Stmt::Return(Some(expr), options, pos) if options.contains(ASTFlags::BREAK) => self
+            Stmt::Return(Some(expr), options, pos) if options.intersects(ASTFlags::BREAK) => self
                 .eval_expr(global, caches, scope, this_ptr, expr)
                 .and_then(|v| Err(ERR::ErrorRuntime(v.flatten(), *pos).into())),
 
             // Empty throw
-            Stmt::Return(None, options, pos) if options.contains(ASTFlags::BREAK) => {
+            Stmt::Return(None, options, pos) if options.intersects(ASTFlags::BREAK) => {
                 Err(ERR::ErrorRuntime(Dynamic::UNIT, *pos).into())
             }
 

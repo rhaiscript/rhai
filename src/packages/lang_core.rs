@@ -32,7 +32,7 @@ mod core_functions {
     /// ```rhai
     /// exit(42);
     /// ```
-    #[rhai_fn(name = "exit", return_raw)]
+    #[rhai_fn(name = "exit", volatile, return_raw)]
     pub fn exit_with_value(value: Dynamic) -> RhaiResult {
         Err(ERR::Exit(value, Position::NONE).into())
     }
@@ -42,7 +42,7 @@ mod core_functions {
     /// ```rhai
     /// exit();
     /// ```
-    #[rhai_fn(return_raw)]
+    #[rhai_fn(volatile, return_raw)]
     pub fn exit() -> RhaiResult {
         Err(ERR::Exit(Dynamic::UNIT, Position::NONE).into())
     }
@@ -134,9 +134,9 @@ mod core_functions {
     /// ```
     #[cfg(not(feature = "no_float"))]
     #[cfg(not(feature = "no_std"))]
-    #[rhai_fn(name = "sleep")]
+    #[rhai_fn(name = "sleep", volatile)]
     pub fn sleep_float(seconds: FLOAT) {
-        if seconds <= 0.0 {
+        if !seconds.is_normal() || seconds.is_sign_negative() {
             return;
         }
 
@@ -154,6 +154,7 @@ mod core_functions {
     /// sleep(10);
     /// ```
     #[cfg(not(feature = "no_std"))]
+    #[rhai_fn(volatile)]
     pub fn sleep(seconds: INT) {
         if seconds <= 0 {
             return;
@@ -216,18 +217,18 @@ mod reflection_functions {
 #[cfg(not(feature = "no_object"))]
 fn collect_fn_metadata(
     ctx: &NativeCallContext,
-    filter: impl Fn(FnNamespace, FnAccess, &str, usize, &crate::Shared<crate::ast::ScriptFnDef>) -> bool
+    filter: impl Fn(FnNamespace, FnAccess, &str, usize, &crate::Shared<crate::ast::ScriptFuncDef>) -> bool
         + Copy,
 ) -> crate::Array {
     #[cfg(not(feature = "no_module"))]
     use crate::Identifier;
-    use crate::{ast::ScriptFnDef, engine::FN_ANONYMOUS, Array, Map};
+    use crate::{ast::ScriptFuncDef, engine::FN_ANONYMOUS, Array, Map};
 
     // Create a metadata record for a function.
     fn make_metadata(
         engine: &Engine,
         #[cfg(not(feature = "no_module"))] namespace: Identifier,
-        func: &ScriptFnDef,
+        func: &ScriptFuncDef,
     ) -> Map {
         let mut map = Map::new();
 
@@ -346,7 +347,7 @@ fn collect_fn_metadata(
             list: &mut Array,
             namespace: &str,
             module: &Module,
-            filter: impl Fn(FnNamespace, FnAccess, &str, usize, &Shared<ScriptFnDef>) -> bool + Copy,
+            filter: impl Fn(FnNamespace, FnAccess, &str, usize, &Shared<ScriptFuncDef>) -> bool + Copy,
         ) {
             module
                 .iter_script_fn()

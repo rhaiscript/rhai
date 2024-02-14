@@ -31,10 +31,7 @@ fn check_struct_sizes() {
     );
 
     #[cfg(feature = "internals")]
-    {
-        assert_eq!(size_of::<CallableFunction>(), 3 * WORD_SIZE);
-        assert_eq!(size_of::<module::FuncInfo>(), 4 * WORD_SIZE);
-    }
+    assert_eq!(size_of::<RhaiFunc>(), 3 * WORD_SIZE);
 
     // The following only on 64-bit platforms
 
@@ -42,16 +39,19 @@ fn check_struct_sizes() {
         return;
     }
 
-    assert_eq!(size_of::<Scope>(), 72);
+    assert_eq!(size_of::<Scope>(), 24);
     assert_eq!(
         size_of::<FnPtr>(),
-        48 - if cfg!(feature = "no_function") {
+        32 - if cfg!(feature = "no_function") {
             WORD_SIZE
         } else {
             0
         }
     );
-    assert_eq!(size_of::<LexError>(), 56);
+    assert_eq!(
+        size_of::<LexError>(),
+        if cfg!(feature = "unstable") { 48 } else { 56 }
+    );
     assert_eq!(
         size_of::<ParseError>(),
         16 - if cfg!(feature = "no_position") {

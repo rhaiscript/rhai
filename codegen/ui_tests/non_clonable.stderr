@@ -2,7 +2,10 @@ error[E0277]: the trait bound `NonClonable: Clone` is not satisfied
   --> ui_tests/non_clonable.rs:11:23
    |
 11 | pub fn test_fn(input: NonClonable) -> bool {
-   |                       ^^^^^^^^^^^ the trait `Clone` is not implemented for `NonClonable`
+   |                       ^^^^^^^^^^^
+   |                       |
+   |                       the trait `Clone` is not implemented for `NonClonable`
+   |                       required by a bound introduced by this call
    |
 note: required by a bound in `rhai::Dynamic::cast`
   --> $WORKSPACE/src/types/dynamic.rs
@@ -10,7 +13,7 @@ note: required by a bound in `rhai::Dynamic::cast`
    |     pub fn cast<T: Any + Clone>(self) -> T {
    |                          ^^^^^ required by this bound in `Dynamic::cast`
 help: consider annotating `NonClonable` with `#[derive(Clone)]`
-     |
+   |
 3    + #[derive(Clone)]
 4    | struct NonClonable {
      |

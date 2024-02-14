@@ -1,6 +1,6 @@
 //! Implement function-calling mechanism for [`Engine`].
 
-use super::{get_builtin_binary_op_fn, get_builtin_op_assignment_fn, CallableFunction};
+use super::{get_builtin_binary_op_fn, get_builtin_op_assignment_fn, RhaiFunc};
 use crate::api::default_limits::MAX_DYNAMIC_PARAMETERS;
 use crate::ast::{Expr, FnCallExpr, FnCallHashes};
 use crate::engine::{
@@ -97,7 +97,7 @@ impl<'a> ArgBackup<'a> {
     /// exiting the current scope.  Otherwise it is undefined behavior as the shorter lifetime will leak.
     #[inline(always)]
     pub fn restore_first_arg(&mut self, args: &mut FnCallArgs<'a>) {
-        args[0] = self.orig_mut.take().expect("`Some`");
+        args[0] = self.orig_mut.take().unwrap();
     }
 }
 
@@ -116,19 +116,16 @@ impl Drop for ArgBackup<'_> {
 #[cfg(not(feature = "no_closure"))]
 #[inline]
 pub fn ensure_no_data_race(fn_name: &str, args: &FnCallArgs, is_ref_mut: bool) -> RhaiResultOf<()> {
-    match args
-        .iter()
-        .enumerate()
+    args.iter()
         .skip(usize::from(is_ref_mut))
-        .find(|(.., a)| a.is_locked())
-    {
-        Some((n, ..)) => Err(ERR::ErrorDataRace(
-            format!("argument #{} of function '{fn_name}'", n + 1),
-            Position::NONE,
-        )
-        .into()),
-        _ => Ok(()),
-    }
+        .position(|a| a.is_locked())
+        .map_or(Ok(()), |n| {
+            Err(ERR::ErrorDataRace(
+                format!("argument #{} of function '{fn_name}'", n + 1),
+                Position::NONE,
+            )
+            .into())
+        })
 }
 
 /// Is a function name an anonymous function?
@@ -182,7 +179,7 @@ impl Engine {
 
         let cache = caches.fn_resolution_cache_mut();
 
-        match cache.map.entry(hash) {
+        match cache.dict.entry(hash) {
             Entry::Occupied(entry) => entry.into_mut().as_ref(),
             Entry::Vacant(entry) => {
                 let num_args = args.as_deref().map_or(0, FnCallArgs::len);
@@ -191,22 +188,24 @@ impl Engine {
                 let mut bitmask = 1usize; // Bitmask of which parameter to replace with `Dynamic`
 
                 loop {
+                    // First check scripted functions in the AST or embedded environments
                     #[cfg(not(feature = "no_function"))]
                     let func = _global
                         .lib
                         .iter()
                         .rev()
-                        .chain(self.global_modules.iter())
                         .find_map(|m| m.get_fn(hash).map(|f| (f, m.id_raw())));
                     #[cfg(feature = "no_function")]
                     let func = None;
 
+                    // Then check the global namespace
                     let func = func.or_else(|| {
                         self.global_modules
                             .iter()
                             .find_map(|m| m.get_fn(hash).map(|f| (f, m.id_raw())))
                     });
 
+                    // Then check imported modules for global functions, then global sub-modules for global functions
                     #[cfg(not(feature = "no_module"))]
                     let func = func
                         .or_else(|| _global.get_qualified_fn(hash, true))
@@ -234,21 +233,23 @@ impl Engine {
                     }
 
                     // Check `Dynamic` parameters for functions with parameters
+                    let max_dynamic_count = usize::min(num_args, MAX_DYNAMIC_PARAMETERS);
+
                     if allow_dynamic && max_bitmask == 0 && num_args > 0 {
-                        let is_dynamic = self
+                        let has_dynamic = self
                             .global_modules
                             .iter()
                             .any(|m| m.may_contain_dynamic_fn(hash_base));
 
                         #[cfg(not(feature = "no_function"))]
-                        let is_dynamic = is_dynamic
+                        let has_dynamic = has_dynamic
                             || _global
                                 .lib
                                 .iter()
                                 .any(|m| m.may_contain_dynamic_fn(hash_base));
 
                         #[cfg(not(feature = "no_module"))]
-                        let is_dynamic = is_dynamic
+                        let has_dynamic = has_dynamic
                             || _global.may_contain_dynamic_fn(hash_base)
                             || self
                                 .global_sub_modules
@@ -256,8 +257,8 @@ impl Engine {
                                 .any(|m| m.may_contain_dynamic_fn(hash_base));
 
                         // Set maximum bitmask when there are dynamic versions of the function
-                        if is_dynamic {
-                            max_bitmask = 1usize << usize::min(num_args, MAX_DYNAMIC_PARAMETERS);
+                        if has_dynamic {
+                            max_bitmask = 1usize << max_dynamic_count;
                         }
                     }
 
@@ -276,20 +277,22 @@ impl Engine {
 
                                     get_builtin_op_assignment_fn(token, first_arg, rest_args[0])
                                         .map(|(f, has_context)| FnResolutionCacheEntry {
-                                            func: CallableFunction::Method {
+                                            func: RhaiFunc::Method {
                                                 func: Shared::new(f),
                                                 has_context,
                                                 is_pure: false,
+                                                is_volatile: false,
                                             },
                                             source: None,
                                         })
                                 }
                                 Some(token) => get_builtin_binary_op_fn(token, args[0], args[1])
                                     .map(|(f, has_context)| FnResolutionCacheEntry {
-                                        func: CallableFunction::Method {
+                                        func: RhaiFunc::Method {
                                             func: Shared::new(f),
                                             has_context,
                                             is_pure: true,
+                                            is_volatile: false,
                                         },
                                         source: None,
                                     }),
@@ -308,19 +311,16 @@ impl Engine {
                     // Try all permutations with `Dynamic` wildcards
                     hash = calc_fn_hash_full(
                         hash_base,
-                        args.as_ref()
-                            .expect("no permutations")
-                            .iter()
-                            .enumerate()
-                            .map(|(i, a)| {
-                                let mask = 1usize << (num_args - i - 1);
-                                if bitmask & mask == 0 {
-                                    a.type_id()
-                                } else {
-                                    // Replace with `Dynamic`
-                                    TypeId::of::<Dynamic>()
-                                }
-                            }),
+                        args.as_ref().unwrap().iter().enumerate().map(|(i, a)| {
+                            if i < max_dynamic_count
+                                && bitmask & (1usize << (max_dynamic_count - i - 1)) != 0
+                            {
+                                // Replace with `Dynamic`
+                                TypeId::of::<Dynamic>()
+                            } else {
+                                a.type_id()
+                            }
+                        }),
                     );
 
                     bitmask += 1;
@@ -348,25 +348,25 @@ impl Engine {
         hash: u64,
         args: &mut FnCallArgs,
         is_ref_mut: bool,
+        non_volatile_only: bool,
         pos: Position,
     ) -> RhaiResultOf<(Dynamic, bool)> {
         self.track_operation(global, pos)?;
 
         // Check if function access already in the cache
         let local_entry = &mut None;
-
-        let func = self.resolve_fn(
-            global,
-            caches,
-            local_entry,
-            op_token,
-            hash,
-            Some(args),
-            true,
-        );
+        let a = Some(&mut *args);
+        let func = self.resolve_fn(global, caches, local_entry, op_token, hash, a, true);
 
         if let Some(FnResolutionCacheEntry { func, source }) = func {
             debug_assert!(func.is_native());
+
+            if non_volatile_only && func.is_volatile() {
+                let gen_fn_call_signature = self.gen_fn_call_signature(name, args);
+                return Err(ERR::ErrorFunctionNotFound(gen_fn_call_signature, pos).into());
+            }
+
+            let is_method = func.is_method();
 
             // Push a new call stack frame
             #[cfg(feature = "debugging")]
@@ -378,7 +378,7 @@ impl Engine {
             let backup = &mut ArgBackup::new();
 
             // Calling non-method function but the first argument is a reference?
-            let swap = is_ref_mut && !func.is_method() && !args.is_empty();
+            let swap = is_ref_mut && !is_method && !args.is_empty();
 
             if swap {
                 // Clone the first argument
@@ -398,20 +398,18 @@ impl Engine {
             }
 
             // Run external function
-            let is_method = func.is_method();
             let context = func
                 .has_context()
                 .then(|| (self, name, source.as_deref(), &*global, pos).into());
 
-            let mut _result = if !func.is_pure() && !args.is_empty() && args[0].is_read_only() {
+            let mut _result = match func {
                 // If function is not pure, there must be at least one argument
-                Err(ERR::ErrorNonPureMethodCallOnConstant(name.to_string(), pos).into())
-            } else if let Some(f) = func.get_plugin_fn() {
-                f.call(context, args)
-            } else if let Some(f) = func.get_native_fn() {
-                f(context, args)
-            } else {
-                unreachable!();
+                f if !f.is_pure() && !args.is_empty() && args[0].is_read_only() => {
+                    Err(ERR::ErrorNonPureMethodCallOnConstant(name.to_string(), pos).into())
+                }
+                RhaiFunc::Plugin { func } => func.call(context, args),
+                RhaiFunc::Pure { func, .. } | RhaiFunc::Method { func, .. } => func(context, args),
+                _ => unreachable!("non-native function"),
             }
             .and_then(|r| self.check_data_size(r, pos))
             .map_err(|err| err.fill_position(pos));
@@ -628,13 +626,14 @@ impl Engine {
             }
 
             if let Some(FnResolutionCacheEntry { func, source }) = resolved.cloned() {
-                // Script function call
-                debug_assert!(func.is_script());
+                let RhaiFunc::Script { fn_def, environ } = func else {
+                    unreachable!("Script function expected");
+                };
 
-                let environ = func.get_encapsulated_environ();
-                let func = func.get_script_fn_def().expect("script-defined function");
+                let fn_def = &*fn_def;
+                let environ = environ.as_deref();
 
-                if func.body.is_empty() {
+                if fn_def.body.is_empty() {
                     return Ok((Dynamic::UNIT, false));
                 }
 
@@ -654,7 +653,7 @@ impl Engine {
                     let (first_arg, args) = args.split_first_mut().unwrap();
                     let this_ptr = Some(&mut **first_arg);
                     self.call_script_fn(
-                        global, caches, scope, this_ptr, environ, func, args, true, pos,
+                        global, caches, scope, this_ptr, environ, fn_def, args, true, pos,
                     )
                 } else {
                     // Normal call of script function
@@ -669,7 +668,9 @@ impl Engine {
 
                     defer! { args = (args) if swap => move |a| backup.restore_first_arg(a) }
 
-                    self.call_script_fn(global, caches, scope, None, environ, func, args, true, pos)
+                    self.call_script_fn(
+                        global, caches, scope, None, environ, fn_def, args, true, pos,
+                    )
                 }
                 .map(|r| (r, false));
             }
@@ -679,7 +680,7 @@ impl Engine {
         let hash = hashes.native();
 
         self.exec_native_fn_call(
-            global, caches, fn_name, op_token, hash, args, is_ref_mut, pos,
+            global, caches, fn_name, op_token, hash, args, is_ref_mut, false, pos,
         )
     }
 
@@ -733,7 +734,7 @@ impl Engine {
         let (result, updated) = match fn_name {
             // Handle fn_ptr.call(...)
             KEYWORD_FN_PTR_CALL if target.as_ref().is_fnptr() => {
-                let fn_ptr = target.as_ref().read_lock::<FnPtr>().expect("`FnPtr`");
+                let fn_ptr = target.as_ref().read_lock::<FnPtr>().unwrap();
 
                 // Arguments are passed as-is, adding the curried arguments
                 let mut curry = fn_ptr.curry().iter().cloned().collect::<FnArgsVec<_>>();
@@ -780,17 +781,14 @@ impl Engine {
                 }
             }
 
-            // Handle obj.call()
-            KEYWORD_FN_PTR_CALL if call_args.is_empty() => {
-                return Err(self.make_type_mismatch_err::<FnPtr>(
-                    self.map_type_name(target.as_ref().type_name()),
-                    pos,
-                ))
-            }
-
             // Handle obj.call(fn_ptr, ...)
             KEYWORD_FN_PTR_CALL => {
-                debug_assert!(!call_args.is_empty());
+                if call_args.is_empty() {
+                    return Err(self.make_type_mismatch_err::<FnPtr>(
+                        self.map_type_name(target.as_ref().type_name()),
+                        pos,
+                    ));
+                }
 
                 // FnPtr call on object
                 let fn_ptr = call_args[0].take().try_cast_raw::<FnPtr>().map_err(|v| {
@@ -1093,7 +1091,7 @@ impl Engine {
                 fn_name = &redirected;
 
                 // Shift the arguments
-                first_arg = args_expr.get(0);
+                first_arg = args_expr.first();
                 if !args_expr.is_empty() {
                     args_expr = &args_expr[1..];
                 }
@@ -1368,7 +1366,7 @@ impl Engine {
                 } else {
                     // Turn it into a method call only if the object is not shared and not a simple value
                     is_ref_mut = true;
-                    let obj_ref = target.take_ref().expect("ref");
+                    let obj_ref = target.take_ref().unwrap();
                     args.push(obj_ref);
                 }
             }
@@ -1417,7 +1415,7 @@ impl Engine {
         // See if the first argument is a variable.
         // If so, convert to method-call style in order to leverage potential
         // &mut first argument and avoid cloning the value.
-        match args_expr.get(0) {
+        match args_expr.first() {
             Some(_first_expr @ Expr::ThisPtr(pos)) if has_non_shared_this_ptr => {
                 self.track_operation(global, *pos)?;
 
@@ -1464,7 +1462,7 @@ impl Engine {
                     // func(x, ...) -> x.func(...)
                     let (first, rest) = arg_values.split_first_mut().unwrap();
                     first_arg_value = Some(first);
-                    let obj_ref = target.take_ref().expect("ref");
+                    let obj_ref = target.take_ref().unwrap();
                     args.push(obj_ref);
                     args.extend(rest.iter_mut());
                 }
@@ -1499,7 +1497,8 @@ impl Engine {
         //        (expected because closures cannot be qualified).
         if func.is_none() && !args.is_empty() {
             let num_args = args.len();
-            let max_bitmask = 1usize << usize::min(num_args, MAX_DYNAMIC_PARAMETERS);
+            let max_dynamic_count = usize::min(num_args, MAX_DYNAMIC_PARAMETERS);
+            let max_bitmask = 1usize << max_dynamic_count;
             let mut bitmask = 1usize; // Bitmask of which parameter to replace with `Dynamic`
 
             // Try all permutations with `Dynamic` wildcards
@@ -1507,12 +1506,13 @@ impl Engine {
                 let hash_qualified_fn = calc_fn_hash_full(
                     hash,
                     args.iter().enumerate().map(|(i, a)| {
-                        let mask = 1usize << (num_args - i - 1);
-                        if bitmask & mask == 0 {
-                            a.type_id()
-                        } else {
+                        if i < max_dynamic_count
+                            && bitmask & (1usize << (max_dynamic_count - i - 1)) != 0
+                        {
                             // Replace with `Dynamic`
                             TypeId::of::<Dynamic>()
+                        } else {
+                            a.type_id()
                         }
                     }),
                 );
@@ -1527,7 +1527,7 @@ impl Engine {
         }
 
         // Clone first argument if the function is not a method after-all
-        if !func.map_or(true, CallableFunction::is_method) {
+        if !func.map_or(true, RhaiFunc::is_method) {
             if let Some(first) = first_arg_value {
                 *first = args[0].clone();
                 args[0] = first;
@@ -1538,16 +1538,16 @@ impl Engine {
 
         match func {
             #[cfg(not(feature = "no_function"))]
-            Some(func) if func.is_script() => {
-                let f = func.get_script_fn_def().expect("script-defined function");
-
-                let environ = func.get_encapsulated_environ();
+            Some(RhaiFunc::Script { fn_def, environ }) => {
+                let environ = environ.as_deref();
                 let scope = &mut Scope::new();
 
                 let orig_source = mem::replace(&mut global.source, module.id_raw().cloned());
                 defer! { global => move |g| g.source = orig_source }
 
-                self.call_script_fn(global, caches, scope, None, environ, f, args, true, pos)
+                self.call_script_fn(
+                    global, caches, scope, None, environ, fn_def, args, true, pos,
+                )
             }
 
             Some(f) if !f.is_pure() && args[0].is_read_only() => {
@@ -1555,24 +1555,30 @@ impl Engine {
                 Err(ERR::ErrorNonPureMethodCallOnConstant(fn_name.to_string(), pos).into())
             }
 
-            Some(f) if f.is_plugin_fn() => {
-                let f = f.get_plugin_fn().expect("plugin function");
-                let context = f
+            Some(RhaiFunc::Plugin { func }) => {
+                let context = func
                     .has_context()
                     .then(|| (self, fn_name, module.id(), &*global, pos).into());
-                f.call(context, args)
+                func.call(context, args)
                     .and_then(|r| self.check_data_size(r, pos))
             }
 
-            Some(f) if f.is_native() => {
-                let func = f.get_native_fn().expect("native function");
-                let context = f
-                    .has_context()
-                    .then(|| (self, fn_name, module.id(), &*global, pos).into());
+            Some(
+                RhaiFunc::Pure {
+                    func, has_context, ..
+                }
+                | RhaiFunc::Method {
+                    func, has_context, ..
+                },
+            ) => {
+                let context =
+                    has_context.then(|| (self, fn_name, module.id(), &*global, pos).into());
                 func(context, args).and_then(|r| self.check_data_size(r, pos))
             }
 
-            Some(f) => unreachable!("unknown function type: {:?}", f),
+            Some(RhaiFunc::Iterator { .. }) => {
+                unreachable!("iterator functions should not occur here")
+            }
 
             None => Err(ERR::ErrorFunctionNotFound(
                 if namespace.is_empty() {

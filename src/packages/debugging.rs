@@ -59,12 +59,16 @@ mod debugging_functions {
                             #[cfg(not(feature = "no_object"))]
                             {
                                 use crate::INT;
+                                use std::iter::FromIterator;
 
                                 let mut map = Map::new();
                                 map.insert("display".into(), display.into());
                                 map.insert("fn_name".into(), _fn_name.into());
                                 if !_args.is_empty() {
-                                    map.insert("args".into(), Dynamic::from_array(_args.clone()));
+                                    map.insert(
+                                        "args".into(),
+                                        Dynamic::from_iter(_args.iter().cloned()),
+                                    );
                                 }
                                 if let Some(source) = _source {
                                     map.insert("source".into(), source.into());

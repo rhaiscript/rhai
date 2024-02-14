@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_optimize"))]
-use rhai::{Engine, Module, OptimizationLevel, Scope, INT};
+use rhai::{Engine, FuncRegistration, Module, OptimizationLevel, Scope, INT};
 
 #[test]
 fn test_optimizer() {
@@ -10,10 +10,10 @@ fn test_optimizer() {
         engine
             .eval::<INT>(
                 "
-                const X = 0;
-                const X = 40 + 2 - 1 + 1;
-                X
-            "
+                    const X = 0;
+                    const X = 40 + 2 - 1 + 1;
+                    X
+                "
             )
             .unwrap(),
         42
@@ -192,4 +192,30 @@ fn test_optimizer_full() {
     assert_eq!(scope.len(), 1);
 
     assert_eq!(scope.get_value::<TestStruct>("FOO").unwrap().0, 42);
+}
+
+#[test]
+fn test_optimizer_volatile() {
+    let mut engine = Engine::new();
+
+    engine.set_optimization_level(OptimizationLevel::Full);
+
+    FuncRegistration::new("foo").with_volatility(true).register_into_engine(&mut engine, |x: INT| x + 1);
+
+    let ast = engine.compile("foo(42)").unwrap();
+
+    let text_ast = format!("{ast:?}");
+
+    // Make sure the call is not optimized away
+    assert!(text_ast.contains(r#"name: "foo""#));
+
+    FuncRegistration::new("foo").with_volatility(false).register_into_engine(&mut engine, |x: INT| x + 1);
+
+    let ast = engine.compile("foo(42)").unwrap();
+
+    let text_ast = format!("{ast:?}");
+    println!("{text_ast:#?}");
+
+    // Make sure the call is optimized away
+    assert!(!text_ast.contains(r#"name: "foo""#));
 }

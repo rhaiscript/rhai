@@ -2,7 +2,7 @@
 #![cfg(feature = "internals")]
 #![cfg(feature = "metadata")]
 
-use crate::module::{FuncInfo, ModuleFlags};
+use crate::module::{FuncMetadata, ModuleFlags};
 use crate::tokenizer::{is_valid_function_name, Token};
 use crate::{Engine, FnAccess, FnPtr, Module, Scope, INT};
 
@@ -321,7 +321,7 @@ impl Definitions<'_> {
         self.engine
             .global_modules
             .iter()
-            .filter(|m| !m.flags.contains(exclude_flags))
+            .filter(|&m| !m.flags.intersects(exclude_flags))
             .enumerate()
             .for_each(|(i, m)| {
                 if i > 0 {
@@ -436,29 +436,26 @@ impl Module {
         }
 
         let mut func_infos = self.iter_fn().collect::<Vec<_>>();
-        func_infos.sort_by(|a, b| match a.metadata.name.cmp(&b.metadata.name) {
-            Ordering::Equal => match a.metadata.num_params.cmp(&b.metadata.num_params) {
-                Ordering::Equal => (a.metadata.params_info.join("")
-                    + a.metadata.return_type.as_str())
-                .cmp(&(b.metadata.params_info.join("") + b.metadata.return_type.as_str())),
+        func_infos.sort_by(|(_, a), (_, b)| match a.name.cmp(&b.name) {
+            Ordering::Equal => match a.num_params.cmp(&b.num_params) {
+                Ordering::Equal => (a.params_info.join("") + a.return_type.as_str())
+                    .cmp(&(b.params_info.join("") + b.return_type.as_str())),
                 o => o,
             },
             o => o,
         });
 
-        for f in func_infos {
+        for (_, f) in func_infos {
             if !first {
                 writer.write_str("\n\n")?;
             }
             first = false;
 
-            if f.metadata.access != FnAccess::Private {
-                let operator =
-                    !f.metadata.name.contains('$') && !is_valid_function_name(&f.metadata.name);
+            if f.access != FnAccess::Private {
+                let operator = !f.name.contains('$') && !is_valid_function_name(&f.name);
 
                 #[cfg(not(feature = "no_custom_syntax"))]
-                let operator =
-                    operator || def.engine.custom_keywords.contains_key(&f.metadata.name);
+                let operator = operator || def.engine.custom_keywords.contains_key(&f.name);
 
                 f.write_definition(writer, def, operator)?;
             }
@@ -468,7 +465,7 @@ impl Module {
     }
 }
 
-impl FuncInfo {
+impl FuncMetadata {
     /// Output definitions for a function.
     fn write_definition(
         &self,
@@ -476,7 +473,7 @@ impl FuncInfo {
         def: &Definitions,
         operator: bool,
     ) -> fmt::Result {
-        for comment in &*self.metadata.comments {
+        for comment in &*self.comments {
             writeln!(writer, "{comment}")?;
         }
 
@@ -486,33 +483,29 @@ impl FuncInfo {
             writer.write_str("fn ")?;
         }
 
-        if let Some(name) = self.metadata.name.strip_prefix("get$") {
+        if let Some(name) = self.name.strip_prefix("get$") {
             write!(writer, "get {name}(")?;
-        } else if let Some(name) = self.metadata.name.strip_prefix("set$") {
+        } else if let Some(name) = self.name.strip_prefix("set$") {
             write!(writer, "set {name}(")?;
         } else {
-            write!(writer, "{}(", self.metadata.name)?;
+            write!(writer, "{}(", self.name)?;
         }
 
         let mut first = true;
-        for i in 0..self.metadata.num_params {
+        for i in 0..self.num_params {
             if !first {
                 writer.write_str(", ")?;
             }
             first = false;
 
-            let (param_name, param_type) =
-                self.metadata
-                    .params_info
-                    .get(i)
-                    .map_or(("_", "?".into()), |s| {
-                        let mut s = s.splitn(2, ':');
-                        (
-                            s.next().unwrap_or("_").split(' ').last().unwrap(),
-                            s.next()
-                                .map_or(Cow::Borrowed("?"), |ty| def_type_name(ty, def.engine)),
-                        )
-                    });
+            let (param_name, param_type) = self.params_info.get(i).map_or(("_", "?".into()), |s| {
+                let mut s = s.splitn(2, ':');
+                (
+                    s.next().unwrap_or("_").split(' ').last().unwrap(),
+                    s.next()
+                        .map_or(Cow::Borrowed("?"), |ty| def_type_name(ty, def.engine)),
+                )
+            });
 
             if operator {
                 write!(writer, "{param_type}")?;
@@ -524,7 +517,7 @@ impl FuncInfo {
         write!(
             writer,
             ") -> {};",
-            def_type_name(&self.metadata.return_type, def.engine)
+            def_type_name(&self.return_type, def.engine)
         )?;
 
         Ok(())
@@ -540,7 +533,7 @@ impl FuncInfo {
 /// Associated generic types are also rewritten into regular generic type parameters.
 #[must_use]
 fn def_type_name<'a>(ty: &'a str, engine: &'a Engine) -> Cow<'a, str> {
-    let ty = engine.format_type_name(ty).replace("crate::", "");
+    let ty = engine.format_param_type(ty).replace("crate::", "");
     let ty = ty.strip_prefix("&mut").unwrap_or(&*ty).trim();
     let ty = ty.split("::").last().unwrap();
 
@@ -582,7 +575,7 @@ impl Scope<'_> {
     /// _(metadata, internals)_ Return definitions for all items inside the [`Scope`].
     fn write_definition(&self, writer: &mut dyn fmt::Write, def: &Definitions) -> fmt::Result {
         let mut first = true;
-        for (name, constant, value) in self.iter_raw() {
+        for (name, constant, value) in self.iter_inner() {
             if !first {
                 writer.write_str("\n\n")?;
             }

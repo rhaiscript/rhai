@@ -377,13 +377,13 @@ mod decimal_functions {
     /// Return the natural number _e_.
     #[cfg(feature = "no_float")]
     #[rhai_fn(name = "PI")]
-    pub fn pi() -> Decimal {
+    pub const fn pi() -> Decimal {
         Decimal::PI
     }
     /// Return the number π.
     #[cfg(feature = "no_float")]
     #[rhai_fn(name = "E")]
-    pub fn e() -> Decimal {
+    pub const fn e() -> Decimal {
         Decimal::E
     }
     /// Parse a string into a decimal number.

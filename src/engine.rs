@@ -174,7 +174,11 @@ impl fmt::Debug for Engine {
         #[cfg(not(feature = "unchecked"))]
         f.field("progress", &self.progress.is_some());
 
-        f.field("options", &self.options);
+        f.field("options", &self.options)
+            .field("default_tag", &self.def_tag);
+
+        #[cfg(not(feature = "no_optimize"))]
+        f.field("optimization_level", &self.optimization_level);
 
         #[cfg(not(feature = "unchecked"))]
         f.field("limits", &self.limits);
@@ -310,25 +314,11 @@ impl Engine {
     }
 
     /// Get an interned [string][ImmutableString].
-    #[cfg(not(feature = "internals"))]
-    #[inline(always)]
-    #[must_use]
-    pub(crate) fn get_interned_string(
-        &self,
-        string: impl AsRef<str> + Into<ImmutableString>,
-    ) -> ImmutableString {
-        match self.interned_strings {
-            Some(ref interner) => locked_write(interner).get(string),
-            _ => string.into(),
-        }
-    }
-
-    /// _(internals)_ Get an interned [string][ImmutableString].
-    /// Exported under the `internals` feature only.
     ///
     /// [`Engine`] keeps a cache of [`ImmutableString`] instances and tries to avoid new allocations
-    /// when an existing instance is found.
-    #[cfg(feature = "internals")]
+    /// and save memory when an existing instance is found.
+    ///
+    /// It is usually a good idea to intern strings if they are used frequently.
     #[inline]
     #[must_use]
     pub fn get_interned_string(

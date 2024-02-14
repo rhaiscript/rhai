@@ -3,6 +3,7 @@
 use crate::types::dynamic::Union;
 use crate::{Dynamic, ImmutableString, Scope};
 use serde::{ser::SerializeSeq, Serialize, Serializer};
+use std::iter::once;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -63,6 +64,9 @@ impl Serialize for Dynamic {
                 m.iter().try_for_each(|(k, v)| map.serialize_entry(k, v))?;
                 map.end()
             }
+            Union::FnPtr(ref f, ..) if f.is_curried() => {
+                ser.collect_seq(once(f.fn_name().into()).chain(f.iter_curry().cloned()))
+            }
             Union::FnPtr(ref f, ..) => ser.serialize_str(f.fn_name()),
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(ref x, ..) => ser.serialize_str(x.as_ref().type_name()),
@@ -104,7 +108,7 @@ impl Serialize for Scope<'_> {
 
         let mut ser = ser.serialize_seq(Some(self.len()))?;
 
-        for (name, is_constant, value) in self.iter_raw() {
+        for (name, is_constant, value) in self.iter_inner() {
             let entry = ScopeEntry {
                 name,
                 value,

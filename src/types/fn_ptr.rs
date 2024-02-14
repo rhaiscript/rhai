@@ -1,21 +1,19 @@
 //! The `FnPtr` type.
 
+use crate::ast::EncapsulatedEnviron;
 use crate::eval::GlobalRuntimeState;
-use crate::func::EncapsulatedEnviron;
 use crate::tokenizer::{is_reserved_keyword_or_symbol, is_valid_function_name, Token};
 use crate::types::dynamic::Variant;
 use crate::{
     Dynamic, Engine, FnArgsVec, FuncArgs, ImmutableString, NativeCallContext, Position, RhaiError,
-    RhaiResult, RhaiResultOf, Shared, StaticVec, AST, ERR, PERR,
+    RhaiResult, RhaiResultOf, Shared, StaticVec, ThinVec, AST, ERR, PERR,
 };
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{
     any::type_name,
     convert::{TryFrom, TryInto},
-    fmt,
-    hash::{Hash, Hasher},
-    mem,
+    fmt, mem,
     ops::{Index, IndexMut},
 };
 
@@ -24,24 +22,15 @@ use std::{
 #[derive(Clone)]
 pub struct FnPtr {
     pub(crate) name: ImmutableString,
-    pub(crate) curry: Vec<Dynamic>,
+    pub(crate) curry: ThinVec<Dynamic>,
     pub(crate) environ: Option<Shared<EncapsulatedEnviron>>,
     #[cfg(not(feature = "no_function"))]
-    pub(crate) fn_def: Option<Shared<crate::ast::ScriptFnDef>>,
+    pub(crate) fn_def: Option<Shared<crate::ast::ScriptFuncDef>>,
 }
 
-impl Hash for FnPtr {
-    #[inline(always)]
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-        self.curry.hash(state);
-
-        // Hash the shared [`EncapsulatedEnviron`] by hashing its shared pointer.
-        self.environ.as_ref().map(Shared::as_ptr).hash(state);
-
-        // Hash the linked [`ScriptFnDef`][crate::ast::ScriptFnDef] by hashing its shared pointer.
-        #[cfg(not(feature = "no_function"))]
-        self.fn_def.as_ref().map(Shared::as_ptr).hash(state);
+impl fmt::Display for FnPtr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Fn({})", self.fn_name())
     }
 }
 
@@ -49,17 +38,16 @@ impl fmt::Debug for FnPtr {
     #[cold]
     #[inline(never)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ff = &mut f.debug_tuple("Fn");
+        let func = "Fn";
+        #[cfg(not(feature = "no_function"))]
+        let func = if self.fn_def.is_some() { "Fn*" } else { func };
+
+        let ff = &mut f.debug_tuple(func);
         ff.field(&self.name);
         self.curry.iter().for_each(|curry| {
             ff.field(curry);
         });
         ff.finish()?;
-
-        #[cfg(not(feature = "no_function"))]
-        if let Some(ref fn_def) = self.fn_def {
-            write!(f, ": {fn_def}")?;
-        }
 
         Ok(())
     }
@@ -456,12 +444,6 @@ impl FnPtr {
     }
 }
 
-impl fmt::Display for FnPtr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Fn({})", self.fn_name())
-    }
-}
-
 impl TryFrom<ImmutableString> for FnPtr {
     type Error = RhaiError;
 
@@ -470,7 +452,7 @@ impl TryFrom<ImmutableString> for FnPtr {
         if is_valid_function_name(&value) {
             Ok(Self {
                 name: value,
-                curry: Vec::new(),
+                curry: ThinVec::new(),
                 environ: None,
                 #[cfg(not(feature = "no_function"))]
                 fn_def: None,
@@ -486,14 +468,14 @@ impl TryFrom<ImmutableString> for FnPtr {
 }
 
 #[cfg(not(feature = "no_function"))]
-impl<T: Into<Shared<crate::ast::ScriptFnDef>>> From<T> for FnPtr {
+impl<T: Into<Shared<crate::ast::ScriptFuncDef>>> From<T> for FnPtr {
     #[inline(always)]
     fn from(value: T) -> Self {
         let fn_def = value.into();
 
         Self {
             name: fn_def.name.clone(),
-            curry: Vec::new(),
+            curry: ThinVec::new(),
             environ: None,
             fn_def: Some(fn_def),
         }

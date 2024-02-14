@@ -3,7 +3,9 @@
 
 use super::{Caches, EvalContext, GlobalRuntimeState};
 use crate::ast::{ASTNode, Expr, Stmt};
-use crate::{Dynamic, Engine, EvalAltResult, ImmutableString, Position, RhaiResultOf, Scope};
+use crate::{
+    Dynamic, Engine, EvalAltResult, ImmutableString, Position, RhaiResultOf, Scope, ThinVec,
+};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{fmt, iter::repeat, mem};
@@ -216,7 +218,7 @@ pub struct CallStackFrame {
     /// Function name.
     pub fn_name: ImmutableString,
     /// Copies of function call arguments, if any.
-    pub args: Vec<Dynamic>,
+    pub args: ThinVec<Dynamic>,
     /// Source of the function.
     pub source: Option<ImmutableString>,
     /// [Position][`Position`] of the function call.
@@ -261,7 +263,7 @@ impl Debugger {
     /// Create a new [`Debugger`].
     #[inline(always)]
     #[must_use]
-    pub const fn new(status: DebuggerStatus) -> Self {
+    pub fn new(status: DebuggerStatus) -> Self {
         Self {
             status,
             break_points: Vec::new(),
@@ -323,8 +325,8 @@ impl Debugger {
         self.break_points()
             .iter()
             .enumerate()
-            .filter(|&(.., bp)| bp.is_enabled())
-            .find(|&(.., bp)| match bp {
+            .filter(|(.., bp)| bp.is_enabled())
+            .find(|(.., bp)| match bp {
                 #[cfg(not(feature = "no_position"))]
                 BreakPoint::AtPosition { pos, .. } if pos.is_none() => false,
                 #[cfg(not(feature = "no_position"))]

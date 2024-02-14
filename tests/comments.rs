@@ -21,6 +21,11 @@ fn test_comments() {
     );
 
     engine.run("/* Hello world */").unwrap();
+
+    let _ = engine.run(" /**\n\u{1680}  */");
+
+    #[cfg(not(feature = "no_function"))]
+    assert!(engine.compile("fn/*").is_err());
 }
 
 #[cfg(not(feature = "no_function"))]

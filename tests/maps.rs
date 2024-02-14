@@ -24,6 +24,8 @@ fn test_map_indexing() {
     }
 
     assert_eq!(engine.eval::<INT>("let y = #{a: 1, b: 2, c: 3}; y.a = 5; y.a").unwrap(), 5);
+    assert_eq!(engine.eval::<INT>("let y = #{a: #{x:9, y:8, z:7}, b: 2, c: 3}; (y.a).z").unwrap(), 7);
+    assert_eq!(engine.eval::<INT>("let y = #{a: #{x:9, y:8, z:7}, b: 2, c: 3}; (y.a).z = 42; y.a.z").unwrap(), 42);
 
     engine.run("let y = #{a: 1, b: 2, c: 3}; y.z").unwrap();
 
@@ -216,6 +218,10 @@ fn test_map_json() {
                 .len(),
             11
         );
+
+        assert_eq!(engine.eval::<String>("#{a:[#{b:42}]}.to_json()").unwrap(), r#"{"a":[{"b":42}]}"#);
+        assert_eq!(engine.eval::<String>(r#"#{a:[Fn("abc")]}.to_json()"#).unwrap(), r#"{"a":["abc"]}"#);
+        assert_eq!(engine.eval::<String>(r#"#{a:[Fn("abc").curry(42).curry(123)]}.to_json()"#).unwrap(), r#"{"a":[["abc",42,123]]}"#);
     }
 
     engine.parse_json(json, true).unwrap();

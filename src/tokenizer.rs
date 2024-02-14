@@ -2,7 +2,7 @@
 
 use crate::engine::Precedence;
 use crate::func::native::OnParseTokenCallback;
-use crate::{Engine, Identifier, LexError, Position, SmartString, INT, UNSIGNED_INT};
+use crate::{Engine, Identifier, LexError, Position, SmartString, StaticVec, INT, UNSIGNED_INT};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{
@@ -1221,7 +1221,7 @@ pub fn parse_string_literal(
     let mut first_char = Position::NONE;
     let mut interpolated = false;
     #[cfg(not(feature = "no_position"))]
-    let mut skip_whitespace_until = 0;
+    let mut skip_space_until = 0;
 
     state.is_within_text_terminated_by = Some(termination_char);
     if let Some(ref mut last) = state.last_token {
@@ -1301,6 +1301,16 @@ pub fn parse_string_literal(
         match next_char {
             // \r - ignore if followed by \n
             '\r' if stream.peek_next().map_or(false, |ch| ch == '\n') => (),
+            // \r
+            'r' if !escape.is_empty() => {
+                escape.clear();
+                result.push('\r');
+            }
+            // \n
+            'n' if !escape.is_empty() => {
+                escape.clear();
+                result.push('\n');
+            }
             // \...
             '\\' if !verbatim && escape.is_empty() => {
                 escape.push('\\');
@@ -1314,16 +1324,6 @@ pub fn parse_string_literal(
             't' if !escape.is_empty() => {
                 escape.clear();
                 result.push('\t');
-            }
-            // \n
-            'n' if !escape.is_empty() => {
-                escape.clear();
-                result.push('\n');
-            }
-            // \r
-            'r' if !escape.is_empty() => {
-                escape.clear();
-                result.push('\r');
             }
             // \x??, \u????, \U????????
             ch @ ('x' | 'u' | 'U') if !escape.is_empty() => {
@@ -1362,20 +1362,14 @@ pub fn parse_string_literal(
                 );
             }
 
-            // \{termination_char} - escaped
-            _ if termination_char == next_char && !escape.is_empty() => {
-                escape.clear();
-                result.push(next_char);
-            }
-
-            // Verbatim
+            // LF - Verbatim
             '\n' if verbatim => {
                 debug_assert_eq!(escape, "", "verbatim strings should not have any escapes");
                 pos.new_line();
-                result.push(next_char);
+                result.push('\n');
             }
 
-            // Line continuation
+            // LF - Line continuation
             '\n' if allow_line_continuation && !escape.is_empty() => {
                 debug_assert_eq!(escape, "\\", "unexpected escape {escape} at end of line");
                 escape.clear();
@@ -1384,36 +1378,42 @@ pub fn parse_string_literal(
                 #[cfg(not(feature = "no_position"))]
                 {
                     let start_position = start.position().unwrap();
-                    skip_whitespace_until = start_position + 1;
+                    skip_space_until = start_position + 1;
                 }
             }
 
-            // Unterminated string
+            // LF - Unterminated string
             '\n' => {
                 pos.rewind();
                 state.is_within_text_terminated_by = None;
                 return Err((LERR::UnterminatedString, start));
             }
 
+            // \{termination_char} - escaped termination character
+            ch if termination_char == ch && !escape.is_empty() => {
+                escape.clear();
+                result.push(termination_char);
+            }
+
             // Unknown escape sequence
-            _ if !escape.is_empty() => {
-                escape.push(next_char);
+            ch if !escape.is_empty() => {
+                escape.push(ch);
 
                 return Err((LERR::MalformedEscapeSequence(escape.to_string()), *pos));
             }
 
             // Whitespace to skip
             #[cfg(not(feature = "no_position"))]
-            _ if next_char.is_whitespace() && pos.position().unwrap() < skip_whitespace_until => (),
+            ch if ch.is_whitespace() && pos.position().unwrap() < skip_space_until => (),
 
             // All other characters
-            _ => {
+            ch => {
                 escape.clear();
-                result.push(next_char);
+                result.push(ch);
 
                 #[cfg(not(feature = "no_position"))]
                 {
-                    skip_whitespace_until = 0;
+                    skip_space_until = 0;
                 }
             }
         }
@@ -1481,7 +1481,7 @@ fn scan_block_comment(
 /// Test if the given character is a hex character.
 #[inline(always)]
 const fn is_hex_digit(c: char) -> bool {
-    matches!(c, 'a'..='f' | 'A'..='F' | '0'..='9')
+    c.is_ascii_hexdigit()
 }
 
 /// Test if the given character is a numeric digit (i.e. 0-9).
@@ -1520,13 +1520,11 @@ pub fn get_next_token(
     stream: &mut (impl InputStream + ?Sized),
     state: &mut TokenizeState,
     pos: &mut Position,
-) -> Option<(Token, Position)> {
+) -> (Token, Position) {
     let result = get_next_token_inner(stream, state, pos);
 
     // Save the last token's state
-    if let Some((ref token, ..)) = result {
-        state.next_token_cannot_be_unary = !token.is_next_unary();
-    }
+    state.next_token_cannot_be_unary = !result.0.is_next_unary();
 
     result
 }
@@ -1537,41 +1535,42 @@ fn get_next_token_inner(
     stream: &mut (impl InputStream + ?Sized),
     state: &mut TokenizeState,
     pos: &mut Position,
-) -> Option<(Token, Position)> {
+) -> (Token, Position) {
     state.last_token.as_mut().map(SmartString::clear);
 
     // Still inside a comment?
     if state.comment_level > 0 {
         let start_pos = *pos;
-        let mut comment = state.include_comments.then(String::new);
+        let mut comment = String::new();
+        let comment_buf = state.include_comments.then_some(&mut comment);
 
-        state.comment_level =
-            scan_block_comment(stream, state.comment_level, pos, comment.as_mut());
+        state.comment_level = scan_block_comment(stream, state.comment_level, pos, comment_buf);
 
         let return_comment = state.include_comments;
 
         #[cfg(not(feature = "no_function"))]
         #[cfg(feature = "metadata")]
-        let return_comment = return_comment || is_doc_comment(comment.as_ref().expect("`Some`"));
+        let return_comment = return_comment || is_doc_comment(&comment);
 
         if return_comment {
-            return Some((Token::Comment(comment.expect("`Some`").into()), start_pos));
+            return (Token::Comment(comment.into()), start_pos);
         }
+
+        // Reached EOF without ending comment block?
         if state.comment_level > 0 {
-            // Reached EOF without ending comment block
-            return None;
+            return (Token::EOF, *pos);
         }
     }
 
     // Within text?
     if let Some(ch) = state.is_within_text_terminated_by.take() {
         return parse_string_literal(stream, state, pos, ch, true, false, true).map_or_else(
-            |(err, err_pos)| Some((Token::LexError(err.into()), err_pos)),
+            |(err, err_pos)| (Token::LexError(err.into()), err_pos),
             |(result, interpolated, start_pos)| {
                 if interpolated {
-                    Some((Token::InterpolatedString(result.into()), start_pos))
+                    (Token::InterpolatedString(result.into()), start_pos)
                 } else {
-                    Some((Token::StringConstant(result.into()), start_pos))
+                    (Token::StringConstant(result.into()), start_pos)
                 }
             },
         );
@@ -1587,14 +1586,14 @@ fn get_next_token_inner(
 
         // Identifiers and strings that can have non-ASCII characters
         match (c, cc) {
-            // \n
-            ('\n', ..) => pos.new_line(),
-
             // digit ...
             ('0'..='9', ..) => {
                 let mut result = SmartString::new_const();
                 let mut radix_base: Option<u32> = None;
                 let mut valid: fn(char) -> bool = is_numeric_digit;
+                let mut _has_period = false;
+                let mut _has_e = false;
+
                 result.push(c);
 
                 while let Some(next_char) = stream.peek_next() {
@@ -1603,64 +1602,70 @@ fn get_next_token_inner(
                             stream.eat_next_and_advance(pos);
                         }
                         ch if valid(ch) => {
-                            result.push(next_char);
+                            result.push(ch);
                             stream.eat_next_and_advance(pos);
                         }
                         #[cfg(any(not(feature = "no_float"), feature = "decimal"))]
-                        '.' => {
+                        '.' if !_has_period && radix_base.is_none() => {
                             stream.get_next().unwrap();
 
                             // Check if followed by digits or something that cannot start a property name
                             match stream.peek_next() {
                                 // digits after period - accept the period
                                 Some('0'..='9') => {
-                                    result.push(next_char);
+                                    result.push('.');
                                     pos.advance();
+                                    _has_period = true;
                                 }
                                 // _ - cannot follow a decimal point
                                 Some(NUMBER_SEPARATOR) => {
-                                    stream.unget(next_char);
+                                    stream.unget('.');
                                     break;
                                 }
                                 // .. - reserved symbol, not a floating-point number
                                 Some('.') => {
-                                    stream.unget(next_char);
+                                    stream.unget('.');
                                     break;
                                 }
                                 // symbol after period - probably a float
                                 Some(ch) if !is_id_first_alphabetic(ch) => {
-                                    result.push(next_char);
+                                    result.push('.');
                                     pos.advance();
                                     result.push('0');
+                                    _has_period = true;
                                 }
                                 // Not a floating-point number
                                 _ => {
-                                    stream.unget(next_char);
+                                    stream.unget('.');
                                     break;
                                 }
                             }
                         }
                         #[cfg(not(feature = "no_float"))]
-                        'e' => {
-                            stream.get_next().expect("`e`");
+                        'e' if !_has_e && radix_base.is_none() => {
+                            stream.get_next().unwrap();
 
                             // Check if followed by digits or +/-
                             match stream.peek_next() {
-                                // digits after e - accept the e
+                                // digits after e - accept the e (no decimal points allowed)
                                 Some('0'..='9') => {
-                                    result.push(next_char);
+                                    result.push('e');
                                     pos.advance();
+                                    _has_e = true;
+                                    _has_period = true;
                                 }
-                                // +/- after e - accept the e and the sign
+                                // +/- after e - accept the e and the sign (no decimal points allowed)
                                 Some('+' | '-') => {
-                                    result.push(next_char);
+                                    result.push('e');
                                     pos.advance();
                                     result.push(stream.get_next().unwrap());
                                     pos.advance();
+                                    _has_e = true;
+                                    _has_period = true;
                                 }
                                 // Not a floating-point number
                                 _ => {
-                                    stream.unget(next_char);
+                                    stream.unget('e');
                                     break;
                                 }
                             }
@@ -1669,7 +1674,7 @@ fn get_next_token_inner(
                         ch @ ('x' | 'o' | 'b' | 'X' | 'O' | 'B')
                             if c == '0' && result.len() <= 1 =>
                         {
-                            result.push(next_char);
+                            result.push(ch);
                             stream.eat_next_and_advance(pos);
 
                             valid = match ch {
@@ -1744,15 +1749,15 @@ fn get_next_token_inner(
                     })()
                 };
 
-                return Some((token, num_pos));
+                return (token, num_pos);
             }
 
             // " - string literal
             ('"', ..) => {
                 return parse_string_literal(stream, state, pos, c, false, true, false)
                     .map_or_else(
-                        |(err, err_pos)| Some((Token::LexError(err.into()), err_pos)),
-                        |(result, ..)| Some((Token::StringConstant(result.into()), start_pos)),
+                        |(err, err_pos)| (Token::LexError(err.into()), err_pos),
+                        |(result, ..)| (Token::StringConstant(result.into()), start_pos),
                     );
             }
             // ` - string literal
@@ -1777,12 +1782,12 @@ fn get_next_token_inner(
                 }
 
                 return parse_string_literal(stream, state, pos, c, true, false, true).map_or_else(
-                    |(err, err_pos)| Some((Token::LexError(err.into()), err_pos)),
+                    |(err, err_pos)| (Token::LexError(err.into()), err_pos),
                     |(result, interpolated, ..)| {
                         if interpolated {
-                            Some((Token::InterpolatedString(result.into()), start_pos))
+                            (Token::InterpolatedString(result.into()), start_pos)
                         } else {
-                            Some((Token::StringConstant(result.into()), start_pos))
+                            (Token::StringConstant(result.into()), start_pos)
                         }
                     },
                 );
@@ -1790,14 +1795,14 @@ fn get_next_token_inner(
 
             // ' - character literal
             ('\'', '\'') => {
-                return Some((
+                return (
                     Token::LexError(LERR::MalformedChar(String::new()).into()),
                     start_pos,
-                ))
+                )
             }
             ('\'', ..) => {
-                return Some(
-                    parse_string_literal(stream, state, pos, c, false, false, false).map_or_else(
+                return parse_string_literal(stream, state, pos, c, false, false, false)
+                    .map_or_else(
                         |(err, err_pos)| (Token::LexError(err.into()), err_pos),
                         |(result, ..)| {
                             let mut chars = result.chars();
@@ -1812,40 +1817,39 @@ fn get_next_token_inner(
                                 (Token::CharConstant(first), start_pos)
                             }
                         },
-                    ),
-                )
+                    )
             }
 
             // Braces
-            ('{', ..) => return Some((Token::LeftBrace, start_pos)),
-            ('}', ..) => return Some((Token::RightBrace, start_pos)),
+            ('{', ..) => return (Token::LeftBrace, start_pos),
+            ('}', ..) => return (Token::RightBrace, start_pos),
 
             // Unit
             ('(', ')') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Unit, start_pos));
+                return (Token::Unit, start_pos);
             }
 
             // Parentheses
             ('(', '*') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new("(*".into())), start_pos));
+                return (Token::Reserved(Box::new("(*".into())), start_pos);
             }
-            ('(', ..) => return Some((Token::LeftParen, start_pos)),
-            (')', ..) => return Some((Token::RightParen, start_pos)),
+            ('(', ..) => return (Token::LeftParen, start_pos),
+            (')', ..) => return (Token::RightParen, start_pos),
 
             // Indexing
-            ('[', ..) => return Some((Token::LeftBracket, start_pos)),
-            (']', ..) => return Some((Token::RightBracket, start_pos)),
+            ('[', ..) => return (Token::LeftBracket, start_pos),
+            (']', ..) => return (Token::RightBracket, start_pos),
 
             // Map literal
             #[cfg(not(feature = "no_object"))]
             ('#', '{') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::MapStart, start_pos));
+                return (Token::MapStart, start_pos);
             }
             // Shebang
-            ('#', '!') => return Some((Token::Reserved(Box::new("#!".into())), start_pos)),
+            ('#', '!') => return (Token::Reserved(Box::new("#!".into())), start_pos),
 
             ('#', ' ') => {
                 stream.eat_next_and_advance(pos);
@@ -1855,56 +1859,54 @@ fn get_next_token_inner(
                 } else {
                     "#"
                 };
-                return Some((Token::Reserved(Box::new(token.into())), start_pos));
+                return (Token::Reserved(Box::new(token.into())), start_pos);
             }
 
-            ('#', ..) => return Some((Token::Reserved(Box::new("#".into())), start_pos)),
+            ('#', ..) => return (Token::Reserved(Box::new("#".into())), start_pos),
 
             // Operators
             ('+', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::PlusAssign, start_pos));
+                return (Token::PlusAssign, start_pos);
             }
             ('+', '+') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new("++".into())), start_pos));
+                return (Token::Reserved(Box::new("++".into())), start_pos);
             }
-            ('+', ..) if !state.next_token_cannot_be_unary => {
-                return Some((Token::UnaryPlus, start_pos))
-            }
-            ('+', ..) => return Some((Token::Plus, start_pos)),
+            ('+', ..) if !state.next_token_cannot_be_unary => return (Token::UnaryPlus, start_pos),
+            ('+', ..) => return (Token::Plus, start_pos),
 
             ('-', '0'..='9') if !state.next_token_cannot_be_unary => negated = Some(start_pos),
-            ('-', '0'..='9') => return Some((Token::Minus, start_pos)),
+            ('-', '0'..='9') => return (Token::Minus, start_pos),
             ('-', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::MinusAssign, start_pos));
+                return (Token::MinusAssign, start_pos);
             }
             ('-', '>') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new("->".into())), start_pos));
+                return (Token::Reserved(Box::new("->".into())), start_pos);
             }
             ('-', '-') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new("--".into())), start_pos));
+                return (Token::Reserved(Box::new("--".into())), start_pos);
             }
             ('-', ..) if !state.next_token_cannot_be_unary => {
-                return Some((Token::UnaryMinus, start_pos))
+                return (Token::UnaryMinus, start_pos)
             }
-            ('-', ..) => return Some((Token::Minus, start_pos)),
+            ('-', ..) => return (Token::Minus, start_pos),
 
             ('*', ')') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new("*)".into())), start_pos));
+                return (Token::Reserved(Box::new("*)".into())), start_pos);
             }
             ('*', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::MultiplyAssign, start_pos));
+                return (Token::MultiplyAssign, start_pos);
             }
             ('*', '*') => {
                 stream.eat_next_and_advance(pos);
 
-                return Some((
+                return (
                     if stream.peek_next() == Some('=') {
                         stream.eat_next_and_advance(pos);
                         Token::PowerOfAssign
@@ -1912,9 +1914,9 @@ fn get_next_token_inner(
                         Token::PowerOf
                     },
                     start_pos,
-                ));
+                );
             }
-            ('*', ..) => return Some((Token::Multiply, start_pos)),
+            ('*', ..) => return (Token::Multiply, start_pos),
 
             // Comments
             ('/', '/') => {
@@ -1969,12 +1971,12 @@ fn get_next_token_inner(
                         }
                         g.push_str(&comment);
                     }
-                    Some(comment) => return Some((Token::Comment(comment.into()), start_pos)),
+                    Some(comment) => return (Token::Comment(comment.into()), start_pos),
                     None => (),
                 }
             }
             ('/', '*') => {
-                state.comment_level = 1;
+                state.comment_level += 1;
                 stream.eat_next_and_advance(pos);
 
                 let mut comment: Option<String> = match stream.peek_next() {
@@ -1997,22 +1999,22 @@ fn get_next_token_inner(
                     scan_block_comment(stream, state.comment_level, pos, comment.as_mut());
 
                 if let Some(comment) = comment {
-                    return Some((Token::Comment(comment.into()), start_pos));
+                    return (Token::Comment(comment.into()), start_pos);
                 }
             }
 
             ('/', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::DivideAssign, start_pos));
+                return (Token::DivideAssign, start_pos);
             }
-            ('/', ..) => return Some((Token::Divide, start_pos)),
+            ('/', ..) => return (Token::Divide, start_pos),
 
-            (';', ..) => return Some((Token::SemiColon, start_pos)),
-            (',', ..) => return Some((Token::Comma, start_pos)),
+            (';', ..) => return (Token::SemiColon, start_pos),
+            (',', ..) => return (Token::Comma, start_pos),
 
             ('.', '.') => {
                 stream.eat_next_and_advance(pos);
-                return Some((
+                return (
                     match stream.peek_next() {
                         Some('.') => {
                             stream.eat_next_and_advance(pos);
@@ -2025,25 +2027,25 @@ fn get_next_token_inner(
                         _ => Token::ExclusiveRange,
                     },
                     start_pos,
-                ));
+                );
             }
-            ('.', ..) => return Some((Token::Period, start_pos)),
+            ('.', ..) => return (Token::Period, start_pos),
 
             ('=', '=') => {
                 stream.eat_next_and_advance(pos);
 
                 if stream.peek_next() == Some('=') {
                     stream.eat_next_and_advance(pos);
-                    return Some((Token::Reserved(Box::new("===".into())), start_pos));
+                    return (Token::Reserved(Box::new("===".into())), start_pos);
                 }
 
-                return Some((Token::EqualsTo, start_pos));
+                return (Token::EqualsTo, start_pos);
             }
             ('=', '>') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::DoubleArrow, start_pos));
+                return (Token::DoubleArrow, start_pos);
             }
-            ('=', ..) => return Some((Token::Equals, start_pos)),
+            ('=', ..) => return (Token::Equals, start_pos),
 
             #[cfg(not(feature = "no_module"))]
             (':', ':') => {
@@ -2051,33 +2053,33 @@ fn get_next_token_inner(
 
                 if stream.peek_next() == Some('<') {
                     stream.eat_next_and_advance(pos);
-                    return Some((Token::Reserved(Box::new("::<".into())), start_pos));
+                    return (Token::Reserved(Box::new("::<".into())), start_pos);
                 }
 
-                return Some((Token::DoubleColon, start_pos));
+                return (Token::DoubleColon, start_pos);
             }
             (':', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new(":=".into())), start_pos));
+                return (Token::Reserved(Box::new(":=".into())), start_pos);
             }
             (':', ';') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new(":;".into())), start_pos));
+                return (Token::Reserved(Box::new(":;".into())), start_pos);
             }
-            (':', ..) => return Some((Token::Colon, start_pos)),
+            (':', ..) => return (Token::Colon, start_pos),
 
             ('<', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::LessThanEqualsTo, start_pos));
+                return (Token::LessThanEqualsTo, start_pos);
             }
             ('<', '-') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new("<-".into())), start_pos));
+                return (Token::Reserved(Box::new("<-".into())), start_pos);
             }
             ('<', '<') => {
                 stream.eat_next_and_advance(pos);
 
-                return Some((
+                return (
                     if stream.peek_next() == Some('=') {
                         stream.eat_next_and_advance(pos);
                         Token::LeftShiftAssign
@@ -2085,22 +2087,22 @@ fn get_next_token_inner(
                         Token::LeftShift
                     },
                     start_pos,
-                ));
+                );
             }
             ('<', '|') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new("<|".into())), start_pos));
+                return (Token::Reserved(Box::new("<|".into())), start_pos);
             }
-            ('<', ..) => return Some((Token::LessThan, start_pos)),
+            ('<', ..) => return (Token::LessThan, start_pos),
 
             ('>', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::GreaterThanEqualsTo, start_pos));
+                return (Token::GreaterThanEqualsTo, start_pos);
             }
             ('>', '>') => {
                 stream.eat_next_and_advance(pos);
 
-                return Some((
+                return (
                     if stream.peek_next() == Some('=') {
                         stream.eat_next_and_advance(pos);
                         Token::RightShiftAssign
@@ -2108,9 +2110,9 @@ fn get_next_token_inner(
                         Token::RightShift
                     },
                     start_pos,
-                ));
+                );
             }
-            ('>', ..) => return Some((Token::GreaterThan, start_pos)),
+            ('>', ..) => return (Token::GreaterThan, start_pos),
 
             ('!', 'i') => {
                 stream.get_next().unwrap();
@@ -2120,122 +2122,126 @@ fn get_next_token_inner(
                         Some(c) if is_id_continue(c) => {
                             stream.unget('n');
                             stream.unget('i');
-                            return Some((Token::Bang, start_pos));
+                            return (Token::Bang, start_pos);
                         }
                         _ => {
                             pos.advance();
                             pos.advance();
-                            return Some((Token::NotIn, start_pos));
+                            return (Token::NotIn, start_pos);
                         }
                     }
                 }
 
                 stream.unget('i');
-                return Some((Token::Bang, start_pos));
+                return (Token::Bang, start_pos);
             }
             ('!', '=') => {
                 stream.eat_next_and_advance(pos);
 
                 if stream.peek_next() == Some('=') {
                     stream.eat_next_and_advance(pos);
-                    return Some((Token::Reserved(Box::new("!==".into())), start_pos));
+                    return (Token::Reserved(Box::new("!==".into())), start_pos);
                 }
 
-                return Some((Token::NotEqualsTo, start_pos));
+                return (Token::NotEqualsTo, start_pos);
             }
             ('!', '.') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new("!.".into())), start_pos));
+                return (Token::Reserved(Box::new("!.".into())), start_pos);
             }
-            ('!', ..) => return Some((Token::Bang, start_pos)),
+            ('!', ..) => return (Token::Bang, start_pos),
 
             ('|', '|') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Or, start_pos));
+                return (Token::Or, start_pos);
             }
             ('|', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::OrAssign, start_pos));
+                return (Token::OrAssign, start_pos);
             }
             ('|', '>') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::Reserved(Box::new("|>".into())), start_pos));
+                return (Token::Reserved(Box::new("|>".into())), start_pos);
             }
-            ('|', ..) => return Some((Token::Pipe, start_pos)),
+            ('|', ..) => return (Token::Pipe, start_pos),
 
             ('&', '&') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::And, start_pos));
+                return (Token::And, start_pos);
             }
             ('&', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::AndAssign, start_pos));
+                return (Token::AndAssign, start_pos);
             }
-            ('&', ..) => return Some((Token::Ampersand, start_pos)),
+            ('&', ..) => return (Token::Ampersand, start_pos),
 
             ('^', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::XOrAssign, start_pos));
+                return (Token::XOrAssign, start_pos);
             }
-            ('^', ..) => return Some((Token::XOr, start_pos)),
+            ('^', ..) => return (Token::XOr, start_pos),
 
-            ('~', ..) => return Some((Token::Reserved(Box::new("~".into())), start_pos)),
+            ('~', ..) => return (Token::Reserved(Box::new("~".into())), start_pos),
 
             ('%', '=') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::ModuloAssign, start_pos));
+                return (Token::ModuloAssign, start_pos);
             }
-            ('%', ..) => return Some((Token::Modulo, start_pos)),
+            ('%', ..) => return (Token::Modulo, start_pos),
 
-            ('@', ..) => return Some((Token::Reserved(Box::new("@".into())), start_pos)),
+            ('@', ..) => return (Token::Reserved(Box::new("@".into())), start_pos),
 
-            ('$', ..) => return Some((Token::Reserved(Box::new("$".into())), start_pos)),
+            ('$', ..) => return (Token::Reserved(Box::new("$".into())), start_pos),
 
             ('?', '.') => {
                 stream.eat_next_and_advance(pos);
-                return Some((
+                return (
                     #[cfg(not(feature = "no_object"))]
                     Token::Elvis,
                     #[cfg(feature = "no_object")]
                     Token::Reserved(Box::new("?.".into())),
                     start_pos,
-                ));
+                );
             }
             ('?', '?') => {
                 stream.eat_next_and_advance(pos);
-                return Some((Token::DoubleQuestion, start_pos));
+                return (Token::DoubleQuestion, start_pos);
             }
             ('?', '[') => {
                 stream.eat_next_and_advance(pos);
-                return Some((
+                return (
                     #[cfg(not(feature = "no_index"))]
                     Token::QuestionBracket,
                     #[cfg(feature = "no_index")]
                     Token::Reserved(Box::new("?[".into())),
                     start_pos,
-                ));
+                );
             }
-            ('?', ..) => return Some((Token::Reserved(Box::new("?".into())), start_pos)),
+            ('?', ..) => return (Token::Reserved(Box::new("?".into())), start_pos),
 
             // letter or underscore ...
             _ if is_id_first_alphabetic(c) || c == '_' => {
-                return Some(parse_identifier_token(stream, state, pos, start_pos, c));
+                return parse_identifier_token(stream, state, pos, start_pos, c);
             }
 
-            _ if c.is_whitespace() => (),
+            // \n
+            ('\n', ..) => pos.new_line(),
+
+            // Whitespace - follows Rust's SPACE, TAB, CR, LF, FF which is the same as WhatWG.
+            (ch, ..) if ch.is_ascii_whitespace() => (),
 
             _ => {
-                return Some((
+                return (
                     Token::LexError(LERR::UnexpectedInput(c.to_string()).into()),
                     start_pos,
-                ))
+                )
             }
         }
     }
 
     pos.advance();
 
-    Some((Token::EOF, *pos))
+    (Token::EOF, *pos)
 }
 
 /// Get the next token, parsing it as an identifier.
@@ -2392,10 +2398,8 @@ pub struct MultiInputsStream<'a> {
     pub buf: [Option<char>; 2],
     /// The current stream index.
     pub index: usize,
-    /// The first input character stream.
-    pub stream: Peekable<Chars<'a>>,
-    /// Extra input character streams.
-    pub extra_streams: Box<[Peekable<Chars<'a>>]>,
+    /// Input character streams.
+    pub streams: StaticVec<Peekable<Chars<'a>>>,
 }
 
 impl InputStream for MultiInputsStream<'_> {
@@ -2421,17 +2425,12 @@ impl InputStream for MultiInputsStream<'_> {
         }
 
         loop {
-            if self.index > self.extra_streams.len() {
+            if self.index >= self.streams.len() {
                 // No more streams
                 return None;
             }
-            if self.index == 0 {
-                if let Some(ch) = self.stream.next() {
-                    // Next character in main stream
-                    return Some(ch);
-                }
-            } else if let Some(ch) = self.extra_streams[self.index - 1].next() {
-                // Next character in current stream
+            if let Some(ch) = self.streams[self.index].next() {
+                // Next character in main stream
                 return Some(ch);
             }
             // Jump to the next stream
@@ -2446,17 +2445,12 @@ impl InputStream for MultiInputsStream<'_> {
         }
 
         loop {
-            if self.index > self.extra_streams.len() {
+            if self.index >= self.streams.len() {
                 // No more streams
                 return None;
             }
-            if self.index == 0 {
-                if let Some(&ch) = self.stream.peek() {
-                    // Next character in main stream
-                    return Some(ch);
-                }
-            } else if let Some(&ch) = self.extra_streams[self.index - 1].peek() {
-                // Next character in current stream
+            if let Some(&ch) = self.streams[self.index].peek() {
+                // Next character in main stream
                 return Some(ch);
             }
             // Jump to the next stream
@@ -2502,18 +2496,18 @@ impl<'a> Iterator for TokenIterator<'a> {
 
         let (token, pos) = match get_next_token(&mut self.stream, &mut self.state, &mut self.pos) {
             // {EOF}
-            None => return None,
+            r @ (Token::EOF, _) => return Some(r),
             // {EOF} after unterminated string.
             // The only case where `TokenizeState.is_within_text_terminated_by` is set is when
             // a verbatim string or a string with continuation encounters {EOF}.
             // This is necessary to handle such cases for line-by-line parsing, but for an entire
             // script it is a syntax error.
-            Some((Token::StringConstant(..), pos)) if self.state.is_within_text_terminated_by.is_some() => {
+            (Token::StringConstant(..), pos) if self.state.is_within_text_terminated_by.is_some() => {
                 self.state.is_within_text_terminated_by = None;
                 return Some((Token::LexError(LERR::UnterminatedString.into()), pos));
             }
             // Reserved keyword/symbol
-            Some((Token::Reserved(s), pos)) => (match
+            (Token::Reserved(s), pos) => (match
                 (s.as_str(),
                     #[cfg(not(feature = "no_custom_syntax"))]
                     self.engine.custom_keywords.contains_key(&*s),
@@ -2562,26 +2556,23 @@ impl<'a> Iterator for TokenIterator<'a> {
             }, pos),
             // Custom keyword
             #[cfg(not(feature = "no_custom_syntax"))]
-            Some((Token::Identifier(s), pos)) if self.engine.custom_keywords.contains_key(&*s) => {
+            (Token::Identifier(s), pos) if self.engine.custom_keywords.contains_key(&*s) => {
                 (Token::Custom(s), pos)
             }
             // Custom keyword/symbol - must be disabled
             #[cfg(not(feature = "no_custom_syntax"))]
-            Some((token, pos)) if token.is_literal() && self.engine.custom_keywords.contains_key(token.literal_syntax()) => {
-                if self.engine.is_symbol_disabled(token.literal_syntax()) {
-                    // Disabled standard keyword/symbol
-                    (Token::Custom(Box::new(token.literal_syntax().into())), pos)
-                } else {
-                    // Active standard keyword - should never be a custom keyword!
-                    unreachable!("{:?} is an active keyword", token)
-                }
+            (token, pos) if token.is_literal() && self.engine.custom_keywords.contains_key(token.literal_syntax()) => {
+                // Active standard keyword should never be a custom keyword!
+                debug_assert!(self.engine.is_symbol_disabled(token.literal_syntax()), "{:?} is an active keyword", token);
+
+                (Token::Custom(Box::new(token.literal_syntax().into())), pos)
             }
             // Disabled symbol
-            Some((token, pos)) if token.is_literal() && self.engine.is_symbol_disabled(token.literal_syntax()) => {
+            (token, pos) if token.is_literal() && self.engine.is_symbol_disabled(token.literal_syntax()) => {
                 (Token::Reserved(Box::new(token.literal_syntax().into())), pos)
             }
             // Normal symbol
-            Some(r) => r,
+            r => r,
         };
 
         // Run the mapper, if any
@@ -2686,8 +2677,6 @@ pub fn lex_raw<'a>(
     let buffer: TokenizerControl = RefCell::new(TokenizerControlBlock::new()).into();
     let buffer2 = buffer.clone();
 
-    let mut input_streams = inputs.into_iter().map(|s| s.as_ref().chars().peekable());
-
     (
         TokenIterator {
             engine,
@@ -2704,8 +2693,10 @@ pub fn lex_raw<'a>(
             pos: Position::new(1, 0),
             stream: MultiInputsStream {
                 buf: [None, None],
-                stream: input_streams.next().unwrap(),
-                extra_streams: input_streams.collect(),
+                streams: inputs
+                    .into_iter()
+                    .map(|s| s.as_ref().chars().peekable())
+                    .collect(),
                 index: 0,
             },
             token_mapper,

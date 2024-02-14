@@ -91,6 +91,7 @@ pub struct ExportedFnParams {
     pub name: Vec<String>,
     pub return_raw: Option<Span>,
     pub pure: Option<Span>,
+    pub volatile: Option<Span>,
     pub skip: bool,
     pub special: FnSpecialAccess,
     pub namespace: FnNamespaceAccess,
@@ -130,6 +131,7 @@ impl ExportedParams for ExportedFnParams {
         let mut name = Vec::new();
         let mut return_raw = None;
         let mut pure = None;
+        let mut volatile = None;
         let mut skip = false;
         let mut namespace = FnNamespaceAccess::Unset;
         let mut special = FnSpecialAccess::None;
@@ -186,6 +188,7 @@ impl ExportedParams for ExportedFnParams {
                 }
 
                 ("pure", None) => pure = Some(item_span),
+                ("volatile", None) => volatile = Some(item_span),
                 ("return_raw", None) => return_raw = Some(item_span),
                 ("skip", None) => skip = true,
                 ("global", None) => match namespace {
@@ -255,6 +258,7 @@ impl ExportedParams for ExportedFnParams {
             name,
             return_raw,
             pure,
+            volatile,
             skip,
             special,
             namespace,
@@ -339,7 +343,7 @@ impl Parse for ExportedFn {
         for arg in fn_all.sig.inputs.iter().skip(skip_slots + 1) {
             let ty = match arg {
                 syn::FnArg::Typed(syn::PatType { ref ty, .. }) => ty,
-                _ => panic!("internal error: receiver argument outside of first position!?"),
+                _ => unreachable!("receiver argument outside of first position!?"),
             };
             let is_ok = match flatten_type_groups(ty.as_ref()) {
                 syn::Type::Reference(syn::TypeReference {
@@ -664,6 +668,7 @@ impl ExportedFn {
         let arg_count = self.arg_count();
         let is_method_call = self.mutable_receiver();
         let is_pure = !self.mutable_receiver() || self.params().pure.is_some();
+        let is_volatile = self.params().volatile.is_some();
         let pass_context = self.pass_context;
 
         let mut unpack_statements = Vec::new();
@@ -749,7 +754,7 @@ impl ExportedFn {
                                     mem::take(args[#i]).into_immutable_string().unwrap()
                                 )
                             }
-                            _ => panic!("internal error: why wasn't this found earlier!?"),
+                            _ => unreachable!("why wasn't this found earlier!?"),
                         },
                         syn::Type::Path(ref p) if p.path == string_type_path => {
                             is_string = true;
@@ -791,7 +796,7 @@ impl ExportedFn {
                         );
                     }
                 }
-                syn::FnArg::Receiver(..) => panic!("internal error: how did this happen!?"),
+                syn::FnArg::Receiver(..) => unreachable!("how did this happen!?"),
             }
             if !is_ref {
                 unpack_exprs.push(syn::parse2::<syn::Expr>(quote! { #var }).unwrap());
@@ -849,7 +854,7 @@ impl ExportedFn {
                 #[inline(always)] pub fn param_types() -> [TypeId; #arg_count] { [#(#input_type_exprs),*] }
             }
             #(#cfg_attrs)*
-            impl PluginFunction for #type_name {
+            impl PluginFunc for #type_name {
                 #[inline(always)]
                 fn call(&self, context: Option<NativeCallContext>, args: &mut [&mut Dynamic]) -> RhaiResult {
                     #(#unpack_statements)*
@@ -858,6 +863,7 @@ impl ExportedFn {
 
                 #[inline(always)] fn is_method_call(&self) -> bool { #is_method_call }
                 #[inline(always)] fn is_pure(&self) -> bool { #is_pure }
+                #[inline(always)] fn is_volatile(&self) -> bool { #is_volatile }
                 #[inline(always)] fn has_context(&self) -> bool { #pass_context }
             }
         }

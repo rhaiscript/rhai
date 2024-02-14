@@ -3,7 +3,7 @@ members = [".", "codegen"]
 
 [package]
 name = "rhai"
-version = "1.17.0"
+version = "1.17.1"
 rust-version = "1.66.0"
 edition = "2018"
 resolver = "2"
@@ -19,12 +19,13 @@ categories = ["no-std", "embedded", "wasm", "parser-implementations"]
 
 [dependencies]
 smallvec = { version = "1.7.0", default-features = false, features = ["union", "const_new", "const_generics"] }
+thin-vec = { version = "0.2.13", default-features = false }
 ahash = { version = "0.8.2", default-features = false, features = ["compile-time-rng"] }
 num-traits = { version = "0.2.0", default-features = false }
 once_cell = { version = "1.7.0", default-features = false, features = ["race"] }
 bitflags = { version = "2.0.0", default-features = false }
 smartstring = { version = "1.0.0", default-features = false }
-rhai_codegen = { version = "1.5.0", path = "codegen", default-features = false }
+rhai_codegen = { version = "2.0.0", path = "codegen" }
 
 no-std-compat = { git = "https://gitlab.com/jD91mZM2/no-std-compat", version = "0.4.1", default-features = false, features = ["alloc"], optional = true }
 libm = { version = "0.2.0", default-features = false, optional = true }
@@ -35,7 +36,7 @@ serde_json = { version = "1.0.45", default-features = false, features = ["alloc"
 unicode-xid = { version = "0.2.0", default-features = false, optional = true }
 rust_decimal = { version = "1.16.0", default-features = false, features = ["maths"], optional = true }
 getrandom = { version = "0.2.0", optional = true }
-rustyline = { version = "12.0.0", optional = true }
+rustyline = { version = "13.0.0", optional = true }
 document-features = { version = "0.2.0", optional = true }
 arbitrary = { version = "1.3.2", optional = true, features = ["derive"] }
 indexmap = { version = "2.1.0", optional = true }
@@ -60,7 +61,7 @@ indexmap = ["dep:indexmap"]
 ## Add support for the [`Decimal`](https://crates.io/crates/rust_decimal) data type (acts as the system floating-point type under `no_float`).
 decimal = ["rust_decimal"]
 ## Enable serialization/deserialization of Rhai data types via [`serde`](https://crates.io/crates/serde).
-serde = ["dep:serde", "smartstring/serde", "smallvec/serde"]
+serde = ["dep:serde", "smartstring/serde", "smallvec/serde", "thin-vec/serde"]
 ## Allow [Unicode Standard Annex #31](https://unicode.org/reports/tr31/) for identifiers.
 unicode-xid-ident = ["unicode-xid"]
 ## Enable functions metadata (including doc-comments); implies [`serde`](#feature-serde).
@@ -71,6 +72,8 @@ internals = []
 debugging = ["internals"]
 ## Features and dependencies required by `bin` tools: `decimal`, `metadata`, `serde`, `debugging` and [`rustyline`](https://crates.io/crates/rustyline).
 bin-features = ["decimal", "metadata", "serde", "debugging", "rustyline"]
+## Enable fuzzing via the [`arbitrary`](https://crates.io/crates/arbitrary) crate.
+fuzz = ["arbitrary", "rust_decimal/rust-fuzz", "serde"]
 
 #! ### System Configuration Features
 
@@ -124,6 +127,9 @@ stdweb = ["getrandom/js", "instant/stdweb"]
 
 #! ### Features used in testing environments only
 
+## Compiled with a non-stable compiler (i.e. beta or nightly)
+unstable = []
+
 ## Running under a testing environment.
 testing-environ = []
 
@@ -161,4 +167,7 @@ features = ["document-features", "metadata", "serde", "internals", "decimal", "d
 [patch.crates-io]
 # Notice that a custom modified version of `rustyline` is used which supports bracketed paste on Windows.
 # This can be moved to the official version when bracketed paste is added.
-rustyline = { git = "https://github.com/schungx/rustyline", branch = "v12" }
+rustyline = { git = "https://github.com/schungx/rustyline", branch = "v13" }
+
+# Patch SmartString to resolve an UB issue.
+#smartstring = { git = "https://github.com/bodil/smartstring", ref = "refs/pull/34/head" }

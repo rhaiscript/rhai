@@ -1,5 +1,6 @@
 //! Implement deserialization support of [`Dynamic`][crate::Dynamic] for [`serde`].
 
+use crate::api::formatting::map_std_type_name;
 use crate::types::dynamic::Union;
 use crate::{Dynamic, ImmutableString, LexError, Position, RhaiError, RhaiResultOf, ERR};
 use serde::de::{Error, IntoDeserializer, Visitor};
@@ -35,16 +36,14 @@ impl<'de> DynamicDeserializer<'de> {
     #[cold]
     #[inline(always)]
     fn type_error<T>(&self) -> RhaiResultOf<T> {
-        self.type_error_str(type_name::<T>())
+        self.type_error_str(map_std_type_name(type_name::<T>(), false))
     }
     /// Shortcut for a type conversion error.
     #[cold]
     #[inline(never)]
-    fn type_error_str<T>(&self, error: &str) -> RhaiResultOf<T> {
-        Err(
-            ERR::ErrorMismatchOutputType(error.into(), self.0.type_name().into(), Position::NONE)
-                .into(),
-        )
+    fn type_error_str<T>(&self, actual: &str) -> RhaiResultOf<T> {
+        let expected = map_std_type_name(self.0.type_name(), false).into();
+        Err(ERR::ErrorMismatchOutputType(actual.into(), expected, Position::NONE).into())
     }
     #[inline(always)]
     fn deserialize_int<V: Visitor<'de>>(v: crate::INT, visitor: V) -> RhaiResultOf<V::Value> {
@@ -378,7 +377,7 @@ impl<'de> Deserializer<'de> for DynamicDeserializer<'de> {
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> RhaiResultOf<V::Value> {
         self.0
             .downcast_ref::<()>()
-            .map_or_else(|| self.type_error(), |_| visitor.visit_unit())
+            .map_or_else(|| self.type_error(), |()| visitor.visit_unit())
     }
 
     fn deserialize_unit_struct<V: Visitor<'de>>(
@@ -441,9 +440,28 @@ impl<'de> Deserializer<'de> for DynamicDeserializer<'de> {
         self,
         _name: &'static str,
         _fields: &'static [&'static str],
-        visitor: V,
+        _visitor: V,
     ) -> RhaiResultOf<V::Value> {
-        self.deserialize_map(visitor)
+        #[cfg(not(feature = "no_object"))]
+        return self.0.downcast_ref::<crate::Map>().map_or_else(
+            || {
+                Err(ERR::ErrorMismatchOutputType(
+                    map_std_type_name(type_name::<crate::Map>(), false).into(),
+                    map_std_type_name(self.0.type_name(), false).into(),
+                    Position::NONE,
+                )
+                .into())
+            },
+            |map| {
+                _visitor.visit_map(IterateMap::new(
+                    map.keys().map(crate::SmartString::as_str),
+                    map.values(),
+                ))
+            },
+        );
+
+        #[cfg(feature = "no_object")]
+        return self.type_error();
     }
 
     fn deserialize_enum<V: Visitor<'de>>(

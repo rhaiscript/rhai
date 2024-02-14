@@ -20,6 +20,8 @@ fn test_float_scientific() {
     assert!(engine.eval::<bool>("123.456 == 1.23456e2").unwrap());
     assert!(engine.eval::<bool>("123.456 == 1.23456e+2").unwrap());
     assert!(engine.eval::<bool>("123.456 == 123456e-3").unwrap());
+
+    assert!(engine.compile("123.456e1.23").is_err());
 }
 
 #[test]

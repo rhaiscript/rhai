@@ -1,6 +1,7 @@
 use crate::eval::calc_index;
 use crate::module::ModuleFlags;
 use crate::plugin::*;
+use crate::FuncRegistration;
 use crate::{
     def_package, ExclusiveRange, InclusiveRange, RhaiResultOf, ERR, INT, INT_BITS, MAX_USIZE_INT,
 };
@@ -241,14 +242,15 @@ macro_rules! reg_range {
     ($lib:ident | $x:expr => $( $y:ty ),*) => {
         $(
             $lib.set_iterator::<Range<$y>>();
-            let _hash = $lib.set_native_fn($x, |from: $y, to: $y| Ok(from..to));
+
+            let f = FuncRegistration::new($x);
 
             #[cfg(feature = "metadata")]
-            $lib.update_fn_metadata_with_comments(_hash, [
-                    concat!("from: ", stringify!($y)),
-                    concat!("to: ", stringify!($y)),
-                    concat!("Iterator<", stringify!($y), ">"),
-            ], ["\
+            let f = f.with_params_info([
+                concat!("from: ", stringify!($y)),
+                concat!("to: ", stringify!($y)),
+                concat!("Iterator<", stringify!($y), ">"),
+            ]).with_comments(["\
                 /// Return an iterator over the exclusive range of `from..to`.\n\
                 /// The value `to` is never included.\n\
                 ///\n\
@@ -262,6 +264,8 @@ macro_rules! reg_range {
                 /// ```"
             ]);
 
+            f.set_into_module($lib, |from: $y, to: $y| from..to);
+
             $lib.set_iterator::<RangeInclusive<$y>>();
         )*
     };
@@ -274,15 +278,16 @@ macro_rules! reg_range {
     ($lib:ident | step ( $add:ident ) $x:expr => $( $y:ty ),*) => {
         $(
             $lib.set_iterator::<StepRange<$y>>();
-            let _hash = $lib.set_native_fn($x, |from: $y, to: $y, step: $y| StepRange::new(from, to, step, $add));
+
+            let f = FuncRegistration::new($x);
 
             #[cfg(feature = "metadata")]
-            $lib.update_fn_metadata_with_comments(_hash, [
-                    concat!("from: ", stringify!($y)),
-                    concat!("to: ", stringify!($y)),
-                    concat!("step: ", stringify!($y)),
-                    concat!("Iterator<", stringify!($y), ">")
-            ], ["\
+            let f = f.with_params_info([
+                concat!("from: ", stringify!($y)),
+                concat!("to: ", stringify!($y)),
+                concat!("step: ", stringify!($y)),
+                concat!("Iterator<", stringify!($y), ">")
+            ]).with_comments(["\
                 /// Return an iterator over the exclusive range of `from..to`, each iteration increasing by `step`.\n\
                 /// The value `to` is never included.\n\
                 ///\n\
@@ -305,14 +310,16 @@ macro_rules! reg_range {
                 /// ```"
             ]);
 
-            let _hash = $lib.set_native_fn($x, |range: std::ops::Range<$y>, step: $y| StepRange::new(range.start, range.end, step, $add));
+            f.set_into_module($lib, |from: $y, to: $y, step: $y| StepRange::new(from, to, step, $add));
+
+            let f = FuncRegistration::new($x);
 
             #[cfg(feature = "metadata")]
-            $lib.update_fn_metadata_with_comments(_hash, [
-                    concat!("range: Range<", stringify!($y), ">"),
-                    concat!("step: ", stringify!($y)),
-                    concat!("Iterator<", stringify!($y), ">")
-            ], ["\
+            let f = f.with_params_info([
+                concat!("range: Range<", stringify!($y), ">"),
+                concat!("step: ", stringify!($y)),
+                concat!("Iterator<", stringify!($y), ">")
+            ]).with_comments(["\
                 /// Return an iterator over an exclusive range, each iteration increasing by `step`.\n\
                 ///\n\
                 /// If `range` is reversed and `step` < 0, iteration goes backwards.\n\
@@ -333,6 +340,8 @@ macro_rules! reg_range {
                 /// }\n\
                 /// ```"
             ]);
+
+            f.set_into_module($lib, |range: std::ops::Range<$y>, step: $y| StepRange::new(range.start, range.end, step, $add));
         )*
     };
 }
@@ -373,282 +382,211 @@ def_package! {
         // Register string iterator
         lib.set_iterator::<CharsStream>();
 
-        #[cfg(feature = "metadata")]
-        let (range_type, range_inclusive_type) = (
-            format!("range: Range<{}>", type_name::<INT>()),
-            format!("range: RangeInclusive<{}>", type_name::<INT>()),
-        );
-
-        let _hash = lib.set_native_fn("chars", |string, range: ExclusiveRange| {
-            let from = INT::max(range.start, 0);
-            let to = INT::max(range.end, from);
-            Ok(CharsStream::new(string, from, to - from))
-        });
-        #[cfg(feature = "metadata")]
-        lib.update_fn_metadata_with_comments(
-            _hash,
-            ["string: &str", &range_type, "Iterator<char>"],
-            [
-                "/// Return an iterator over an exclusive range of characters in the string.",
-                "///",
-                "/// # Example",
-                "///",
-                "/// ```rhai",
-                r#"/// for ch in "hello, world!".chars(2..5) {"#,
-                "///     print(ch);",
-                "/// }",
-                "/// ```"
-        ]
-        );
-
-        let _hash = lib.set_native_fn("chars", |string, range: InclusiveRange| {
-            let from = INT::max(*range.start(), 0);
-            let to = INT::max(*range.end(), from - 1);
-            Ok(CharsStream::new(string, from, to-from + 1))
-        });
-        #[cfg(feature = "metadata")]
-        lib.update_fn_metadata_with_comments(
-            _hash,
-            ["string: &str", &range_inclusive_type, "Iterator<char>"],
-            [
-                "/// Return an iterator over an inclusive range of characters in the string.",
-                "///",
-                "/// # Example",
-                "///",
-                "/// ```rhai",
-                r#"/// for ch in "hello, world!".chars(2..=6) {"#,
-                "///     print(ch);",
-                "/// }",
-                "/// ```"
-            ]
-        );
-
-        let _hash = lib.set_native_fn("chars", |string, from, len| Ok(CharsStream::new(string, from, len)));
-        #[cfg(feature = "metadata")]
-        lib.update_fn_metadata_with_comments(
-            _hash,
-            ["string: &str", "start: INT", "len: INT", "Iterator<char>"],
-            [
-                "/// Return an iterator over a portion of characters in the string.",
-                "///",
-                "/// * If `start` < 0, position counts from the end of the string (`-1` is the last character).",
-                "/// * If `start` < -length of string, position counts from the beginning of the string.",
-                "/// * If `start` ≥ length of string, an empty iterator is returned.",
-                "/// * If `len` ≤ 0, an empty iterator is returned.",
-                "/// * If `start` position + `len` ≥ length of string, all characters of the string after the `start` position are iterated.",
-                "///",
-                "/// # Example",
-                "///",
-                "/// ```rhai",
-                r#"/// for ch in "hello, world!".chars(2, 4) {"#,
-                "///     print(ch);",
-                "/// }",
-                "/// ```"
-            ]
-        );
-
-        let _hash = lib.set_native_fn("chars", |string, from| Ok(CharsStream::new(string, from, INT::MAX)));
-        #[cfg(feature = "metadata")]
-        lib.update_fn_metadata_with_comments(
-            _hash,
-            ["string: &str", "from: INT", "Iterator<char>"],
-            [
-                "/// Return an iterator over the characters in the string starting from the `start` position.",
-                "///",
-                "/// * If `start` < 0, position counts from the end of the string (`-1` is the last character).",
-                "/// * If `start` < -length of string, position counts from the beginning of the string.",
-                "/// * If `start` ≥ length of string, an empty iterator is returned.",
-                "///",
-                "/// # Example",
-                "///",
-                "/// ```rhai",
-                r#"/// for ch in "hello, world!".chars(2) {"#,
-                "///     print(ch);",
-                "/// }",
-                "/// ```"
-            ]
-        );
-
-        let _hash = lib.set_native_fn("chars", |string| Ok(CharsStream::new(string, 0, INT::MAX)));
-        #[cfg(feature = "metadata")]
-        lib.update_fn_metadata_with_comments(
-            _hash,
-            ["string: &str", "Iterator<char>"],
-            [
-                "/// Return an iterator over the characters in the string.",
-                "///",
-                "/// # Example",
-                "///",
-                "/// ```rhai",
-                r#"/// for ch in "hello, world!".chars() {"#,
-                "///     print(ch);",
-                "/// }",
-                "/// ```"
-            ]
-        );
-
-        #[cfg(not(feature = "no_object"))]
-        {
-            let _hash = lib.set_getter_fn("chars", |string: &mut ImmutableString| Ok(CharsStream::new(string, 0, INT::MAX)));
-            #[cfg(feature = "metadata")]
-            lib.update_fn_metadata_with_comments(
-                _hash,
-                ["string: &mut ImmutableString", "Iterator<char>"],
-                [
-                    "/// Return an iterator over all the characters in the string.",
-                    "///",
-                    "/// # Example",
-                    "///",
-                    "/// ```rhai",
-                    r#"/// for ch in "hello, world!".chars {"#,
-                    "///     print(ch);",
-                    "/// }",
-                    "/// ```"
-                    ]
-            );
-        }
-
         // Register bit-field iterator
         lib.set_iterator::<BitRange>();
 
-        let _hash = lib.set_native_fn("bits", |value, range: ExclusiveRange| {
-            let from = INT::max(range.start, 0);
-            let to = INT::max(range.end, from);
-            BitRange::new(value, from, to - from)
-        });
-        #[cfg(feature = "metadata")]
-        lib.update_fn_metadata_with_comments(
-            _hash,
-            ["value: INT", &range_type, "Iterator<bool>"],
-            [
-                "/// Return an iterator over an exclusive range of bits in the number.",
-                "///",
-                "/// # Example",
-                "///",
-                "/// ```rhai",
-                "/// let x = 123456;",
-                "///",
-                "/// for bit in x.bits(10..24) {",
-                "///     print(bit);",
-                "/// }",
-                "/// ```"
-            ]
-        );
-
-        let _hash = lib.set_native_fn("bits", |value, range: InclusiveRange| {
-            let from = INT::max(*range.start(), 0);
-            let to = INT::max(*range.end(), from - 1);
-            BitRange::new(value, from, to - from + 1)
-        });
-        #[cfg(feature = "metadata")]
-        lib.update_fn_metadata_with_comments(
-            _hash,
-            ["value: INT", &range_inclusive_type, "Iterator<bool>"],
-            [
-                "/// Return an iterator over an inclusive range of bits in the number.",
-                "///",
-                "/// # Example",
-                "///",
-                "/// ```rhai",
-                "/// let x = 123456;",
-                "///",
-                "/// for bit in x.bits(10..=23) {",
-                "///     print(bit);",
-                "/// }",
-                "/// ```"
-            ]
-        );
-
-        let _hash = lib.set_native_fn("bits", BitRange::new);
-        #[cfg(feature = "metadata")]
-        lib.update_fn_metadata_with_comments(
-            _hash,
-            ["value: INT", "from: INT", "len: INT", "Iterator<bool>"],
-            [
-                "/// Return an iterator over a portion of bits in the number.",
-                "///",
-                "/// * If `start` < 0, position counts from the MSB (Most Significant Bit)>.",
-                "/// * If `len` ≤ 0, an empty iterator is returned.",
-                "/// * If `start` position + `len` ≥ length of string, all bits of the number after the `start` position are iterated.",
-                "///",
-                "/// # Example",
-                "///",
-                "/// ```rhai",
-                "/// let x = 123456;",
-                "///",
-                "/// for bit in x.bits(10, 8) {",
-                "///     print(bit);",
-                "/// }",
-                "/// ```"
-            ]
-        );
-
-        let _hash = lib.set_native_fn("bits", |value, from| BitRange::new(value, from, INT::MAX));
-        #[cfg(feature = "metadata")]
-        lib.update_fn_metadata_with_comments(
-            _hash,
-            ["value: INT", "from: INT", "Iterator<bool>"],
-            [
-                "/// Return an iterator over the bits in the number starting from the specified `start` position.",
-                "///",
-                "/// If `start` < 0, position counts from the MSB (Most Significant Bit)>.",
-                "///",
-                "/// # Example",
-                "///",
-                "/// ```rhai",
-                "/// let x = 123456;",
-                "///",
-                "/// for bit in x.bits(10) {",
-                "///     print(bit);",
-                "/// }",
-                "/// ```"
-            ]
-        );
-
-        let _hash = lib.set_native_fn("bits", |value| BitRange::new(value, 0, INT::MAX) );
-        #[cfg(feature = "metadata")]
-        lib.update_fn_metadata_with_comments(
-            _hash,
-            ["value: INT", "Iterator<bool>"],
-            [
-                "/// Return an iterator over all the bits in the number.",
-                "///",
-                "/// # Example",
-                "///",
-                "/// ```rhai",
-                "/// let x = 123456;",
-                "///",
-                "/// for bit in x.bits() {",
-                "///     print(bit);",
-                "/// }",
-                "/// ```"
-            ]
-        );
-
-        #[cfg(not(feature = "no_object"))]
-        {
-            let _hash = lib.set_getter_fn("bits", |value: &mut INT| BitRange::new(*value, 0, INT::MAX) );
-            #[cfg(feature = "metadata")]
-            lib.update_fn_metadata_with_comments(
-                _hash,
-                ["value: &mut INT", "Iterator<bool>"],
-                [
-                    "/// Return an iterator over all the bits in the number.",
-                    "///",
-                    "/// # Example",
-                    "///",
-                    "/// ```rhai",
-                    "/// let x = 123456;",
-                    "///",
-                    "/// for bit in x.bits {",
-                    "///     print(bit);",
-                    "/// }",
-                    "/// ```"
-                    ]
-            );
-        }
-
+        // Register iterator functions
+        combine_with_exported_module!(lib, "iterator", iterator_functions);
         combine_with_exported_module!(lib, "range", range_functions);
+    }
+}
+
+#[export_module]
+mod iterator_functions {
+    /// Return an iterator over an exclusive range of characters in the string.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// for ch in "hello, world!".chars(2..5) {
+    ///     print(ch);
+    /// }
+    /// ```
+    #[rhai_fn(name = "chars")]
+    pub fn chars_from_exclusive_range(string: &str, range: ExclusiveRange) -> CharsStream {
+        let from = INT::max(range.start, 0);
+        let to = INT::max(range.end, from);
+        CharsStream::new(string, from, to - from)
+    }
+    /// Return an iterator over an inclusive range of characters in the string.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// for ch in "hello, world!".chars(2..=6) {
+    ///     print(ch);
+    /// }
+    /// ```
+    #[rhai_fn(name = "chars")]
+    pub fn chars_from_inclusive_range(string: &str, range: InclusiveRange) -> CharsStream {
+        let from = INT::max(*range.start(), 0);
+        let to = INT::max(*range.end(), from - 1);
+        CharsStream::new(string, from, to - from + 1)
+    }
+    /// Return an iterator over a portion of characters in the string.
+    ///
+    /// * If `start` < 0, position counts from the end of the string (`-1` is the last character).
+    /// * If `start` < -length of string, position counts from the beginning of the string.
+    /// * If `start` ≥ length of string, an empty iterator is returned.
+    /// * If `len` ≤ 0, an empty iterator is returned.
+    /// * If `start` position + `len` ≥ length of string, all characters of the string after the `start` position are iterated.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// for ch in "hello, world!".chars(2, 4) {
+    ///     print(ch);
+    /// }
+    /// ```
+    #[rhai_fn(name = "chars")]
+    pub fn chars_from_start_len(string: &str, start: INT, len: INT) -> CharsStream {
+        CharsStream::new(string, start, len)
+    }
+    /// Return an iterator over the characters in the string starting from the `start` position.
+    ///
+    /// * If `start` < 0, position counts from the end of the string (`-1` is the last character).
+    /// * If `start` < -length of string, position counts from the beginning of the string.
+    /// * If `start` ≥ length of string, an empty iterator is returned.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// for ch in "hello, world!".chars(2) {
+    ///     print(ch);
+    /// }
+    /// ```
+    #[rhai_fn(name = "chars")]
+    pub fn chars_from_start(string: &str, start: INT) -> CharsStream {
+        CharsStream::new(string, start, INT::MAX)
+    }
+    /// Return an iterator over the characters in the string.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// for ch in "hello, world!".chars() {
+    ///     print(ch);
+    /// }
+    /// ```
+    #[rhai_fn(name = "chars")]
+    pub fn chars(string: &str) -> CharsStream {
+        CharsStream::new(string, 0, INT::MAX)
+    }
+    /// Return an iterator over all the characters in the string.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// for ch in "hello, world!".chars {"
+    ///     print(ch);
+    /// }
+    /// ```
+    #[cfg(not(feature = "no_object"))]
+    #[rhai_fn(get = "chars")]
+    pub fn get_chars(string: &str) -> CharsStream {
+        CharsStream::new(string, 0, INT::MAX)
+    }
+
+    /// Return an iterator over an exclusive range of bits in the number.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// let x = 123456;
+    ///
+    /// for bit in x.bits(10..24) {
+    ///     print(bit);
+    /// }
+    /// ```
+    #[rhai_fn(name = "bits", return_raw)]
+    pub fn bits_from_exclusive_range(value: INT, range: ExclusiveRange) -> RhaiResultOf<BitRange> {
+        let from = INT::max(range.start, 0);
+        let to = INT::max(range.end, from);
+        BitRange::new(value, from, to - from)
+    }
+    /// Return an iterator over an inclusive range of bits in the number.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// let x = 123456;
+    ///
+    /// for bit in x.bits(10..=23) {
+    ///     print(bit);
+    /// }
+    /// ```
+    #[rhai_fn(name = "bits", return_raw)]
+    pub fn bits_from_inclusive_range(value: INT, range: InclusiveRange) -> RhaiResultOf<BitRange> {
+        let from = INT::max(*range.start(), 0);
+        let to = INT::max(*range.end(), from - 1);
+        BitRange::new(value, from, to - from + 1)
+    }
+    /// Return an iterator over a portion of bits in the number.
+    ///
+    /// * If `start` < 0, position counts from the MSB (Most Significant Bit)>.
+    /// * If `len` ≤ 0, an empty iterator is returned.
+    /// * If `start` position + `len` ≥ length of string, all bits of the number after the `start` position are iterated.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// let x = 123456;
+    ///
+    /// for bit in x.bits(10, 8) {
+    ///     print(bit);
+    /// }
+    /// ```
+    #[rhai_fn(name = "bits", return_raw)]
+    pub fn bits_from_start_and_len(value: INT, from: INT, len: INT) -> RhaiResultOf<BitRange> {
+        BitRange::new(value, from, len)
+    }
+    /// Return an iterator over the bits in the number starting from the specified `start` position.
+    ///
+    /// If `start` < 0, position counts from the MSB (Most Significant Bit)>.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// let x = 123456;
+    ///
+    /// for bit in x.bits(10) {
+    ///     print(bit);
+    /// }
+    /// ```
+    #[rhai_fn(name = "bits", return_raw)]
+    pub fn bits_from_start(value: INT, from: INT) -> RhaiResultOf<BitRange> {
+        BitRange::new(value, from, INT::MAX)
+    }
+    /// Return an iterator over all the bits in the number.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// let x = 123456;
+    ///
+    /// for bit in x.bits() {
+    ///     print(bit);
+    /// }
+    /// ```
+    #[rhai_fn(name = "bits", return_raw)]
+    pub fn bits(value: INT) -> RhaiResultOf<BitRange> {
+        BitRange::new(value, 0, INT::MAX)
+    }
+    /// Return an iterator over all the bits in the number.
+    ///
+    /// # Example
+    ///
+    /// ```rhai
+    /// let x = 123456;
+    ///
+    /// for bit in x.bits {
+    ///     print(bit);
+    /// }
+    /// ```
+    #[cfg(not(feature = "no_object"))]
+    #[rhai_fn(get = "bits", return_raw)]
+    pub fn get_bits(value: INT) -> RhaiResultOf<BitRange> {
+        BitRange::new(value, 0, INT::MAX)
     }
 }
 

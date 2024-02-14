@@ -90,7 +90,7 @@
 #![allow(clippy::absurd_extreme_comparisons)] // On `only_i32`, `MAX_USIZE_INT` < `INT::MAX` because `usize` == `u32` and `INT` == `i64`
 #![allow(clippy::wildcard_imports)] // Wildcard imports are used to import the plugins prelude
 #![allow(clippy::enum_glob_use)] // Sometimes useful to import all `Tokens` etc.
-#![allow(clippy::no_effect_underscore_binding)] // Underscored variables may be  used by code within feature guards
+#![allow(clippy::no_effect_underscore_binding)] // Underscored variables may be used by code within feature guards
 #![allow(clippy::semicolon_if_nothing_returned)] // One-liner `match` cases are sometimes formatted as multi-line blocks
 
 #[cfg(feature = "no_std")]
@@ -226,7 +226,6 @@ use once_cell::sync::OnceCell;
 #[cfg(not(feature = "std"))]
 use once_cell::race::OnceBox as OnceCell;
 
-#[allow(deprecated)]
 pub use api::build_type::{CustomType, TypeBuilder};
 #[cfg(not(feature = "no_custom_syntax"))]
 pub use api::custom_syntax::Expression;
@@ -242,8 +241,8 @@ pub use eval::EvalContext;
 #[cfg(not(feature = "no_object"))]
 use func::calc_typed_method_hash;
 use func::{calc_fn_hash, calc_fn_hash_full, calc_var_hash};
-pub use func::{plugin, FuncArgs, NativeCallContext, RegisterNativeFunction};
-pub use module::{FnNamespace, Module};
+pub use func::{plugin, FuncArgs, NativeCallContext, RhaiNativeFunc};
+pub use module::{FnNamespace, FuncRegistration, Module};
 pub use packages::string_basic::{FUNC_TO_DEBUG, FUNC_TO_STRING};
 pub use rhai_codegen::*;
 #[cfg(not(feature = "no_time"))]
@@ -370,8 +369,9 @@ pub use api::default_limits;
 
 #[cfg(feature = "internals")]
 pub use ast::{
-    ASTFlags, ASTNode, BinaryExpr, ConditionalExpr, Expr, FlowControl, FnCallExpr, FnCallHashes,
-    Ident, OpAssignment, RangeCase, ScriptFnDef, Stmt, StmtBlock, SwitchCasesCollection,
+    ASTFlags, ASTNode, BinaryExpr, EncapsulatedEnviron, Expr, FlowControl, FnCallExpr,
+    FnCallHashes, Ident, OpAssignment, RangeCase, ScriptFuncDef, Stmt, StmtBlock,
+    SwitchCasesCollection,
 };
 
 #[cfg(feature = "internals")]
@@ -383,14 +383,11 @@ pub use ast::CustomExpr;
 pub use ast::Namespace;
 
 #[cfg(feature = "internals")]
-pub use func::EncapsulatedEnviron;
-
-#[cfg(feature = "internals")]
 pub use eval::{Caches, FnResolutionCache, FnResolutionCacheEntry, GlobalRuntimeState};
 
 #[cfg(feature = "internals")]
 #[allow(deprecated)]
-pub use func::{locked_read, locked_write, CallableFunction, NativeCallContextStore};
+pub use func::{locked_read, locked_write, NativeCallContextStore, RhaiFunc};
 
 #[cfg(feature = "internals")]
 #[cfg(feature = "metadata")]
@@ -399,37 +396,7 @@ pub use api::definitions::Definitions;
 /// Number of items to keep inline for [`StaticVec`].
 const STATIC_VEC_INLINE_SIZE: usize = 3;
 
-/// Alias to [`smallvec::SmallVec<[T; 3]>`](https://crates.io/crates/smallvec), which is a
-/// specialized [`Vec`] backed by a small, inline, fixed-size array when there are ≤ 3 items stored.
-///
-/// # History
-///
-/// And Saint Attila raised the `SmallVec` up on high, saying, "O Lord, bless this Thy `SmallVec`
-/// that, with it, Thou mayest blow Thine allocation costs to tiny bits in Thy mercy."
-///
-/// And the Lord did grin, and the people did feast upon the lambs and sloths and carp and anchovies
-/// and orangutans and breakfast cereals and fruit bats and large chu...
-///
-/// And the Lord spake, saying, "First shalt thou depend on the [`smallvec`](https://crates.io/crates/smallvec) crate.
-/// Then, shalt thou keep three inline. No more. No less. Three shalt be the number thou shalt keep inline,
-/// and the number to keep inline shalt be three. Four shalt thou not keep inline, nor either keep inline
-/// thou two, excepting that thou then proceed to three. Five is right out. Once the number three,
-/// being the third number, be reached, then, lobbest thou thy `SmallVec` towards thy heap, who,
-/// being slow and cache-naughty in My sight, shall snuff it."
-///
-/// # Why Three
-///
-/// `StaticVec` is used frequently to keep small lists of items in inline (non-heap) storage in
-/// order to improve cache friendliness and reduce indirections.
-///
-/// The number 3, other than being the holy number, is carefully chosen for a balance between
-/// storage space and reduce allocations. That is because most function calls (and most functions,
-/// for that matter) contain fewer than 4 arguments, the exception being closures that capture a
-/// large number of external variables.
-///
-/// In addition, most script blocks either contain many statements, or just one or two lines;
-/// most scripts load fewer than 4 external modules; most module paths contain fewer than 4 levels
-/// (e.g. `std::collections::map::HashMap` is 4 levels and it is just about as long as they get).
+/// Alias to [`smallvec::SmallVec<[T; 3]>`](https://crates.io/crates/smallvec).
 #[cfg(not(feature = "internals"))]
 type StaticVec<T> = smallvec::SmallVec<[T; STATIC_VEC_INLINE_SIZE]>;
 
@@ -468,11 +435,34 @@ type StaticVec<T> = smallvec::SmallVec<[T; STATIC_VEC_INLINE_SIZE]>;
 #[cfg(feature = "internals")]
 pub type StaticVec<T> = smallvec::SmallVec<[T; STATIC_VEC_INLINE_SIZE]>;
 
+/// A smaller [`Vec`] alternative.
+#[cfg(not(feature = "internals"))]
+type ThinVec<T> = thin_vec::ThinVec<T>;
+
+/// _(internals)_ A smaller [`Vec`] alternative. Exported under the `internals` feature only.
+///
+/// The standard [`Vec`] type uses three machine words (i.e. 24 bytes on 64-bit).
+///
+/// [`ThinVec`](https://crates.io/crates/thin-vec) only uses one machine word, storing other
+/// information inline together with the data.
+///
+/// This is primarily used in places where a few bytes affect the size of the type
+/// -- e.g. in `enum`'s.
+#[cfg(feature = "internals")]
+pub type ThinVec<T> = thin_vec::ThinVec<T>;
+
 /// Number of items to keep inline for [`FnArgsVec`].
 #[cfg(not(feature = "no_closure"))]
 const FN_ARGS_VEC_INLINE_SIZE: usize = 5;
 
 /// Inline arguments storage for function calls.
+#[cfg(not(feature = "no_closure"))]
+#[cfg(not(feature = "internals"))]
+type FnArgsVec<T> = smallvec::SmallVec<[T; FN_ARGS_VEC_INLINE_SIZE]>;
+
+/// _(internals)_ Inline arguments storage for function calls.
+///
+/// Not available under `no_closure`.
 ///
 /// # Notes
 ///
@@ -485,7 +475,8 @@ const FN_ARGS_VEC_INLINE_SIZE: usize = 5;
 ///
 /// Under `no_closure`, this type aliases to [`StaticVec`][crate::StaticVec] instead.
 #[cfg(not(feature = "no_closure"))]
-type FnArgsVec<T> = smallvec::SmallVec<[T; FN_ARGS_VEC_INLINE_SIZE]>;
+#[cfg(feature = "internals")]
+pub type FnArgsVec<T> = smallvec::SmallVec<[T; FN_ARGS_VEC_INLINE_SIZE]>;
 
 /// Inline arguments storage for function calls.
 /// This type aliases to [`StaticVec`][crate::StaticVec].

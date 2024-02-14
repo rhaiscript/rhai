@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 
 use crate::attrs::ExportScope;
 use crate::function::{
-    flatten_type_groups, print_type, ExportedFn, FnNamespaceAccess, FnSpecialAccess, FN_GET,
-    FN_IDX_GET, FN_IDX_SET, FN_SET,
+    print_type, ExportedFn, FnNamespaceAccess, FnSpecialAccess, FN_GET, FN_IDX_GET, FN_IDX_SET,
+    FN_SET,
 };
 use crate::module::Module;
 
@@ -39,8 +39,6 @@ pub fn generate_body(
     let mut set_const_statements = Vec::new();
     let mut add_mod_blocks = Vec::new();
     let mut set_flattened_mod_blocks = Vec::new();
-    let str_type_path = syn::parse2::<syn::Path>(quote! { str }).unwrap();
-    let string_type_path = syn::parse2::<syn::Path>(quote! { String }).unwrap();
 
     for ExportedConst {
         name: const_name,
@@ -146,49 +144,6 @@ pub fn generate_body(
         );
         let reg_names = function.exported_names();
 
-        let fn_input_types: Vec<_> = function
-            .arg_list()
-            .map(|fn_arg| match fn_arg {
-                syn::FnArg::Receiver(..) => panic!("internal error: receiver fn outside impl!?"),
-                syn::FnArg::Typed(syn::PatType { ref ty, .. }) => {
-                    let arg_type = match flatten_type_groups(ty.as_ref()) {
-                        syn::Type::Reference(syn::TypeReference {
-                            mutability: None,
-                            ref elem,
-                            ..
-                        }) => match flatten_type_groups(elem.as_ref()) {
-                            syn::Type::Path(ref p) if p.path == str_type_path => {
-                                syn::parse2::<syn::Type>(quote! {
-                                ImmutableString })
-                                .unwrap()
-                            }
-                            _ => panic!("internal error: non-string shared reference!?"),
-                        },
-                        syn::Type::Path(ref p) if p.path == string_type_path => {
-                            syn::parse2::<syn::Type>(quote! {
-                            ImmutableString })
-                            .unwrap()
-                        }
-                        syn::Type::Reference(syn::TypeReference {
-                            mutability: Some(_),
-                            ref elem,
-                            ..
-                        }) => match flatten_type_groups(elem.as_ref()) {
-                            syn::Type::Path(ref p) => syn::parse2::<syn::Type>(quote! {
-                            #p })
-                            .unwrap(),
-                            _ => panic!("internal error: invalid mutable reference!?"),
-                        },
-                        t => t.clone(),
-                    };
-
-                    syn::parse2::<syn::Expr>(quote! {
-                    TypeId::of::<#arg_type>()})
-                    .unwrap()
-                }
-            })
-            .collect();
-
         let cfg_attrs: Vec<_> = function
             .cfg_attrs()
             .iter()
@@ -226,33 +181,34 @@ pub fn generate_body(
                 fn_literal.span(),
             );
 
+            let mut tokens = quote! {
+                #(#cfg_attrs)*
+                FuncRegistration::new(#fn_literal).with_namespace(FnNamespace::#ns_str)
+            };
             #[cfg(feature = "metadata")]
-            let (param_names, comments) = (
-                quote! { Some(#fn_token_name::PARAM_NAMES) },
-                function
+            {
+                tokens.extend(quote! {
+                    .with_params_info(#fn_token_name::PARAM_NAMES)
+                });
+
+                let comments = function
                     .comments()
                     .iter()
                     .map(|s| syn::LitStr::new(s, Span::call_site()))
-                    .collect::<Vec<_>>(),
-            );
-            #[cfg(not(feature = "metadata"))]
-            let (param_names, comments) = (quote! { None }, Vec::<syn::LitStr>::new());
+                    .collect::<Vec<_>>();
 
-            set_fn_statements.push(if comments.is_empty() {
-                syn::parse2::<syn::Stmt>(quote! {
-                    #(#cfg_attrs)*
-                    m.set_fn(#fn_literal, FnNamespace::#ns_str, FnAccess::Public,
-                             #param_names, &[#(#fn_input_types),*], #fn_token_name().into());
-                })
-                .unwrap()
-            } else {
-                syn::parse2::<syn::Stmt>(quote! {
-                    #(#cfg_attrs)*
-                    m.set_fn_with_comments(#fn_literal, FnNamespace::#ns_str, FnAccess::Public,
-                             #param_names, &[#(#fn_input_types),*], &[#(#comments),*], #fn_token_name().into());
-                })
-                .unwrap()
+                if !comments.is_empty() {
+                    tokens.extend(quote! {
+                        .with_comments(&[#(#comments),*])
+                    });
+                }
+            }
+
+            tokens.extend(quote! {
+                .set_into_module_raw(m, &#fn_token_name::param_types(), #fn_token_name().into());
             });
+
+            set_fn_statements.push(syn::parse2::<syn::Stmt>(tokens).unwrap());
         }
 
         gen_fn_tokens.push(quote! {

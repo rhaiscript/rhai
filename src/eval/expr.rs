@@ -73,7 +73,7 @@ pub fn search_scope_only<'s>(
             {
                 let val: Dynamic = crate::FnPtr {
                     name: v.3.clone(),
-                    curry: Vec::new(),
+                    curry: <_>::default(),
                     environ: None,
                     fn_def: Some(fn_def.clone()),
                 }
@@ -92,7 +92,7 @@ pub fn search_scope_only<'s>(
         let orig_scope_len = scope.len();
 
         let context = EvalContext::new(engine, global, caches, scope, this_ptr);
-        let var_name = expr.get_variable_name(true).expect("`Expr::Variable`");
+        let var_name = expr.get_variable_name(true).unwrap();
         let resolved_var = resolve_var(var_name, index, context);
 
         if orig_scope_len != scope.len() {
@@ -114,7 +114,7 @@ pub fn search_scope_only<'s>(
         scope.len() - index
     } else {
         // Find the variable in the scope
-        let var_name = expr.get_variable_name(true).expect("`Expr::Variable`");
+        let var_name = expr.get_variable_name(true).unwrap();
 
         match scope.search(var_name) {
             Some(index) => index,

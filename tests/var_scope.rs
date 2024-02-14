@@ -397,3 +397,26 @@ fn test_var_def_filter() {
     assert!(engine.run("let y = 42; { let x = y + 1; }").is_err());
     engine.run("let y = 42; { let z = y + 1; { let x = z + 1; } }").unwrap();
 }
+
+#[cfg(not(feature = "no_object"))]
+#[test]
+fn test_var_scope_cloning() {
+    struct Foo {
+        field: INT,
+    }
+
+    impl Clone for Foo {
+        fn clone(&self) -> Self {
+            panic!("forbidden to clone!");
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.register_get_set("field", |foo: &mut Foo| foo.field, |foo: &mut Foo, value| foo.field = value);
+
+    let mut scope = Scope::new();
+    scope.push("foo", Foo { field: 1 });
+
+    engine.run_with_scope(&mut scope, "let x = 42; print(x + foo.field);").unwrap();
+    assert_eq!(engine.eval_with_scope::<INT>(&mut scope, "let x = 42; x + foo.field").unwrap(), 43);
+}

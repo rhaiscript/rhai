@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - fix
   pull_request: {}
 
 env:
@@ -75,8 +76,8 @@ jobs:
           # smoketests for different toolchains
           - {toolchain: stable, os: windows-latest, experimental: false, flags: ""}
           - {toolchain: stable, os: macos-latest, experimental: false, flags: ""}
-          - {toolchain: beta, os: ubuntu-latest, experimental: false, flags: ""}
-          - {toolchain: nightly, os: ubuntu-latest, experimental: true, flags: ""}
+          - {toolchain: beta, os: ubuntu-latest, experimental: false, flags: "--features unstable"}
+          - {toolchain: nightly, os: ubuntu-latest, experimental: true, flags: "--features unstable"}
       fail-fast: false
     steps:
     - name: Checkout

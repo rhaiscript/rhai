@@ -22,6 +22,7 @@ use crate::{
 use std::prelude::v1::*;
 use std::{
     any::TypeId,
+    borrow::Cow,
     convert::TryFrom,
     hash::{Hash, Hasher},
     mem,
@@ -49,12 +50,14 @@ pub enum OptimizationLevel {
 struct OptimizerState<'a> {
     /// Has the [`AST`] been changed during this pass?
     is_dirty: bool,
-    /// Stack of variables/constants for constants propagation.
-    variables: Vec<(ImmutableString, Option<Dynamic>)>,
+    /// Stack of variables/constants for constants propagation and strict variables checking.
+    variables: Vec<(ImmutableString, Option<Cow<'a, Dynamic>>)>,
     /// Activate constants propagation?
     propagate_constants: bool,
     /// [`Engine`] instance for eager function evaluation.
     engine: &'a Engine,
+    /// Optional [`Scope`].
+    scope: Option<&'a Scope<'a>>,
     /// The global runtime state.
     global: GlobalRuntimeState,
     /// Function resolution caches.
@@ -69,6 +72,7 @@ impl<'a> OptimizerState<'a> {
     pub fn new(
         engine: &'a Engine,
         lib: &'a [crate::SharedModule],
+        scope: Option<&'a Scope<'a>>,
         optimization_level: OptimizationLevel,
     ) -> Self {
         let mut _global = GlobalRuntimeState::new(engine);
@@ -76,7 +80,7 @@ impl<'a> OptimizerState<'a> {
 
         #[cfg(not(feature = "no_function"))]
         {
-            _global.lib = _lib.to_vec();
+            _global.lib = _lib.into();
         }
 
         Self {
@@ -84,6 +88,7 @@ impl<'a> OptimizerState<'a> {
             variables: Vec::new(),
             propagate_constants: true,
             engine,
+            scope,
             global: _global,
             caches: Caches::new(),
             optimization_level,
@@ -113,7 +118,7 @@ impl<'a> OptimizerState<'a> {
     ///
     /// `Some(value)` if literal constant (which can be used for constants propagation), `None` otherwise.
     #[inline(always)]
-    pub fn push_var(&mut self, name: ImmutableString, value: Option<Dynamic>) {
+    pub fn push_var<'x: 'a>(&mut self, name: ImmutableString, value: Option<Cow<'x, Dynamic>>) {
         self.variables.push((name, value));
     }
     /// Look up a literal constant from the variables stack.
@@ -123,7 +128,7 @@ impl<'a> OptimizerState<'a> {
             .iter()
             .rev()
             .find(|(n, _)| n == name)
-            .and_then(|(_, value)| value.as_ref())
+            .and_then(|(_, value)| value.as_deref())
     }
     /// Call a registered function
     #[inline]
@@ -142,6 +147,7 @@ impl<'a> OptimizerState<'a> {
                 calc_fn_hash(None, fn_name, arg_values.len()),
                 &mut arg_values.iter_mut().collect::<FnArgsVec<_>>(),
                 false,
+                true,
                 Position::NONE,
             )
             .ok()
@@ -175,10 +181,9 @@ fn optimize_stmt_block(
     ) {
         let (first, second) = statements.split_at_mut(n);
         let mut stmt = second[0].take();
-        let stmts = if let Stmt::Block(ref mut block, ..) = stmt {
-            block.statements_mut()
-        } else {
-            unreachable!("Stmt::Block expected but gets {:?}", stmt)
+        let stmts = match stmt {
+            Stmt::Block(ref mut block, ..) => block.statements_mut(),
+            _ => unreachable!("Stmt::Block expected but gets {:?}", stmt),
         };
         statements = first
             .iter_mut()
@@ -218,9 +223,9 @@ fn optimize_stmt_block(
                 Stmt::Var(x, options, ..) => {
                     optimize_expr(&mut x.1, state, false);
 
-                    let value = if options.contains(ASTFlags::CONSTANT) && x.1.is_constant() {
+                    let value = if options.intersects(ASTFlags::CONSTANT) && x.1.is_constant() {
                         // constant literal
-                        Some(x.1.get_literal_value().unwrap())
+                        Some(Cow::Owned(x.1.get_literal_value().unwrap()))
                     } else {
                         // variable
                         None
@@ -237,17 +242,16 @@ fn optimize_stmt_block(
         let mut first_non_constant = statements
             .iter()
             .rev()
-            .enumerate()
-            .find_map(|(i, stmt)| match stmt {
-                stmt if !is_pure(stmt) => Some(i),
+            .position(|stmt| match stmt {
+                stmt if !is_pure(stmt) => true,
 
-                Stmt::Var(x, ..) if x.1.is_constant() => Some(i),
-                Stmt::Expr(e) if !e.is_constant() => Some(i),
+                Stmt::Var(x, ..) if x.1.is_constant() => true,
+                Stmt::Expr(e) if !e.is_constant() => true,
 
                 #[cfg(not(feature = "no_module"))]
-                Stmt::Import(x, ..) if !x.0.is_constant() => Some(i),
+                Stmt::Import(x, ..) if !x.0.is_constant() => true,
 
-                _ => None,
+                _ => false,
             })
             .map_or(0, |n| statements.len() - n - 1);
 
@@ -278,7 +282,7 @@ fn optimize_stmt_block(
                 match statements[..] {
                     // { return; } -> {}
                     [Stmt::Return(None, options, ..)]
-                        if reduce_return && !options.contains(ASTFlags::BREAK) =>
+                        if reduce_return && !options.intersects(ASTFlags::BREAK) =>
                     {
                         state.set_dirty();
                         statements.clear();
@@ -290,7 +294,7 @@ fn optimize_stmt_block(
                     // { ...; return; } -> { ... }
                     [.., ref last_stmt, Stmt::Return(None, options, ..)]
                         if reduce_return
-                            && !options.contains(ASTFlags::BREAK)
+                            && !options.intersects(ASTFlags::BREAK)
                             && !last_stmt.returns_value() =>
                     {
                         state.set_dirty();
@@ -298,7 +302,7 @@ fn optimize_stmt_block(
                     }
                     // { ...; return val; } -> { ...; val }
                     [.., Stmt::Return(ref mut expr, options, pos)]
-                        if reduce_return && !options.contains(ASTFlags::BREAK) =>
+                        if reduce_return && !options.intersects(ASTFlags::BREAK) =>
                     {
                         state.set_dirty();
                         *statements.last_mut().unwrap() = expr
@@ -335,7 +339,7 @@ fn optimize_stmt_block(
                     }
                     // { ...; return; } -> { ... }
                     [.., Stmt::Return(None, options, ..)]
-                        if reduce_return && !options.contains(ASTFlags::BREAK) =>
+                        if reduce_return && !options.intersects(ASTFlags::BREAK) =>
                     {
                         state.set_dirty();
                         statements.pop().unwrap();
@@ -343,7 +347,7 @@ fn optimize_stmt_block(
                     // { ...; return pure_val; } -> { ... }
                     [.., Stmt::Return(Some(ref expr), options, ..)]
                         if reduce_return
-                            && !options.contains(ASTFlags::BREAK)
+                            && !options.intersects(ASTFlags::BREAK)
                             && expr.is_pure() =>
                     {
                         state.set_dirty();
@@ -382,6 +386,16 @@ impl StmtBlock {
     #[must_use]
     fn take_statements(&mut self) -> StmtBlockContainer {
         mem::take(self.statements_mut())
+    }
+}
+
+/// Is this [`Expr`] a constant that is hashable?
+#[inline(always)]
+fn is_hashable_constant(expr: &Expr) -> bool {
+    match expr {
+        _ if !expr.is_constant() => false,
+        Expr::DynamicConstant(v, ..) => v.is_hashable(),
+        _ => false,
     }
 }
 
@@ -501,7 +515,7 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
         }
 
         // switch const { ... }
-        Stmt::Switch(x, pos) if x.0.is_constant() => {
+        Stmt::Switch(x, pos) if is_hashable_constant(&x.0) => {
             let (
                 match_expr,
                 SwitchCasesCollection {
@@ -525,23 +539,22 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
                         let mut b = mem::take(&mut expressions[*index]);
                         cases.clear();
 
-                        if b.is_always_true() {
+                        if matches!(b.lhs, Expr::BoolConstant(true, ..)) {
                             // Promote the matched case
-                            let mut statements = Stmt::Expr(b.expr.take().into());
+                            let mut statements = Stmt::Expr(b.rhs.take().into());
                             optimize_stmt(&mut statements, state, true);
                             *stmt = statements;
                         } else {
                             // switch const { case if condition => stmt, _ => def } => if condition { stmt } else { def }
-                            optimize_expr(&mut b.condition, state, false);
+                            optimize_expr(&mut b.lhs, state, false);
 
                             let branch = def_case.map_or(StmtBlock::NONE, |index| {
-                                let mut def_stmt =
-                                    Stmt::Expr(expressions[index].expr.take().into());
+                                let mut def_stmt = Stmt::Expr(expressions[index].rhs.take().into());
                                 optimize_stmt(&mut def_stmt, state, true);
                                 def_stmt.into()
                             });
-                            let body = Stmt::Expr(b.expr.take().into()).into();
-                            let expr = b.condition.take();
+                            let body = Stmt::Expr(b.rhs.take().into()).into();
+                            let expr = b.lhs.take();
 
                             *stmt = Stmt::If(
                                 FlowControl { expr, body, branch }.into(),
@@ -556,9 +569,9 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
                         for &index in case_blocks_list {
                             let mut b = mem::take(&mut expressions[index]);
 
-                            if b.is_always_true() {
+                            if matches!(b.lhs, Expr::BoolConstant(true, ..)) {
                                 // Promote the matched case
-                                let mut statements = Stmt::Expr(b.expr.take().into());
+                                let mut statements = Stmt::Expr(b.rhs.take().into());
                                 optimize_stmt(&mut statements, state, true);
                                 *stmt = statements;
                                 state.set_dirty();
@@ -575,31 +588,30 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
                 if ranges.len() == 1
                     || ranges
                         .iter()
-                        .all(|r| expressions[r.index()].is_always_true())
+                        .all(|r| matches!(expressions[r.index()].lhs, Expr::BoolConstant(true, ..)))
                 {
                     if let Some(r) = ranges.iter().find(|r| r.contains(&value)) {
                         let range_block = &mut expressions[r.index()];
 
-                        if range_block.is_always_true() {
+                        if matches!(range_block.lhs, Expr::BoolConstant(true, ..)) {
                             // Promote the matched case
                             let block = &mut expressions[r.index()];
-                            let mut statements = Stmt::Expr(block.expr.take().into());
+                            let mut statements = Stmt::Expr(block.rhs.take().into());
                             optimize_stmt(&mut statements, state, true);
                             *stmt = statements;
                         } else {
-                            let mut expr = range_block.condition.take();
+                            let mut expr = range_block.lhs.take();
 
                             // switch const { range if condition => stmt, _ => def } => if condition { stmt } else { def }
                             optimize_expr(&mut expr, state, false);
 
                             let branch = def_case.map_or(StmtBlock::NONE, |index| {
-                                let mut def_stmt =
-                                    Stmt::Expr(expressions[index].expr.take().into());
+                                let mut def_stmt = Stmt::Expr(expressions[index].rhs.take().into());
                                 optimize_stmt(&mut def_stmt, state, true);
                                 def_stmt.into()
                             });
 
-                            let body = Stmt::Expr(expressions[r.index()].expr.take().into()).into();
+                            let body = Stmt::Expr(expressions[r.index()].rhs.take().into()).into();
 
                             *stmt = Stmt::If(
                                 FlowControl { expr, body, branch }.into(),
@@ -627,8 +639,8 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
 
                     for r in ranges {
                         let b = &mut expressions[r.index()];
-                        optimize_expr(&mut b.condition, state, false);
-                        optimize_expr(&mut b.expr, state, false);
+                        optimize_expr(&mut b.lhs, state, false);
+                        optimize_expr(&mut b.rhs, state, false);
                     }
                     return;
                 }
@@ -639,7 +651,7 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
 
             match def_case {
                 Some(index) => {
-                    let mut def_stmt = Stmt::Expr(expressions[*index].expr.take().into());
+                    let mut def_stmt = Stmt::Expr(expressions[*index].rhs.take().into());
                     optimize_stmt(&mut def_stmt, state, true);
                     *stmt = def_stmt;
                 }
@@ -663,11 +675,11 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
 
             // Optimize blocks
             for b in &mut *expressions {
-                optimize_expr(&mut b.condition, state, false);
-                optimize_expr(&mut b.expr, state, false);
+                optimize_expr(&mut b.lhs, state, false);
+                optimize_expr(&mut b.rhs, state, false);
 
-                if b.is_always_false() && !b.expr.is_unit() {
-                    b.expr = Expr::Unit(b.expr.position());
+                if matches!(b.lhs, Expr::BoolConstant(false, ..)) && !b.rhs.is_unit() {
+                    b.rhs = Expr::Unit(b.rhs.position());
                     state.set_dirty();
                 }
             }
@@ -676,7 +688,7 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
             cases.retain(|_, list| {
                 // Remove all entries that have false conditions
                 list.retain(|index| {
-                    if expressions[*index].is_always_false() {
+                    if matches!(expressions[*index].lhs, Expr::BoolConstant(false, ..)) {
                         state.set_dirty();
                         false
                     } else {
@@ -684,10 +696,9 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
                     }
                 });
                 // Remove all entries after a `true` condition
-                if let Some(n) = list
-                    .iter()
-                    .position(|&index| expressions[index].is_always_true())
-                {
+                if let Some(n) = list.iter().position(|&index| {
+                    matches!(expressions[index].lhs, Expr::BoolConstant(true, ..))
+                }) {
                     if n + 1 < list.len() {
                         state.set_dirty();
                         list.truncate(n + 1);
@@ -704,7 +715,7 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
 
             // Remove false ranges
             ranges.retain(|r| {
-                if expressions[r.index()].is_always_false() {
+                if matches!(expressions[r.index()].lhs, Expr::BoolConstant(false, ..)) {
                     state.set_dirty();
                     false
                 } else {
@@ -713,7 +724,7 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
             });
 
             if let Some(index) = def_case {
-                optimize_expr(&mut expressions[*index].expr, state, false);
+                optimize_expr(&mut expressions[*index].rhs, state, false);
             }
 
             // Remove unused block statements
@@ -721,9 +732,9 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
                 if *def_case != Some(index)
                     && cases.values().flat_map(|c| c.iter()).all(|&n| n != index)
                     && ranges.iter().all(|r| r.index() != index)
-                    && !b.expr.is_unit()
+                    && !b.rhs.is_unit()
                 {
-                    b.expr = Expr::Unit(b.expr.position());
+                    b.rhs = Expr::Unit(b.rhs.position());
                     state.set_dirty();
                 }
             });
@@ -760,7 +771,7 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
                 optimize_stmt_block(x.2.body.take_statements(), state, false, true, false);
         }
         // let id = expr;
-        Stmt::Var(x, options, ..) if !options.contains(ASTFlags::CONSTANT) => {
+        Stmt::Var(x, options, ..) if !options.intersects(ASTFlags::CONSTANT) => {
             optimize_expr(&mut x.1, state, false);
         }
         // import expr as var;
@@ -900,7 +911,7 @@ fn optimize_expr(expr: &mut Expr, state: &mut OptimizerState, _chaining: bool) {
         }
         // ()?.rhs
         #[cfg(not(feature = "no_object"))]
-        Expr::Dot(x, options, ..) if options.contains(ASTFlags::NEGATED) && matches!(x.lhs, Expr::Unit(..)) => {
+        Expr::Dot(x, options, ..) if options.intersects(ASTFlags::NEGATED) && matches!(x.lhs, Expr::Unit(..)) => {
             state.set_dirty();
             *expr = x.lhs.take();
         }
@@ -942,7 +953,7 @@ fn optimize_expr(expr: &mut Expr, state: &mut OptimizerState, _chaining: bool) {
 
         // ()?[rhs]
         #[cfg(not(feature = "no_index"))]
-        Expr::Index(x, options, ..) if options.contains(ASTFlags::NEGATED) && matches!(x.lhs, Expr::Unit(..)) => {
+        Expr::Index(x, options, ..) if options.intersects(ASTFlags::NEGATED) && matches!(x.lhs, Expr::Unit(..)) => {
             state.set_dirty();
             *expr = x.lhs.take();
         }
@@ -1289,7 +1300,7 @@ impl Engine {
         if self
             .global_modules
             .iter()
-            .filter(|m| !m.flags.contains(ModuleFlags::STANDARD_LIB))
+            .filter(|m| !m.flags.intersects(ModuleFlags::STANDARD_LIB))
             .any(|m| m.contains_fn(hash))
         {
             return true;
@@ -1327,21 +1338,29 @@ impl Engine {
         }
 
         // Set up the state
-        let mut state = OptimizerState::new(self, lib, optimization_level);
+        let mut state = OptimizerState::new(self, lib, scope, optimization_level);
 
         // Add constants from global modules
         self.global_modules
             .iter()
             .rev()
             .flat_map(|m| m.iter_var())
-            .for_each(|(name, value)| state.push_var(name.into(), Some(value.clone())));
+            .for_each(|(name, value)| state.push_var(name.into(), Some(Cow::Borrowed(value))));
 
         // Add constants and variables from the scope
-        scope
+        state
+            .scope
             .into_iter()
-            .flat_map(Scope::iter)
+            .flat_map(Scope::iter_inner)
             .for_each(|(name, constant, value)| {
-                state.push_var(name.into(), if constant { Some(value) } else { None });
+                state.push_var(
+                    name.into(),
+                    if constant {
+                        Some(Cow::Borrowed(value))
+                    } else {
+                        None
+                    },
+                );
             });
 
         optimize_stmt_block(statements, &mut state, true, false, true)
@@ -1353,7 +1372,7 @@ pub fn optimize_into_ast(
     engine: &Engine,
     scope: Option<&Scope>,
     statements: StmtBlockContainer,
-    #[cfg(not(feature = "no_function"))] functions: Vec<crate::Shared<crate::ast::ScriptFnDef>>,
+    #[cfg(not(feature = "no_function"))] functions: Vec<crate::Shared<crate::ast::ScriptFuncDef>>,
     optimization_level: OptimizationLevel,
 ) -> AST {
     let mut statements = statements;
@@ -1372,7 +1391,7 @@ pub fn optimize_into_ast(
 
             functions
                 .iter()
-                .map(|fn_def| crate::ast::ScriptFnDef {
+                .map(|fn_def| crate::ast::ScriptFuncDef {
                     name: fn_def.name.clone(),
                     access: fn_def.access,
                     body: crate::ast::StmtBlock::NONE,

@@ -44,7 +44,7 @@ pub mod default_limits {
     #[cfg(feature = "internals")]
     pub use super::limits::default_limits::*;
 
-    /// Maximum number of parameters in functions with [`Dynamic`] support.
+    /// Maximum number of parameters in functions with [`Dynamic`][crate::Dynamic] support.
     pub const MAX_DYNAMIC_PARAMETERS: usize = 16;
 }
 

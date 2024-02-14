@@ -22,10 +22,6 @@ pub use std::time::Instant;
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
 pub use instant::Instant;
 
-/// The message: data type was checked
-#[allow(dead_code)]
-const CHECKED: &str = "data type was checked";
-
 /// _(internals)_ Modes of access.
 /// Exported under the `internals` feature only.
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
@@ -129,7 +125,7 @@ impl<'d, T: Any + Clone> Deref for DynamicReadLock<'d, T> {
         match self.0 {
             DynamicReadLockInner::Reference(reference) => reference,
             #[cfg(not(feature = "no_closure"))]
-            DynamicReadLockInner::Guard(ref guard) => guard.downcast_ref().expect(CHECKED),
+            DynamicReadLockInner::Guard(ref guard) => guard.downcast_ref().unwrap(),
         }
     }
 }
@@ -163,7 +159,7 @@ impl<'d, T: Any + Clone> Deref for DynamicWriteLock<'d, T> {
         match self.0 {
             DynamicWriteLockInner::Reference(ref reference) => reference,
             #[cfg(not(feature = "no_closure"))]
-            DynamicWriteLockInner::Guard(ref guard) => guard.downcast_ref().expect(CHECKED),
+            DynamicWriteLockInner::Guard(ref guard) => guard.downcast_ref().unwrap(),
         }
     }
 }
@@ -174,7 +170,7 @@ impl<'d, T: Any + Clone> DerefMut for DynamicWriteLock<'d, T> {
         match self.0 {
             DynamicWriteLockInner::Reference(ref mut reference) => reference,
             #[cfg(not(feature = "no_closure"))]
-            DynamicWriteLockInner::Guard(ref mut guard) => guard.downcast_mut().expect(CHECKED),
+            DynamicWriteLockInner::Guard(ref mut guard) => guard.downcast_mut().unwrap(),
         }
     }
 }
@@ -374,14 +370,7 @@ impl Dynamic {
             Union::Variant(ref v, ..) => (***v).type_name(),
 
             #[cfg(not(feature = "no_closure"))]
-            #[cfg(not(feature = "sync"))]
-            Union::Shared(ref cell, ..) => cell
-                .try_borrow()
-                .map(|v| (*v).type_name())
-                .unwrap_or("<shared>"),
-            #[cfg(not(feature = "no_closure"))]
-            #[cfg(feature = "sync")]
-            Union::Shared(ref cell, ..) => (*cell.read().unwrap()).type_name(),
+            Union::Shared(ref cell, ..) => (*crate::func::locked_read(cell)).type_name(),
         }
     }
 }
@@ -419,19 +408,72 @@ impl Hash for Dynamic {
             Union::Blob(ref a, ..) => a.hash(state),
             #[cfg(not(feature = "no_object"))]
             #[cfg(not(feature = "indexmap"))]
-            Union::Map(ref m, ..) => m.hash(state),
-            #[cfg(not(feature = "no_object"))]
-            #[cfg(feature = "indexmap")]
             Union::Map(ref m, ..) => hash_indexmap(m, state),
-            Union::FnPtr(ref f, ..) => f.hash(state),
 
+            Union::FnPtr(ref f, ..) if f.environ.is_some() => {
+                unimplemented!("FnPtr with embedded environment cannot be hashed")
+            }
+            Union::FnPtr(ref f, ..) => {
+                f.fn_name().hash(state);
+                f.curry().hash(state);
+            }
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(ref cell, ..) => (*crate::func::locked_read(cell)).hash(state),
 
-            Union::Variant(..) => unimplemented!("{} cannot be hashed", self.type_name()),
+            Union::Variant(ref v, ..) => {
+                let _value_any = (***v).as_any();
+
+                #[cfg(not(feature = "only_i32"))]
+                #[cfg(not(feature = "only_i64"))]
+                if let Some(value) = _value_any.downcast_ref::<u8>() {
+                    return value.hash(state);
+                } else if let Some(value) = _value_any.downcast_ref::<u16>() {
+                    return value.hash(state);
+                } else if let Some(value) = _value_any.downcast_ref::<u32>() {
+                    return value.hash(state);
+                } else if let Some(value) = _value_any.downcast_ref::<u64>() {
+                    return value.hash(state);
+                } else if let Some(value) = _value_any.downcast_ref::<i8>() {
+                    return value.hash(state);
+                } else if let Some(value) = _value_any.downcast_ref::<i16>() {
+                    return value.hash(state);
+                } else if let Some(value) = _value_any.downcast_ref::<i32>() {
+                    return value.hash(state);
+                } else if let Some(value) = _value_any.downcast_ref::<i64>() {
+                    return value.hash(state);
+                }
+
+                #[cfg(not(feature = "no_float"))]
+                #[cfg(not(feature = "f32_float"))]
+                if let Some(value) = _value_any.downcast_ref::<f32>() {
+                    return value.to_ne_bytes().hash(state);
+                }
+                #[cfg(not(feature = "no_float"))]
+                #[cfg(feature = "f32_float")]
+                if let Some(value) = _value_any.downcast_ref::<f64>() {
+                    return value.to_ne_bytes().hash(state);
+                }
+
+                #[cfg(not(feature = "only_i32"))]
+                #[cfg(not(feature = "only_i64"))]
+                #[cfg(not(target_family = "wasm"))]
+                if let Some(value) = _value_any.downcast_ref::<u128>() {
+                    return value.hash(state);
+                } else if let Some(value) = _value_any.downcast_ref::<i128>() {
+                    return value.hash(state);
+                }
+
+                if let Some(range) = _value_any.downcast_ref::<ExclusiveRange>() {
+                    return range.hash(state);
+                } else if let Some(range) = _value_any.downcast_ref::<InclusiveRange>() {
+                    return range.hash(state);
+                }
+
+                unimplemented!("Custom type {} cannot be hashed", self.type_name())
+            }
 
             #[cfg(not(feature = "no_time"))]
-            Union::TimeStamp(..) => unimplemented!("{} cannot be hashed", self.type_name()),
+            Union::TimeStamp(..) => unimplemented!("Timestamp cannot be hashed"),
         }
     }
 }
@@ -512,14 +554,90 @@ impl fmt::Display for Dynamic {
             }
 
             #[cfg(not(feature = "no_closure"))]
-            #[cfg(not(feature = "sync"))]
-            Union::Shared(ref cell, ..) => match cell.try_borrow() {
-                Ok(v) => fmt::Display::fmt(&*v, f),
-                Err(_) => f.write_str("<shared>"),
-            },
+            Union::Shared(ref cell, ..) if cfg!(feature = "unchecked") => {
+                #[cfg(not(feature = "sync"))]
+                match cell.try_borrow() {
+                    Ok(v) => {
+                        fmt::Display::fmt(&*v, f)?;
+                        f.write_str(" (shared)")
+                    }
+                    Err(_) => f.write_str("<shared>"),
+                }
+                #[cfg(feature = "sync")]
+                fmt::Display::fmt(&*cell.read().unwrap(), f)
+            }
             #[cfg(not(feature = "no_closure"))]
-            #[cfg(feature = "sync")]
-            Union::Shared(ref cell, ..) => fmt::Display::fmt(&*cell.read().unwrap(), f),
+            Union::Shared(..) => {
+                #[cfg(feature = "no_std")]
+                use hashbrown::HashSet;
+                #[cfg(not(feature = "no_std"))]
+                use std::collections::HashSet;
+
+                // Avoid infinite recursion for shared values in a reference loop.
+                fn display_fmt(
+                    value: &Dynamic,
+                    f: &mut fmt::Formatter<'_>,
+                    dict: &mut HashSet<*const Dynamic>,
+                ) -> fmt::Result {
+                    match value.0 {
+                        #[cfg(not(feature = "no_closure"))]
+                        #[cfg(not(feature = "sync"))]
+                        Union::Shared(ref cell, ..) => match cell.try_borrow() {
+                            Ok(v) => {
+                                if dict.insert(value) {
+                                    display_fmt(&*v, f, dict)?;
+                                    f.write_str(" (shared)")
+                                } else {
+                                    f.write_str("<shared>")
+                                }
+                            }
+                            Err(_) => f.write_str("<shared>"),
+                        },
+                        #[cfg(not(feature = "no_closure"))]
+                        #[cfg(feature = "sync")]
+                        Union::Shared(ref cell, ..) => {
+                            let v = cell.read().unwrap();
+
+                            if dict.insert(value) {
+                                display_fmt(&*v, f, dict)
+                            } else {
+                                f.write_str("<shared>")
+                            }
+                        }
+                        #[cfg(not(feature = "no_index"))]
+                        Union::Array(ref arr, ..) => {
+                            dict.insert(value);
+
+                            f.write_str("[")?;
+                            for (i, v) in arr.iter().enumerate() {
+                                if i > 0 {
+                                    f.write_str(", ")?;
+                                }
+                                display_fmt(v, f, dict)?;
+                            }
+                            f.write_str("]")
+                        }
+                        #[cfg(not(feature = "no_object"))]
+                        Union::Map(ref map, ..) => {
+                            dict.insert(value);
+
+                            f.write_str("#{")?;
+                            for (i, (k, v)) in map.iter().enumerate() {
+                                if i > 0 {
+                                    f.write_str(", ")?;
+                                }
+                                fmt::Display::fmt(k, f)?;
+                                f.write_str(": ")?;
+                                display_fmt(v, f, dict)?;
+                            }
+                            f.write_str("}")
+                        }
+                        _ => fmt::Display::fmt(value, f),
+                    }
+                }
+
+                display_fmt(self, f, &mut <_>::default())
+            }
         }
     }
 }
@@ -614,14 +732,107 @@ impl fmt::Debug for Dynamic {
             }
 
             #[cfg(not(feature = "no_closure"))]
-            #[cfg(not(feature = "sync"))]
-            Union::Shared(ref cell, ..) => match cell.try_borrow() {
-                Ok(v) => write!(f, "{:?} (shared)", *v),
-                Err(_) => f.write_str("<shared>"),
-            },
+            Union::Shared(ref cell, ..) if cfg!(feature = "unchecked") => {
+                #[cfg(not(feature = "sync"))]
+                match cell.try_borrow() {
+                    Ok(v) => {
+                        fmt::Debug::fmt(&*v, f)?;
+                        f.write_str(" (shared)")
+                    }
+                    Err(_) => f.write_str("<shared>"),
+                }
+                #[cfg(feature = "sync")]
+                fmt::Debug::fmt(&*cell.read().unwrap(), f)
+            }
             #[cfg(not(feature = "no_closure"))]
-            #[cfg(feature = "sync")]
-            Union::Shared(ref cell, ..) => fmt::Debug::fmt(&*cell.read().unwrap(), f),
+            Union::Shared(..) => {
+                #[cfg(feature = "no_std")]
+                use hashbrown::HashSet;
+                #[cfg(not(feature = "no_std"))]
+                use std::collections::HashSet;
+
+                // Avoid infinite recursion for shared values in a reference loop.
+                fn debug_fmt(
+                    value: &Dynamic,
+                    f: &mut fmt::Formatter<'_>,
+                    dict: &mut HashSet<*const Dynamic>,
+                ) -> fmt::Result {
+                    match value.0 {
+                        #[cfg(not(feature = "no_closure"))]
+                        #[cfg(not(feature = "sync"))]
+                        Union::Shared(ref cell, ..) => match cell.try_borrow() {
+                            Ok(v) => {
+                                if dict.insert(value) {
+                                    debug_fmt(&*v, f, dict)?;
+                                    f.write_str(" (shared)")
+                                } else {
+                                    f.write_str("<shared>")
+                                }
+                            }
+                            Err(_) => f.write_str("<shared>"),
+                        },
+                        #[cfg(not(feature = "no_closure"))]
+                        #[cfg(feature = "sync")]
+                        Union::Shared(ref cell, ..) => {
+                            let v = cell.read().unwrap();
+
+                            if dict.insert(value) {
+                                debug_fmt(&*v, f, dict)?;
+                                f.write_str(" (shared)")
+                            } else {
+                                f.write_str("<shared>")
+                            }
+                        }
+                        #[cfg(not(feature = "no_index"))]
+                        Union::Array(ref arr, ..) => {
+                            dict.insert(value);
+
+                            f.write_str("[")?;
+                            for (i, v) in arr.iter().enumerate() {
+                                if i > 0 {
+                                    f.write_str(", ")?;
+                                }
+                                debug_fmt(v, f, dict)?;
+                            }
+                            f.write_str("]")
+                        }
+                        #[cfg(not(feature = "no_object"))]
+                        Union::Map(ref map, ..) => {
+                            dict.insert(value);
+
+                            f.write_str("#{")?;
+                            for (i, (k, v)) in map.iter().enumerate() {
+                                if i > 0 {
+                                    f.write_str(", ")?;
+                                }
+                                fmt::Debug::fmt(k, f)?;
+                                f.write_str(": ")?;
+                                debug_fmt(v, f, dict)?;
+                            }
+                            f.write_str("}")
+                        }
+                        Union::FnPtr(ref fnptr, ..) => {
+                            dict.insert(value);
+
+                            f.write_str("Fn")?;
+                            #[cfg(not(feature = "no_function"))]
+                            if fnptr.fn_def.is_some() {
+                                f.write_str("*")?;
+                            }
+                            f.write_str("(")?;
+                            fmt::Debug::fmt(fnptr.fn_name(), f)?;
+                            for curry in fnptr.curry.iter() {
+                                f.write_str(", ")?;
+                                debug_fmt(curry, f, dict)?;
+                            }
+                            f.write_str(")")
+                        }
+                        _ => fmt::Debug::fmt(value, f),
+                    }
+                }
+
+                debug_fmt(self, f, &mut <_>::default())
+            }
         }
     }
 }
@@ -1007,15 +1218,67 @@ impl Dynamic {
 
             #[cfg(not(feature = "no_float"))]
             Union::Float(..) => true,
+            #[cfg(feature = "decimal")]
+            Union::Decimal(..) => true,
             #[cfg(not(feature = "no_index"))]
-            Union::Array(..) => true,
+            Union::Array(ref a, ..) => a.iter().all(Self::is_hashable),
+            #[cfg(not(feature = "no_index"))]
+            Union::Blob(..) => true,
             #[cfg(not(feature = "no_object"))]
-            Union::Map(..) => true,
+            Union::Map(ref m, ..) => m.values().all(Self::is_hashable),
+            Union::FnPtr(ref f, ..) => {
+                f.environ.is_none() && f.curry().iter().all(Self::is_hashable)
+            }
+            #[cfg(not(feature = "no_time"))]
+            Union::TimeStamp(..) => false,
+
+            Union::Variant(ref v, ..) => {
+                let _value_any = (***v).as_any();
+                let _type_id = _value_any.type_id();
+
+                #[cfg(not(feature = "only_i32"))]
+                #[cfg(not(feature = "only_i64"))]
+                if _type_id == TypeId::of::<u8>()
+                    || _type_id == TypeId::of::<u16>()
+                    || _type_id == TypeId::of::<u32>()
+                    || _type_id == TypeId::of::<u64>()
+                    || _type_id == TypeId::of::<i8>()
+                    || _type_id == TypeId::of::<i16>()
+                    || _type_id == TypeId::of::<i32>()
+                    || _type_id == TypeId::of::<i64>()
+                {
+                    return true;
+                }
+
+                #[cfg(not(feature = "no_float"))]
+                #[cfg(not(feature = "f32_float"))]
+                if _type_id == TypeId::of::<f32>() {
+                    return true;
+                }
+                #[cfg(not(feature = "no_float"))]
+                #[cfg(feature = "f32_float")]
+                if _type_id == TypeId::of::<f64>() {
+                    return true;
+                }
+
+                #[cfg(not(feature = "only_i32"))]
+                #[cfg(not(feature = "only_i64"))]
+                #[cfg(not(target_family = "wasm"))]
+                if _type_id == TypeId::of::<u128>() || _type_id == TypeId::of::<i128>() {
+                    return true;
+                }
+
+                if _type_id == TypeId::of::<ExclusiveRange>()
+                    || _type_id == TypeId::of::<InclusiveRange>()
+                {
+                    return true;
+                }
+
+                false
+            }
 
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(ref cell, ..) => crate::func::locked_read(cell).is_hashable(),
-
-            _ => false,
         }
     }
     /// Create a [`Dynamic`] from any type.  A [`Dynamic`] value is simply returned as is.
@@ -1394,7 +1657,7 @@ impl Dynamic {
     pub fn flatten(self) -> Self {
         match self.0 {
             #[cfg(not(feature = "no_closure"))]
-            Union::Shared(cell, ..) => crate::func::shared_try_take(cell).map_or_else(
+            Union::Shared(cell, ..) => crate::func::native::shared_try_take(cell).map_or_else(
                 |ref cell| crate::func::locked_read(cell).clone(),
                 #[cfg(not(feature = "sync"))]
                 crate::Locked::into_inner,

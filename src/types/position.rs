@@ -75,7 +75,7 @@ impl Position {
     /// Advance by one character position.
     #[inline]
     pub(crate) fn advance(&mut self) {
-        assert!(!self.is_none(), "cannot advance Position::none");
+        assert!(!self.is_none(), "cannot advance Position::NONE");
 
         // Advance up to maximum position
         self.pos = self.pos.saturating_add(1);
@@ -87,14 +87,14 @@ impl Position {
     /// Panics if already at beginning of a line - cannot rewind to a previous line.
     #[inline]
     pub(crate) fn rewind(&mut self) {
-        assert!(!self.is_none(), "cannot rewind Position::none");
+        assert!(!self.is_none(), "cannot rewind Position::NONE");
         assert!(self.pos > 0, "cannot rewind at position 0");
         self.pos -= 1;
     }
     /// Advance to the next line.
     #[inline]
     pub(crate) fn new_line(&mut self) {
-        assert!(!self.is_none(), "cannot advance Position::none");
+        assert!(!self.is_none(), "cannot advance Position::NONE");
 
         // Advance up to maximum position
         if self.line < u16::MAX {

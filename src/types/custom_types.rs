@@ -26,7 +26,7 @@ pub struct CustomTypeInfo {
     ///
     /// Each line in non-block doc-comments starts with `///`.
     #[cfg(feature = "metadata")]
-    pub comments: Box<[crate::SmartString]>,
+    pub comments: crate::StaticVec<crate::SmartString>,
 }
 
 /// _(internals)_ A collection of custom types.

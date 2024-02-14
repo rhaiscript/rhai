@@ -88,9 +88,10 @@
 //!
 
 use quote::quote;
-use syn::{parse_macro_input, spanned::Spanned};
+use syn::{parse_macro_input, spanned::Spanned, DeriveInput};
 
 mod attrs;
+mod custom_type;
 mod function;
 mod module;
 mod register;
@@ -344,19 +345,18 @@ pub fn set_exported_fn(args: proc_macro::TokenStream) -> proc_macro::TokenStream
         Ok((module_expr, export_name, rust_mod_path)) => {
             let gen_mod_path = crate::register::generated_module_path(&rust_mod_path);
 
-            #[cfg(feature = "metadata")]
-            let param_names = quote! {
-                Some(#gen_mod_path::Token::PARAM_NAMES)
+            let mut tokens = quote! {
+                let fx = FuncRegistration::new(#export_name).with_namespace(FnNamespace::Internal)
             };
-            #[cfg(not(feature = "metadata"))]
-            let param_names = quote! { None };
-
-            proc_macro::TokenStream::from(quote! {
-                #module_expr.set_fn(#export_name, FnNamespace::Internal, FnAccess::Public,
-                                    #param_names,
-                                    &#gen_mod_path::Token::param_types(),
-                                    #gen_mod_path::Token().into())
-            })
+            #[cfg(feature = "metadata")]
+            tokens.extend(quote! {
+                .with_params_info(#gen_mod_path::Token::PARAM_NAMES)
+            });
+            tokens.extend(quote! {
+                ;
+                #module_expr.set_fn_raw_with_options(fx, &#gen_mod_path::Token::param_types(), #gen_mod_path::Token().into());
+            });
+            tokens.into()
         }
         Err(e) => e.to_compile_error().into(),
     }
@@ -393,20 +393,40 @@ pub fn set_exported_global_fn(args: proc_macro::TokenStream) -> proc_macro::Toke
         Ok((module_expr, export_name, rust_mod_path)) => {
             let gen_mod_path = crate::register::generated_module_path(&rust_mod_path);
 
-            #[cfg(feature = "metadata")]
-            let param_names = quote! {
-                Some(#gen_mod_path::Token::PARAM_NAMES)
+            let mut tokens = quote! {
+                let fx = FuncRegistration::new(#export_name).with_namespace(FnNamespace::Global)
             };
-            #[cfg(not(feature = "metadata"))]
-            let param_names = quote! { None };
-
-            proc_macro::TokenStream::from(quote! {
-                #module_expr.set_fn(#export_name, FnNamespace::Global, FnAccess::Public,
-                                    #param_names,
-                                    &#gen_mod_path::Token::param_types(),
-                                    #gen_mod_path::Token().into())
-            })
+            #[cfg(feature = "metadata")]
+            tokens.extend(quote! {
+                .with_params_info(#gen_mod_path::Token::PARAM_NAMES)
+            });
+            tokens.extend(quote! {
+                ;
+                #module_expr.set_fn_raw_with_options(fx, &#gen_mod_path::Token::param_types(), #gen_mod_path::Token().into());
+            });
+            tokens.into()
         }
         Err(e) => e.to_compile_error().into(),
     }
+}
+
+/// Macro to implement the [`CustomType`][rhai::CustomType] trait.
+///
+/// # Usage
+///
+/// ```
+/// use rhai::{CustomType, TypeBuilder};
+///
+/// #[derive(Clone, CustomType)]
+/// struct MyType {
+///     foo: i64,
+///     bar: bool,
+///     baz: String
+/// }
+/// ```
+#[proc_macro_derive(CustomType, attributes(rhai_type,))]
+pub fn derive_custom_type(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let expanded = custom_type::derive_custom_type_impl(input);
+    expanded.into()
 }

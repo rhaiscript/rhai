@@ -293,7 +293,7 @@ fn main() {
     println!("{0:=<1$}", "", title.len());
 
     #[cfg(not(feature = "no_optimize"))]
-    let mut optimize_level = rhai::OptimizationLevel::Simple;
+    let mut optimize_level = rhai::OptimizationLevel::Full;
 
     // Initialize scripting engine
     let mut engine = Engine::new();
@@ -509,7 +509,7 @@ fn main() {
                     .iter()
                     .rev()
                     .enumerate()
-                    .find(|&(.., h)| h.contains(text));
+                    .find(|(.., h)| h.contains(text));
 
                 match history {
                     Some((n, line)) => {
@@ -540,7 +540,7 @@ fn main() {
                         .iter()
                         .rev()
                         .enumerate()
-                        .find(|&(.., h)| h.trim_start().starts_with(prefix))
+                        .find(|(.., h)| h.trim_start().starts_with(prefix))
                     {
                         replacement = Some(line.clone());
                         replacement_index = history_offset + (rl.history().len() - 1 - n);

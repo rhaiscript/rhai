@@ -66,25 +66,6 @@ impl fmt::Display for Namespace {
     }
 }
 
-impl From<Vec<Ident>> for Namespace {
-    #[inline]
-    fn from(mut path: Vec<Ident>) -> Self {
-        path.shrink_to_fit();
-        Self {
-            index: None,
-            path: path.into(),
-        }
-    }
-}
-
-impl From<StaticVec<Ident>> for Namespace {
-    #[inline]
-    fn from(mut path: StaticVec<Ident>) -> Self {
-        path.shrink_to_fit();
-        Self { index: None, path }
-    }
-}
-
 impl Namespace {
     /// Constant for no namespace.
     pub const NONE: Self = Self {

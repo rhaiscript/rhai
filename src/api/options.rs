@@ -68,7 +68,7 @@ impl Engine {
     #[inline(always)]
     #[must_use]
     pub const fn allow_if_expression(&self) -> bool {
-        self.options.contains(LangOptions::IF_EXPR)
+        self.options.intersects(LangOptions::IF_EXPR)
     }
     /// Set whether `if`-expression is allowed.
     #[inline(always)]
@@ -81,7 +81,7 @@ impl Engine {
     #[inline(always)]
     #[must_use]
     pub const fn allow_switch_expression(&self) -> bool {
-        self.options.contains(LangOptions::SWITCH_EXPR)
+        self.options.intersects(LangOptions::SWITCH_EXPR)
     }
     /// Set whether `switch` expression is allowed.
     #[inline(always)]
@@ -94,7 +94,7 @@ impl Engine {
     #[inline(always)]
     #[must_use]
     pub const fn allow_loop_expressions(&self) -> bool {
-        self.options.contains(LangOptions::LOOP_EXPR)
+        self.options.intersects(LangOptions::LOOP_EXPR)
     }
     /// Set whether loop expressions are allowed.
     #[inline(always)]
@@ -107,7 +107,7 @@ impl Engine {
     #[inline(always)]
     #[must_use]
     pub const fn allow_statement_expression(&self) -> bool {
-        self.options.contains(LangOptions::STMT_EXPR)
+        self.options.intersects(LangOptions::STMT_EXPR)
     }
     /// Set whether statement-expression is allowed.
     #[inline(always)]
@@ -123,7 +123,7 @@ impl Engine {
     #[inline(always)]
     #[must_use]
     pub const fn allow_anonymous_fn(&self) -> bool {
-        self.options.contains(LangOptions::ANON_FN)
+        self.options.intersects(LangOptions::ANON_FN)
     }
     /// Set whether anonymous function is allowed.
     ///
@@ -139,7 +139,7 @@ impl Engine {
     #[inline(always)]
     #[must_use]
     pub const fn allow_looping(&self) -> bool {
-        self.options.contains(LangOptions::LOOPING)
+        self.options.intersects(LangOptions::LOOPING)
     }
     /// Set whether looping is allowed.
     #[inline(always)]
@@ -152,7 +152,7 @@ impl Engine {
     #[inline(always)]
     #[must_use]
     pub const fn allow_shadowing(&self) -> bool {
-        self.options.contains(LangOptions::SHADOWING)
+        self.options.intersects(LangOptions::SHADOWING)
     }
     /// Set whether variables shadowing is allowed.
     #[inline(always)]
@@ -165,7 +165,7 @@ impl Engine {
     #[inline(always)]
     #[must_use]
     pub const fn strict_variables(&self) -> bool {
-        self.options.contains(LangOptions::STRICT_VAR)
+        self.options.intersects(LangOptions::STRICT_VAR)
     }
     /// Set whether strict variables mode is enabled.
     #[inline(always)]
@@ -182,7 +182,7 @@ impl Engine {
     #[must_use]
     pub const fn fail_on_invalid_map_property(&self) -> bool {
         self.options
-            .contains(LangOptions::FAIL_ON_INVALID_MAP_PROPERTY)
+            .intersects(LangOptions::FAIL_ON_INVALID_MAP_PROPERTY)
     }
     /// Set whether to raise error if an object map property does not exist.
     ///
@@ -199,7 +199,7 @@ impl Engine {
     #[inline(always)]
     #[must_use]
     pub const fn fast_operators(&self) -> bool {
-        self.options.contains(LangOptions::FAST_OPS)
+        self.options.intersects(LangOptions::FAST_OPS)
     }
     /// Set whether fast operators mode is enabled.
     #[inline(always)]

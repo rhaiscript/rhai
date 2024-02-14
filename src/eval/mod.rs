@@ -15,11 +15,15 @@ pub use cache::{Caches, FnResolutionCacheEntry};
 #[cfg(not(feature = "no_index"))]
 pub use data_check::calc_array_sizes;
 #[cfg(not(feature = "unchecked"))]
+#[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
 pub use data_check::calc_data_sizes;
 #[cfg(feature = "debugging")]
+#[cfg(not(feature = "no_function"))]
+pub use debugger::CallStackFrame;
+#[cfg(feature = "debugging")]
 pub use debugger::{
-    BreakPoint, CallStackFrame, Debugger, DebuggerCommand, DebuggerEvent, DebuggerStatus,
-    OnDebuggerCallback, OnDebuggingInit,
+    BreakPoint, Debugger, DebuggerCommand, DebuggerEvent, DebuggerStatus, OnDebuggerCallback,
+    OnDebuggingInit,
 };
 pub use eval_context::EvalContext;
 #[cfg(not(feature = "no_module"))]

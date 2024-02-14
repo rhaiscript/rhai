@@ -1,6 +1,6 @@
 [package]
 name = "rhai_codegen"
-version = "1.6.1"
+version = "2.0.0"
 edition = "2018"
 resolver = "2"
 authors = ["jhwgh1968", "Stephen Chung"]
@@ -24,5 +24,5 @@ syn = { version = "2.0.0", features = ["full", "parsing", "printing", "proc-macr
 quote = "1.0.0"
 
 [dev-dependencies]
-rhai = { path = "..", version = "1.16.0", features = ["metadata"] }
+rhai = { path = "..", version = "1.17.0", features = ["metadata"] }
 trybuild = "1.0.0"

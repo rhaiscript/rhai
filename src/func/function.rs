@@ -1,38 +1,18 @@
 //! Module defining the standard Rhai function type.
 
-use super::native::{FnAny, FnPlugin, IteratorFn, SendSync};
-use crate::ast::FnAccess;
-use crate::plugin::PluginFunction;
+use super::native::{FnAny, FnIterator, FnPlugin, SendSync};
+use crate::ast::{EncapsulatedEnviron, FnAccess};
+use crate::plugin::PluginFunc;
 use crate::Shared;
 use std::fmt;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
-/// _(internals)_ Encapsulated AST environment.
-/// Exported under the `internals` feature only.
-///
-/// 1) functions defined within the same AST
-/// 2) the stack of imported [modules][crate::Module]
-/// 3) global constants
-#[derive(Debug, Clone)]
-pub struct EncapsulatedEnviron {
-    /// Functions defined within the same [`AST`][crate::AST].
-    #[cfg(not(feature = "no_function"))]
-    pub lib: crate::SharedModule,
-    /// Imported [modules][crate::Module].
-    #[cfg(not(feature = "no_module"))]
-    pub imports: Vec<(crate::ImmutableString, crate::SharedModule)>,
-    /// Globally-defined constants.
-    #[cfg(not(feature = "no_module"))]
-    #[cfg(not(feature = "no_function"))]
-    pub constants: Option<crate::eval::SharedGlobalConstants>,
-}
-
 /// _(internals)_ A type encapsulating a function callable by Rhai.
 /// Exported under the `internals` feature only.
 #[derive(Clone)]
 #[non_exhaustive]
-pub enum CallableFunction {
+pub enum RhaiFunc {
     /// A pure native Rust function with all arguments passed by value.
     Pure {
         /// Shared function pointer.
@@ -41,6 +21,10 @@ pub enum CallableFunction {
         has_context: bool,
         /// This is a dummy field and is not used.
         is_pure: bool,
+        /// Is this function volatile?
+        ///
+        /// A volatile function does not guarantee the same result for the same input(s).
+        is_volatile: bool,
     },
     /// A native Rust object method with the first argument passed by reference,
     /// and the rest passed by value.
@@ -51,11 +35,15 @@ pub enum CallableFunction {
         has_context: bool,
         /// Allow operating on constants?
         is_pure: bool,
+        /// Is this function volatile?
+        ///
+        /// A volatile function does not guarantee the same result for the same input(s).
+        is_volatile: bool,
     },
     /// An iterator function.
     Iterator {
         /// Shared function pointer.
-        func: Shared<IteratorFn>,
+        func: Shared<FnIterator>,
     },
     /// A plugin function,
     Plugin {
@@ -65,14 +53,14 @@ pub enum CallableFunction {
     /// A script-defined function.
     #[cfg(not(feature = "no_function"))]
     Script {
-        /// Shared reference to the [`ScriptFnDef`][crate::ast::ScriptFnDef] function definition.
-        fn_def: Shared<crate::ast::ScriptFnDef>,
+        /// Shared reference to the [`ScriptFuncDef`][crate::ast::ScriptFuncDef] function definition.
+        fn_def: Shared<crate::ast::ScriptFuncDef>,
         /// Encapsulated environment, if any.
         environ: Option<Shared<EncapsulatedEnviron>>,
     },
 }
 
-impl fmt::Debug for CallableFunction {
+impl fmt::Debug for RhaiFunc {
     #[cold]
     #[inline(never)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -88,7 +76,7 @@ impl fmt::Debug for CallableFunction {
     }
 }
 
-impl fmt::Display for CallableFunction {
+impl fmt::Display for RhaiFunc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Pure { .. } => f.write_str("NativePureFunction"),
@@ -102,7 +90,7 @@ impl fmt::Display for CallableFunction {
     }
 }
 
-impl CallableFunction {
+impl RhaiFunc {
     /// Is this a pure native Rust function?
     #[inline]
     #[must_use]
@@ -200,6 +188,24 @@ impl CallableFunction {
             Self::Script { .. } => false,
         }
     }
+    /// Is this function volatile?
+    ///
+    /// A volatile function does not guarantee the same result for the same input(s).
+    #[inline]
+    #[must_use]
+    pub fn is_volatile(&self) -> bool {
+        match self {
+            Self::Pure { is_volatile, .. } => *is_volatile,
+            Self::Method { is_volatile, .. } => *is_volatile,
+            Self::Iterator { .. } => true,
+
+            Self::Plugin { func, .. } => func.is_volatile(),
+
+            // Scripts are assumed to be volatile -- it can be calling volatile native functions.
+            #[cfg(not(feature = "no_function"))]
+            Self::Script { .. } => true,
+        }
+    }
     /// Get the access mode.
     #[inline]
     #[must_use]
@@ -234,7 +240,7 @@ impl CallableFunction {
     #[cfg(not(feature = "no_function"))]
     #[inline]
     #[must_use]
-    pub const fn get_script_fn_def(&self) -> Option<&Shared<crate::ast::ScriptFnDef>> {
+    pub const fn get_script_fn_def(&self) -> Option<&Shared<crate::ast::ScriptFuncDef>> {
         match self {
             Self::Pure { .. }
             | Self::Method { .. }
@@ -262,7 +268,7 @@ impl CallableFunction {
     /// Get a reference to an iterator function.
     #[inline]
     #[must_use]
-    pub fn get_iter_fn(&self) -> Option<&IteratorFn> {
+    pub fn get_iter_fn(&self) -> Option<&FnIterator> {
         match self {
             Self::Iterator { func, .. } => Some(&**func),
             Self::Pure { .. } | Self::Method { .. } | Self::Plugin { .. } => None,
@@ -286,9 +292,9 @@ impl CallableFunction {
 }
 
 #[cfg(not(feature = "no_function"))]
-impl From<crate::ast::ScriptFnDef> for CallableFunction {
+impl From<crate::ast::ScriptFuncDef> for RhaiFunc {
     #[inline(always)]
-    fn from(fn_def: crate::ast::ScriptFnDef) -> Self {
+    fn from(fn_def: crate::ast::ScriptFuncDef) -> Self {
         Self::Script {
             fn_def: fn_def.into(),
             environ: None,
@@ -297,9 +303,9 @@ impl From<crate::ast::ScriptFnDef> for CallableFunction {
 }
 
 #[cfg(not(feature = "no_function"))]
-impl From<Shared<crate::ast::ScriptFnDef>> for CallableFunction {
+impl From<Shared<crate::ast::ScriptFuncDef>> for RhaiFunc {
     #[inline(always)]
-    fn from(fn_def: Shared<crate::ast::ScriptFnDef>) -> Self {
+    fn from(fn_def: Shared<crate::ast::ScriptFuncDef>) -> Self {
         Self::Script {
             fn_def,
             environ: None,
@@ -307,7 +313,7 @@ impl From<Shared<crate::ast::ScriptFnDef>> for CallableFunction {
     }
 }
 
-impl<T: PluginFunction + 'static + SendSync> From<T> for CallableFunction {
+impl<T: PluginFunc + 'static + SendSync> From<T> for RhaiFunc {
     #[inline(always)]
     fn from(func: T) -> Self {
         Self::Plugin {
@@ -316,7 +322,7 @@ impl<T: PluginFunction + 'static + SendSync> From<T> for CallableFunction {
     }
 }
 
-impl From<Shared<FnPlugin>> for CallableFunction {
+impl From<Shared<FnPlugin>> for RhaiFunc {
     #[inline(always)]
     fn from(func: Shared<FnPlugin>) -> Self {
         Self::Plugin { func }

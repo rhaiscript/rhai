@@ -1,7 +1,7 @@
 #![cfg(not(feature = "no_module"))]
 use rhai::{
     module_resolvers::{DummyModuleResolver, StaticModuleResolver},
-    Dynamic, Engine, EvalAltResult, FnNamespace, ImmutableString, Module, ParseError, ParseErrorType, Scope, INT,
+    Dynamic, Engine, EvalAltResult, FnNamespace, FuncRegistration, ImmutableString, Module, ParseError, ParseErrorType, Scope, INT,
 };
 //
 #[cfg(all(not(feature = "no_function"), feature = "internals"))]
@@ -36,8 +36,9 @@ fn test_module_sub_module() {
     sub_module2.build_index();
     assert!(!sub_module2.contains_indexed_global_functions());
 
-    let super_hash = sub_module2.set_native_fn("super_inc", |x: &mut INT| Ok(*x + 1));
-    sub_module2.update_fn_namespace(super_hash, FnNamespace::Global);
+    let f = |x: &mut INT| *x + 1;
+    FuncRegistration::new("super_inc").with_namespace(FnNamespace::Global).set_into_module(&mut sub_module2, f);
+
     sub_module2.build_index();
     assert!(sub_module2.contains_indexed_global_functions());
 
@@ -90,11 +91,9 @@ fn test_module_resolver() {
 
     module.set_var("answer", 42 as INT);
     module.set_native_fn("sum", |x: INT, y: INT, z: INT, w: INT| Ok(x + y + z + w));
-    let double_hash = module.set_native_fn("double", |x: &mut INT| {
-        *x *= 2;
-        Ok(())
-    });
-    module.update_fn_namespace(double_hash, FnNamespace::Global);
+
+    let f = |x: &mut INT| *x *= 2;
+    FuncRegistration::new("double").with_namespace(FnNamespace::Global).set_into_module(&mut module, f);
 
     #[cfg(not(feature = "no_float"))]
     module.set_native_fn("sum_of_three_args", |target: &mut INT, a: INT, b: INT, c: rhai::FLOAT| {
@@ -512,9 +511,9 @@ fn test_module_file() {
     let ast = engine
         .compile(
             r#"
-            import "scripts/module";
-            print("top");
-        "#,
+                import "scripts/module";
+                print("top");
+            "#,
         )
         .unwrap();
     Module::eval_ast_as_new(Scope::new(), &ast, &engine).unwrap();
