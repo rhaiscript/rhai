@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_index"))]
-use rhai::{Array, Dynamic, Engine, ParseErrorType, INT};
+use spo_rhai::{Array, Dynamic, Engine, ParseErrorType, INT};
 use std::iter::FromIterator;
 
 #[test]

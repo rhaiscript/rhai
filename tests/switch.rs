@@ -1,4 +1,4 @@
-use rhai::{Engine, ParseErrorType, Scope, INT};
+use spo_rhai::{Engine, ParseErrorType, Scope, INT};
 
 #[test]
 fn test_switch() {
@@ -136,7 +136,7 @@ fn test_switch_condition() {
 #[cfg(not(feature = "no_object"))]
 mod test_switch_enum {
     use super::*;
-    use rhai::Array;
+    use spo_rhai::Array;
     #[derive(Debug, Clone)]
     #[allow(dead_code)]
     enum MyEnum {

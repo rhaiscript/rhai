@@ -1,5 +1,5 @@
 ///! This test simulates an external command object that is driven by a script.
-use rhai::{Engine, Scope, INT};
+use spo_rhai::{Engine, Scope, INT};
 use std::sync::{Arc, Mutex, RwLock};
 
 /// Simulate a command object.

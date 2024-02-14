@@ -1,6 +1,6 @@
 #![cfg(not(feature = "no_custom_syntax"))]
 
-use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, LexError, ParseErrorType, Position, Scope, INT};
+use spo_rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, LexError, ParseErrorType, Position, Scope, INT};
 
 #[test]
 fn test_custom_syntax() {

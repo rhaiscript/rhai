@@ -1,4 +1,4 @@
-use rhai::{Engine, EvalAltResult, ImmutableString, Scope, INT};
+use spo_rhai::{Engine, EvalAltResult, ImmutableString, Scope, INT};
 
 #[test]
 fn test_string() {

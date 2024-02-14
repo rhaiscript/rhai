@@ -1,7 +1,7 @@
-use rhai::{Engine, Module, INT};
+use spo_rhai::{Engine, Module, INT};
 
 #[cfg(not(feature = "no_float"))]
-use rhai::FLOAT;
+use spo_rhai::FLOAT;
 
 #[cfg(feature = "decimal")]
 #[cfg(not(feature = "no_float"))]

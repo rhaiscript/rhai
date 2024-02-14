@@ -1,5 +1,5 @@
-use rhai::plugin::*;
-use rhai::{Dynamic, Engine, EvalAltResult, Module, Scope, AST, INT};
+use spo_rhai::plugin::*;
+use spo_rhai::{Dynamic, Engine, EvalAltResult, Module, Scope, AST, INT};
 use rustyline::config::Builder;
 use rustyline::error::ReadlineError;
 use rustyline::history::{History, SearchDirection};

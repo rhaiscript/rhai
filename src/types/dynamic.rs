@@ -375,6 +375,7 @@ impl Dynamic {
     }
 }
 
+#[cfg(feature = "indexmap")]
 fn hash_indexmap<H: Hasher>(m: &Box<crate::Map>, state: &mut H) {
     let mut m = m.iter().collect::<Vec<_>>();
     m.sort_unstable_by_key(|x| x.0);
@@ -406,8 +407,12 @@ impl Hash for Dynamic {
             Union::Array(ref a, ..) => a.hash(state),
             #[cfg(not(feature = "no_index"))]
             Union::Blob(ref a, ..) => a.hash(state),
+
             #[cfg(not(feature = "no_object"))]
             #[cfg(not(feature = "indexmap"))]
+            Union::Map(ref m, ..) => m.hash(state),
+            #[cfg(not(feature = "no_object"))]
+            #[cfg(feature = "indexmap")]
             Union::Map(ref m, ..) => hash_indexmap(m, state),
 
             Union::FnPtr(ref f, ..) if f.environ.is_some() => {

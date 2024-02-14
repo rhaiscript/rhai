@@ -1,4 +1,4 @@
-use rhai::{Engine, INT};
+use spo_rhai::{Engine, INT};
 
 #[test]
 fn test_left_shift() {

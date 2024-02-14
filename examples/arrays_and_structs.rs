@@ -5,7 +5,7 @@ fn main() {
     panic!("This example does not run under 'no_index' or 'no_object'.")
 }
 
-use rhai::{Engine, EvalAltResult};
+use spo_rhai::{Engine, EvalAltResult};
 
 #[cfg(not(feature = "no_index"))]
 #[cfg(not(feature = "no_object"))]

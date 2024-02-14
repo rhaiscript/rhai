@@ -1,4 +1,4 @@
-use rhai::{Engine, EvalAltResult, FnPtr, INT};
+use spo_rhai::{Engine, EvalAltResult, FnPtr, INT};
 
 #[test]
 fn test_fn_ptr() {

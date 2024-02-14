@@ -1,5 +1,5 @@
-use rhai::plugin::*;
-use rhai::{Engine, INT};
+use spo_rhai::plugin::*;
+use spo_rhai::{Engine, INT};
 
 #[export_fn]
 pub fn add_together(x: INT, y: INT) -> INT {

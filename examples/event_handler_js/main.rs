@@ -8,7 +8,7 @@ pub fn main() {
 #[cfg(not(feature = "no_function"))]
 #[cfg(not(feature = "no_object"))]
 pub fn main() {
-    use rhai::{CallFnOptions, Dynamic, Engine, Map, Scope, AST};
+    use spo_rhai::{CallFnOptions, Dynamic, Engine, Map, Scope, AST};
     use std::io::{stdin, stdout, Write};
 
     const SCRIPT_FILE: &str = "event_handler_js/script.rhai";

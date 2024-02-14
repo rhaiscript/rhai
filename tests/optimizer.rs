@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_optimize"))]
-use rhai::{Engine, FuncRegistration, Module, OptimizationLevel, Scope, INT};
+use spo_rhai::{Engine, FuncRegistration, Module, OptimizationLevel, Scope, INT};
 
 #[test]
 fn test_optimizer() {

@@ -1,4 +1,4 @@
-use rhai::{Engine, EvalAltResult, Position};
+use spo_rhai::{Engine, EvalAltResult, Position};
 
 use std::{env, fs::File, io::Read, path::Path, process::exit};
 
@@ -55,7 +55,7 @@ fn main() {
         let mut engine = Engine::new();
 
         #[cfg(not(feature = "no_optimize"))]
-        engine.set_optimization_level(rhai::OptimizationLevel::Simple);
+        engine.set_optimization_level(spo_rhai::OptimizationLevel::Simple);
 
         let mut f = match File::open(&filename) {
             Err(err) => {

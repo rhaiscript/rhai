@@ -1,4 +1,4 @@
-use rhai::{Engine, EvalAltResult, ParseErrorType, Scope, INT};
+use spo_rhai::{Engine, EvalAltResult, ParseErrorType, Scope, INT};
 
 #[test]
 fn test_constant() {

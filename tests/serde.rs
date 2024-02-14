@@ -1,6 +1,6 @@
 #![cfg(feature = "serde")]
 
-use rhai::{
+use spo_rhai::{
     serde::{from_dynamic, to_dynamic},
     Dynamic, Engine, ImmutableString, Scope, INT,
 };
@@ -9,11 +9,11 @@ use serde_json::json;
 use std::sync::Arc;
 
 #[cfg(not(feature = "no_index"))]
-use rhai::Array;
+use spo_rhai::Array;
 #[cfg(not(feature = "no_object"))]
-use rhai::Map;
+use spo_rhai::Map;
 #[cfg(not(feature = "no_float"))]
-use rhai::FLOAT;
+use spo_rhai::FLOAT;
 #[cfg(feature = "decimal")]
 use rust_decimal::Decimal;
 

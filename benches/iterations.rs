@@ -3,7 +3,7 @@
 ///! Test 1,000 iterations
 extern crate test;
 
-use rhai::{Engine, OptimizationLevel, INT};
+use spo_rhai::{Engine, OptimizationLevel, INT};
 use test::Bencher;
 
 #[bench]

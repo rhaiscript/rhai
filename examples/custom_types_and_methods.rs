@@ -5,7 +5,7 @@ fn main() {
     panic!("This example does not run under 'no_object'.");
 }
 
-use rhai::{CustomType, Engine, EvalAltResult, TypeBuilder};
+use spo_rhai::{CustomType, Engine, EvalAltResult, TypeBuilder};
 
 #[cfg(not(feature = "no_object"))]
 fn main() -> Result<(), Box<EvalAltResult>> {

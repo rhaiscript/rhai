@@ -1,5 +1,5 @@
-use rhai::debugger::{BreakPoint, DebuggerCommand, DebuggerEvent};
-use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, Position, Scope, INT};
+use spo_rhai::debugger::{BreakPoint, DebuggerCommand, DebuggerEvent};
+use spo_rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, Position, Scope, INT};
 
 use std::{
     env,

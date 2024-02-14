@@ -1,11 +1,11 @@
 #![cfg(not(feature = "no_module"))]
-use rhai::{
+use spo_rhai::{
     module_resolvers::{DummyModuleResolver, StaticModuleResolver},
     Dynamic, Engine, EvalAltResult, FnNamespace, FuncRegistration, ImmutableString, Module, ParseError, ParseErrorType, Scope, INT,
 };
 //
 #[cfg(all(not(feature = "no_function"), feature = "internals"))]
-use rhai::{FnPtr, NativeCallContext};
+use spo_rhai::{FnPtr, NativeCallContext};
 
 #[test]
 fn test_module() {
@@ -96,7 +96,7 @@ fn test_module_resolver() {
     FuncRegistration::new("double").with_namespace(FnNamespace::Global).set_into_module(&mut module, f);
 
     #[cfg(not(feature = "no_float"))]
-    module.set_native_fn("sum_of_three_args", |target: &mut INT, a: INT, b: INT, c: rhai::FLOAT| {
+    module.set_native_fn("sum_of_three_args", |target: &mut INT, a: INT, b: INT, c: spo_rhai::FLOAT| {
         *target = a + b + c as INT;
         Ok(())
     });
@@ -405,13 +405,13 @@ fn test_module_str() {
         Ok(input.len() as INT)
     }
 
-    let mut engine = rhai::Engine::new();
+    let mut engine = spo_rhai::Engine::new();
     let mut module = Module::new();
     module.set_native_fn("test", test_fn);
     module.set_native_fn("test2", test_fn2);
     module.set_native_fn("test3", test_fn3);
 
-    let mut static_modules = rhai::module_resolvers::StaticModuleResolver::new();
+    let mut static_modules = spo_rhai::module_resolvers::StaticModuleResolver::new();
     static_modules.insert("test", module);
     engine.set_module_resolver(static_modules);
 
@@ -447,7 +447,7 @@ fn test_module_ast_namespace() {
 #[cfg(not(feature = "no_function"))]
 #[test]
 fn test_module_ast_namespace2() {
-    use rhai::{Engine, Module, Scope};
+    use spo_rhai::{Engine, Module, Scope};
 
     const MODULE_TEXT: &str = "
         fn run_function(function) {
@@ -468,7 +468,7 @@ fn test_module_ast_namespace2() {
     let mut engine = Engine::new();
     let module_ast = engine.compile(MODULE_TEXT).unwrap();
     let module = Module::eval_ast_as_new(Scope::new(), &module_ast, &engine).unwrap();
-    let mut static_modules = rhai::module_resolvers::StaticModuleResolver::new();
+    let mut static_modules = spo_rhai::module_resolvers::StaticModuleResolver::new();
     static_modules.insert("test_module", module);
     engine.set_module_resolver(static_modules);
 
@@ -572,11 +572,11 @@ fn test_module_dynamic() {
         Ok(s.len() as INT + x)
     }
 
-    let mut engine = rhai::Engine::new();
+    let mut engine = spo_rhai::Engine::new();
     let mut module = Module::new();
     module.set_native_fn("test", test_fn);
 
-    let mut static_modules = rhai::module_resolvers::StaticModuleResolver::new();
+    let mut static_modules = spo_rhai::module_resolvers::StaticModuleResolver::new();
     static_modules.insert("test", module);
     engine.set_module_resolver(static_modules);
     engine.register_fn("test2", test_fn);

@@ -1,4 +1,4 @@
-use rhai::Engine;
+use spo_rhai::Engine;
 
 #[test]
 fn test_not() {

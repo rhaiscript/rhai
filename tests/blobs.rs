@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_index"))]
-use rhai::{Blob, Engine, Scope, INT};
+use spo_rhai::{Blob, Engine, Scope, INT};
 use std::iter::FromIterator;
 
 #[test]

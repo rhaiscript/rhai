@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_function"))]
-use rhai::{CallFnOptions, Dynamic, Engine, EvalAltResult, FnPtr, Func, FuncArgs, Scope, AST, INT};
+use spo_rhai::{CallFnOptions, Dynamic, Engine, EvalAltResult, FnPtr, Func, FuncArgs, Scope, AST, INT};
 use std::any::TypeId;
 
 #[test]

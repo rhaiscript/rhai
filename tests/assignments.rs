@@ -1,4 +1,4 @@
-use rhai::{Engine, ParseErrorType, INT};
+use spo_rhai::{Engine, ParseErrorType, INT};
 
 #[test]
 fn test_assignments() {

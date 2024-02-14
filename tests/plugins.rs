@@ -1,20 +1,20 @@
 #![cfg(not(feature = "no_index"))]
 #![cfg(not(feature = "no_module"))]
-use rhai::plugin::*;
-use rhai::{Engine, Scope, INT};
+use spo_rhai::plugin::*;
+use spo_rhai::{Engine, Scope, INT};
 
 mod test {
     use super::*;
 
     #[export_module]
     pub mod special_array_package {
-        use rhai::{Array, INT};
+        use spo_rhai::{Array, INT};
 
         pub const MYSTIC_NUMBER: INT = 42;
 
         #[cfg(not(feature = "no_object"))]
         pub mod feature {
-            use rhai::{Array, Dynamic, EvalAltResult};
+            use spo_rhai::{Array, Dynamic, EvalAltResult};
 
             #[rhai_fn(get = "foo", return_raw)]
             #[inline(always)]

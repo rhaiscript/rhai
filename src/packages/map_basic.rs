@@ -118,7 +118,15 @@ mod map_functions {
             return Dynamic::UNIT;
         }
 
-        map.remove(property).unwrap_or(Dynamic::UNIT)
+        #[cfg(not(feature = "indexmap"))]
+        {
+            map.remove(property).unwrap_or(Dynamic::UNIT)
+        }
+
+        #[cfg(feature = "indexmap")]
+        {
+            map.swap_remove(property).unwrap_or(Dynamic::UNIT)
+        }
     }
     /// Add all property values of another object map into the object map.
     /// Existing property values of the same names are replaced.

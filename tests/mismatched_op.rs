@@ -1,4 +1,4 @@
-use rhai::{Engine, EvalAltResult, INT};
+use spo_rhai::{Engine, EvalAltResult, INT};
 
 #[test]
 fn test_mismatched_op() {

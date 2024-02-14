@@ -1,5 +1,5 @@
-use rhai::packages::{Package, StandardPackage as SSS};
-use rhai::{def_package, Engine, Module, Scope, INT};
+use spo_rhai::packages::{Package, StandardPackage as SSS};
+use spo_rhai::{def_package, Engine, Module, Scope, INT};
 
 #[cfg(not(feature = "no_module"))]
 #[cfg(not(feature = "no_custom_syntax"))]

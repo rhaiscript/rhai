@@ -1,5 +1,5 @@
-use rhai::plugin::*;
-use rhai::{Engine, EvalAltResult, Scope};
+use spo_rhai::plugin::*;
+use spo_rhai::{Engine, EvalAltResult, Scope};
 
 #[export_module]
 pub mod general_kenobi {

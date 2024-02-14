@@ -1,4 +1,4 @@
-use rhai::{Engine, Scope, INT};
+use spo_rhai::{Engine, Scope, INT};
 
 #[test]
 fn test_options_allow() {

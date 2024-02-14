@@ -3,7 +3,7 @@
 ///! Test evaluating expressions
 extern crate test;
 
-use rhai::{Engine, OptimizationLevel};
+use spo_rhai::{Engine, OptimizationLevel};
 use test::Bencher;
 
 // This script uses the Sieve of Eratosthenes to calculate prime numbers.

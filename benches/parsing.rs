@@ -3,7 +3,7 @@
 ///! Test parsing expressions
 extern crate test;
 
-use rhai::{Engine, OptimizationLevel};
+use spo_rhai::{Engine, OptimizationLevel};
 use test::Bencher;
 
 #[bench]

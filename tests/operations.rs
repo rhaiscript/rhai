@@ -1,11 +1,11 @@
 #![cfg(not(feature = "unchecked"))]
-use rhai::{Engine, EvalAltResult, INT};
+use spo_rhai::{Engine, EvalAltResult, INT};
 
 #[test]
 fn test_max_operations() {
     let mut engine = Engine::new();
     #[cfg(not(feature = "no_optimize"))]
-    engine.set_optimization_level(rhai::OptimizationLevel::None);
+    engine.set_optimization_level(spo_rhai::OptimizationLevel::None);
     engine.set_max_operations(500);
 
     engine.on_progress(|count| {
@@ -28,7 +28,7 @@ fn test_max_operations() {
 fn test_max_operations_literal() {
     let mut engine = Engine::new();
     #[cfg(not(feature = "no_optimize"))]
-    engine.set_optimization_level(rhai::OptimizationLevel::None);
+    engine.set_optimization_level(spo_rhai::OptimizationLevel::None);
     engine.set_max_operations(10);
 
     #[cfg(not(feature = "no_index"))]
@@ -131,7 +131,7 @@ fn test_max_operations_eval() {
 fn test_max_operations_progress() {
     let mut engine = Engine::new();
     #[cfg(not(feature = "no_optimize"))]
-    engine.set_optimization_level(rhai::OptimizationLevel::None);
+    engine.set_optimization_level(spo_rhai::OptimizationLevel::None);
     engine.set_max_operations(500);
 
     engine.on_progress(|count| if count < 100 { None } else { Some((42 as INT).into()) });

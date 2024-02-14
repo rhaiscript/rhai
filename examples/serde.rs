@@ -7,8 +7,8 @@ fn main() {
 
 #[cfg(not(feature = "no_object"))]
 fn main() {
-    use rhai::serde::{from_dynamic, to_dynamic};
-    use rhai::{Dynamic, Engine, Map};
+    use spo_rhai::serde::{from_dynamic, to_dynamic};
+    use spo_rhai::{Dynamic, Engine, Map};
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

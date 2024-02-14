@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_float"))]
-use rhai::{Engine, FLOAT};
+use spo_rhai::{Engine, FLOAT};
 
 const EPSILON: FLOAT = 0.000_000_000_1;
 
