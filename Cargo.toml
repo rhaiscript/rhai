@@ -145,10 +145,6 @@ name = "rhai-dbg"
 required-features = ["debugging"]
 
 [[example]]
-name = "serde"
-required-features = ["serde"]
-
-[[example]]
 name = "definitions"
 required-features = ["metadata", "internals"]
 
