@@ -33,6 +33,52 @@ pub enum AccessMode {
     ReadOnly,
 }
 
+pub struct SharedVariantPtr(*mut dyn Variant);
+impl SharedVariantPtr {
+    fn type_id(&self) -> TypeId {
+        unsafe { (*self.0).type_id() }
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        unsafe { (*self.0).type_name() }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        unsafe { (*self.0).as_any() }
+    }
+
+    fn clone(&self) -> Self {
+        SharedVariantPtr(self.0)
+    }
+}
+
+pub struct OwnedVariantBox(Box<dyn Variant>);
+impl OwnedVariantBox {
+    fn type_id(&self) -> TypeId {
+        (*(*self).0).type_id()
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        (*(*self).0).type_name()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        (*(*self).0).as_any()
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        (*(*self).0).as_any_mut()
+    }
+
+    fn clone(&self) -> Self {
+        OwnedVariantBox(self.0.clone_object())
+    }
+
+    pub fn is<T: 'static>(&self) -> bool {
+        self.0.is::<T>()
+    }
+}
+
 /// Arbitrary data attached to a [`Dynamic`] value.
 #[cfg(target_pointer_width = "64")]
 pub type Tag = i32;
@@ -87,9 +133,12 @@ pub enum Union {
 
     /// Any type as a trait object.
     ///
+    /// We needed to support both variants shared and owned
+    ///
     /// An extra level of redirection is used in order to avoid bloating the size of [`Dynamic`]
     /// because `Box<dyn Variant>` is a fat pointer.
-    Variant(Box<Box<dyn Variant>>, Tag, AccessMode),
+    OwnedVariant(OwnedVariantBox, Tag, AccessMode),
+    SharedVariant(SharedVariantPtr, Tag, AccessMode),
 
     /// A _shared_ value of any type.
     #[cfg(not(feature = "no_closure"))]
@@ -186,7 +235,8 @@ impl Dynamic {
             | Union::Char(_, tag, _)
             | Union::Int(_, tag, _)
             | Union::FnPtr(_, tag, _)
-            | Union::Variant(_, tag, _) => tag,
+            | Union::SharedVariant(_, tag, _)
+            | Union::OwnedVariant(_, tag, _) => tag,
 
             #[cfg(not(feature = "no_float"))]
             Union::Float(_, tag, _) => tag,
@@ -211,7 +261,8 @@ impl Dynamic {
             | Union::Char(_, ref mut tag, _)
             | Union::Int(_, ref mut tag, _)
             | Union::FnPtr(_, ref mut tag, _)
-            | Union::Variant(_, ref mut tag, _) => *tag = value,
+            | Union::OwnedVariant(_, ref mut tag, _)
+            | Union::SharedVariant(_, ref mut tag, _) => *tag = value,
 
             #[cfg(not(feature = "no_float"))]
             Union::Float(_, ref mut tag, _) => *tag = value,
@@ -233,7 +284,7 @@ impl Dynamic {
     #[inline(always)]
     #[must_use]
     pub const fn is_variant(&self) -> bool {
-        matches!(self.0, Union::Variant(..))
+        matches!(self.0, Union::OwnedVariant(..)) || matches!(self.0, Union::SharedVariant(..))
     }
     /// Is the value held by this [`Dynamic`] shared?
     ///
@@ -333,7 +384,8 @@ impl Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => TypeId::of::<Instant>(),
 
-            Union::Variant(ref v, ..) => (***v).type_id(),
+            Union::SharedVariant(ref v, ..) => v.type_id(),
+            Union::OwnedVariant(ref v, ..) => v.type_id(),
 
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(ref cell, ..) => (*crate::func::locked_read(cell).unwrap()).type_id(),
@@ -367,7 +419,8 @@ impl Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => "timestamp",
 
-            Union::Variant(ref v, ..) => (***v).type_name(),
+            Union::SharedVariant(ref v, ..) => v.type_name(),
+            Union::OwnedVariant(ref v, ..) => v.type_name(),
 
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(ref cell, ..) => (*crate::func::locked_read(cell).unwrap()).type_name(),
@@ -411,8 +464,12 @@ impl Hash for Dynamic {
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(ref cell, ..) => (*crate::func::locked_read(cell).unwrap()).hash(state),
 
-            Union::Variant(ref v, ..) => {
-                let _value_any = (***v).as_any();
+            Union::OwnedVariant(..) | Union::SharedVariant(..) => {
+                let _value_any = match self.0 {
+                    Union::OwnedVariant(ref v, ..) => v.as_any(),
+                    Union::SharedVariant(ref v, ..) => v.as_any(),
+                    _ => unimplemented!("unknown type"),
+                };
 
                 #[cfg(not(feature = "only_i32"))]
                 #[cfg(not(feature = "only_i64"))]
@@ -491,8 +548,12 @@ impl fmt::Display for Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => f.write_str("<timestamp>"),
 
-            Union::Variant(ref v, ..) => {
-                let _value_any = (***v).as_any();
+            Union::OwnedVariant(..) | Union::SharedVariant(..) => {
+                let (_value_any, _type_name) = match self.0 {
+                    Union::OwnedVariant(ref v, ..) => (v.as_any(), v.type_name()),
+                    Union::SharedVariant(ref v, ..) => (v.as_any(), v.type_name()),
+                    _ => unimplemented!("unknown type"),
+                };
                 let _type_id = _value_any.type_id();
 
                 #[cfg(not(feature = "only_i32"))]
@@ -549,7 +610,7 @@ impl fmt::Display for Dynamic {
                     };
                 }
 
-                f.write_str((***v).type_name())
+                f.write_str(_type_name)
             }
 
             #[cfg(not(feature = "no_closure"))]
@@ -659,8 +720,12 @@ impl fmt::Debug for Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => write!(f, "<timestamp>"),
 
-            Union::Variant(ref v, ..) => {
-                let _value_any = (***v).as_any();
+            Union::SharedVariant(..) | Union::OwnedVariant(..) => {
+                let (_value_any, _type_name) = match self.0 {
+                    Union::OwnedVariant(ref v, ..) => (v.as_any(), v.type_name()),
+                    Union::SharedVariant(ref v, ..) => (v.as_any(), v.type_name()),
+                    _ => unimplemented!("unknown type"),
+                };
                 let _type_id = _value_any.type_id();
 
                 #[cfg(not(feature = "only_i32"))]
@@ -717,7 +782,7 @@ impl fmt::Debug for Dynamic {
                     };
                 }
 
-                f.write_str((***v).type_name())
+                f.write_str(_type_name)
             }
 
             #[cfg(not(feature = "no_closure"))]
@@ -836,11 +901,13 @@ impl Clone for Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(ref v, tag, ..) => Self(Union::TimeStamp(v.clone(), tag, ReadWrite)),
 
-            Union::Variant(ref v, tag, ..) => Self(Union::Variant(
-                v.as_ref().as_ref().clone_object().into(),
-                tag,
-                ReadWrite,
-            )),
+            Union::OwnedVariant(ref v, tag, ..) => {
+                Self(Union::OwnedVariant(v.clone(), tag, ReadWrite))
+            }
+
+            Union::SharedVariant(ref v, tag, ..) => {
+                Self(Union::SharedVariant(v.clone(), tag, ReadWrite))
+            }
 
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(ref cell, tag, ..) => Self(Union::Shared(cell.clone(), tag, ReadWrite)),
@@ -1082,7 +1149,8 @@ impl Dynamic {
             | Union::Char(.., access)
             | Union::Int(.., access)
             | Union::FnPtr(.., access)
-            | Union::Variant(.., access) => access,
+            | Union::SharedVariant(.., access)
+            | Union::OwnedVariant(.., access) => access,
 
             #[cfg(not(feature = "no_float"))]
             Union::Float(.., access) => access,
@@ -1107,7 +1175,8 @@ impl Dynamic {
             | Union::Char(.., ref mut access)
             | Union::Int(.., ref mut access)
             | Union::FnPtr(.., ref mut access)
-            | Union::Variant(.., ref mut access) => *access = typ,
+            | Union::SharedVariant(.., ref mut access)
+            | Union::OwnedVariant(.., ref mut access) => *access = typ,
 
             #[cfg(not(feature = "no_float"))]
             Union::Float(.., ref mut access) => *access = typ,
@@ -1220,8 +1289,12 @@ impl Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => false,
 
-            Union::Variant(ref v, ..) => {
-                let _value_any = (***v).as_any();
+            Union::SharedVariant(..) | Union::OwnedVariant(..) => {
+                let _value_any = match self.0 {
+                    Union::OwnedVariant(ref v, ..) => v.as_any(),
+                    Union::SharedVariant(ref v, ..) => v.as_any(),
+                    _ => unimplemented!("unknown type"),
+                };
                 let _type_id = _value_any.type_id();
 
                 #[cfg(not(feature = "only_i32"))]
@@ -1400,8 +1473,8 @@ impl Dynamic {
         #[cfg(not(feature = "no_closure"))]
         reify! { value => |v: crate::Shared<crate::Locked<Self>>| return v.into() }
 
-        Self(Union::Variant(
-            Box::new(Box::new(value)),
+        Self(Union::OwnedVariant(
+            OwnedVariantBox(Box::new(value)),
             DEFAULT_TAG_VALUE,
             ReadWrite,
         ))
@@ -1590,8 +1663,8 @@ impl Dynamic {
         }
 
         match self.0 {
-            Union::Variant(v, ..) if TypeId::of::<T>() == (**v).type_id() => {
-                Ok((*v).as_boxed_any().downcast().map(|x| *x).unwrap())
+            Union::OwnedVariant(v, ..) if TypeId::of::<T>() == v.type_id() => {
+                Ok(v.0.as_boxed_any().downcast().map(|x| *x).unwrap())
             }
             _ => Err(self),
         }
@@ -1939,7 +2012,7 @@ impl Dynamic {
         }
 
         match self.0 {
-            Union::Variant(ref v, ..) => (***v).as_any().downcast_ref::<T>(),
+            Union::OwnedVariant(ref v, ..) => v.as_any().downcast_ref::<T>(),
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(..) => None,
             _ => None,
@@ -2042,7 +2115,7 @@ impl Dynamic {
         }
 
         match self.0 {
-            Union::Variant(ref mut v, ..) => (***v).as_any_mut().downcast_mut::<T>(),
+            Union::OwnedVariant(ref mut v, ..) => v.as_any_mut().downcast_mut::<T>(),
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(..) => None,
             _ => None,
