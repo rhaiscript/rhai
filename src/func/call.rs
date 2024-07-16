@@ -1873,7 +1873,7 @@ impl Engine {
                     _ => (),
                 },
                 (Union::SharedVariant(..), _) | (_, Union::SharedVariant(..)) => (),
-                (Union::OwnedVariant(..), _) | (_, Union::OwnedVariant(..)) => (),
+                (Union::Variant(..), _) | (_, Union::Variant(..)) => (),
                 _ => {
                     if let Some((func, need_context)) =
                         get_builtin_binary_op_fn(op_token, &lhs, &rhs)

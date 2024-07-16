@@ -71,7 +71,7 @@ impl Serialize for Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(ref x, ..) => ser.serialize_str(x.as_ref().type_name()),
 
-            Union::OwnedVariant(ref v, ..) => ser.serialize_str(v.type_name()),
+            Union::Variant(ref v, ..) => ser.serialize_str(v.type_name()),
             Union::SharedVariant(ref v, ..) => ser.serialize_str(v.type_name()),
 
             #[cfg(not(feature = "no_closure"))]
