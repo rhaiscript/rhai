@@ -187,7 +187,7 @@ fn test_array_with_structs() {
             self.x += 1000;
         }
 
-        fn get_x(&mut self) -> INT {
+        fn get_x(&self) -> INT {
             self.x
         }
 

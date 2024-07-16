@@ -44,7 +44,7 @@ fn test_struct_with_float() {
             self.x += 5.789;
         }
 
-        fn get_x(&mut self) -> FLOAT {
+        fn get_x(&self) -> FLOAT {
             self.x
         }
 

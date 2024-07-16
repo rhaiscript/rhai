@@ -323,8 +323,6 @@ pub use module::resolvers as module_resolvers;
 #[cfg(not(feature = "no_optimize"))]
 pub use optimizer::OptimizationLevel;
 
-// Expose internal data structures.
-
 #[cfg(feature = "internals")]
 pub use types::dynamic::{AccessMode, DynamicReadLock, DynamicWriteLock, Variant};
 

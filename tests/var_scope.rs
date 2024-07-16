@@ -444,7 +444,7 @@ fn test_var_scope_cloning() {
     }
 
     let mut engine = Engine::new();
-    engine.register_get_set("field", |foo: &mut Foo| foo.field, |foo: &mut Foo, value| foo.field = value);
+    engine.register_get_set("field", |foo: &Foo| foo.field, |foo: &mut Foo, value| foo.field = value);
 
     let mut scope = Scope::new();
     scope.push("foo", Foo { field: 1 });

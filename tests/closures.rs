@@ -328,7 +328,7 @@ fn test_closures_shared_obj() {
     // Register API on TestStruct
     engine
         .register_type_with_name::<TestStruct>("TestStruct")
-        .register_get_set("data", |p: &mut TestStruct| *p.borrow(), |p: &mut TestStruct, value: INT| *p.borrow_mut() = value)
+        .register_get_set("data", |p: &TestStruct| *p.borrow(), |p: &mut TestStruct, value: INT| *p.borrow_mut() = value)
         .register_fn("+=", |p1: &mut TestStruct, p2: TestStruct| *p1.borrow_mut() += *p2.borrow())
         .register_fn("-=", |p1: &mut TestStruct, p2: TestStruct| *p1.borrow_mut() -= *p2.borrow());
 

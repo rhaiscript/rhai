@@ -46,7 +46,7 @@ fn test_constant_mut() {
     engine
         .register_type_with_name::<TestStruct>("TestStruct")
         .register_fn("new_ts", || TestStruct(123))
-        .register_get("value", |obj: &mut TestStruct| obj.0)
+        .register_get("value", |obj: &TestStruct| obj.0)
         .register_set("value", set_value)
         .register_fn("update_value", set_value);
 

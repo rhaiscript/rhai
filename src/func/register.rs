@@ -35,7 +35,7 @@ use std::{
 ///
 /// These types are not actually used anywhere.
 pub struct Mut<T>(T);
-//pub struct Ref<T>(T);
+pub struct Ref<T>(T);
 
 /// Dereference into [`DynamicWriteLock`]
 #[inline(always)]
@@ -230,6 +230,8 @@ macro_rules! def_register {
     ($p0:ident:$n0:expr $(, $p:ident: $n:expr)*) => {
         def_register!(imp Pure   : $n0 ; $p0 => $p0      => $p0      => $p0      => by_value $(, $p => $p => $p => $p => by_value)*);
         def_register!(imp Method : $n0 ; $p0 => &mut $p0 => Mut<$p0> => &mut $p0 => by_ref   $(, $p => $p => $p => $p => by_value)*);
+
+        def_register!(imp Method : $n0 ; $p0 => & $p0 => Ref<$p0> => & $p0 => by_ref   $(, $p => $p => $p => $p => by_value)*);
         //                ^ RhaiFunc constructor
         //                         ^ number of arguments                            ^ first parameter passed through
         //                                                                                       ^ others passed by value (by_value)

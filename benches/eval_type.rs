@@ -12,7 +12,7 @@ struct Test {
 }
 
 impl Test {
-    pub fn get_x(&mut self) -> INT {
+    pub fn get_x(&self) -> INT {
         self.x
     }
     pub fn action(&mut self) {
@@ -21,7 +21,7 @@ impl Test {
     pub fn update(&mut self, val: INT) {
         self.x = val;
     }
-    pub fn get_nest(&mut self) -> Test {
+    pub fn get_nest(&self) -> Test {
         Test { x: 9 }
     }
 }
