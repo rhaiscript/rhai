@@ -26,6 +26,7 @@ pub use instant::Instant;
 /// Exported under the `internals` feature only.
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 #[non_exhaustive]
+#[repr(u8)]
 pub enum AccessMode {
     /// Mutable.
     ReadWrite,
@@ -33,7 +34,7 @@ pub enum AccessMode {
     ReadOnly,
 }
 
-pub struct SharedVariantPtr(*mut dyn Variant);
+pub struct SharedVariantPtr(*const dyn Variant);
 impl SharedVariantPtr {
     fn type_id(&self) -> TypeId {
         unsafe { (*self.0).type_id() }
@@ -77,6 +78,19 @@ impl OwnedVariantBox {
     pub fn is<T: 'static>(&self) -> bool {
         self.0.is::<T>()
     }
+}
+
+#[thread_local]
+pub static DYNAMIC_GENERATION: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+
+/// dynamic scope
+pub fn dynamic_scope<R>(func: impl FnOnce() -> R) -> R {
+    let current_generation = DYNAMIC_GENERATION.load(core::sync::atomic::Ordering::Acquire);
+    let result = func();
+    if current_generation != DYNAMIC_GENERATION.fetch_add(1, core::sync::atomic::Ordering::AcqRel) {
+        panic!("nested dynnamic scopes not supproted yet");
+    }
+    result
 }
 
 /// Arbitrary data attached to a [`Dynamic`] value.
@@ -138,7 +152,7 @@ pub enum Union {
     /// An extra level of redirection is used in order to avoid bloating the size of [`Dynamic`]
     /// because `Box<dyn Variant>` is a fat pointer.
     OwnedVariant(OwnedVariantBox, Tag, AccessMode),
-    SharedVariant(SharedVariantPtr, Tag, AccessMode),
+    SharedVariant(SharedVariantPtr, Tag, AccessMode, u16),
 
     /// A _shared_ value of any type.
     #[cfg(not(feature = "no_closure"))]
@@ -235,7 +249,7 @@ impl Dynamic {
             | Union::Char(_, tag, _)
             | Union::Int(_, tag, _)
             | Union::FnPtr(_, tag, _)
-            | Union::SharedVariant(_, tag, _)
+            | Union::SharedVariant(_, tag, _, _)
             | Union::OwnedVariant(_, tag, _) => tag,
 
             #[cfg(not(feature = "no_float"))]
@@ -262,7 +276,7 @@ impl Dynamic {
             | Union::Int(_, ref mut tag, _)
             | Union::FnPtr(_, ref mut tag, _)
             | Union::OwnedVariant(_, ref mut tag, _)
-            | Union::SharedVariant(_, ref mut tag, _) => *tag = value,
+            | Union::SharedVariant(_, ref mut tag, _, _) => *tag = value,
 
             #[cfg(not(feature = "no_float"))]
             Union::Float(_, ref mut tag, _) => *tag = value,
@@ -905,9 +919,12 @@ impl Clone for Dynamic {
                 Self(Union::OwnedVariant(v.clone(), tag, ReadWrite))
             }
 
-            Union::SharedVariant(ref v, tag, ..) => {
-                Self(Union::SharedVariant(v.clone(), tag, ReadWrite))
-            }
+            Union::SharedVariant(ref v, tag, ..) => Self(Union::SharedVariant(
+                v.clone(),
+                tag,
+                ReadWrite,
+                DYNAMIC_GENERATION.load(core::sync::atomic::Ordering::Relaxed),
+            )),
 
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(ref cell, tag, ..) => Self(Union::Shared(cell.clone(), tag, ReadWrite)),
@@ -1149,7 +1166,7 @@ impl Dynamic {
             | Union::Char(.., access)
             | Union::Int(.., access)
             | Union::FnPtr(.., access)
-            | Union::SharedVariant(.., access)
+            | Union::SharedVariant(.., access, _)
             | Union::OwnedVariant(.., access) => access,
 
             #[cfg(not(feature = "no_float"))]
@@ -1175,7 +1192,7 @@ impl Dynamic {
             | Union::Char(.., ref mut access)
             | Union::Int(.., ref mut access)
             | Union::FnPtr(.., ref mut access)
-            | Union::SharedVariant(.., ref mut access)
+            | Union::SharedVariant(.., ref mut access, _)
             | Union::OwnedVariant(.., ref mut access) => *access = typ,
 
             #[cfg(not(feature = "no_float"))]
@@ -1375,6 +1392,18 @@ impl Dynamic {
             }
         }
     }
+
+    ///
+    #[inline]
+    pub unsafe fn from_ref<T: Variant + Clone + 'static>(value: &T) -> Self {
+        Self(Union::SharedVariant(
+            SharedVariantPtr(value as &dyn Variant as *const dyn Variant),
+            0,
+            ReadOnly,
+            DYNAMIC_GENERATION.load(core::sync::atomic::Ordering::Relaxed) as u16,
+        ))
+    }
+
     /// Create a [`Dynamic`] from any type.  A [`Dynamic`] value is simply returned as is.
     ///
     /// # Arrays
@@ -1543,7 +1572,7 @@ impl Dynamic {
     #[inline(always)]
     #[must_use]
     #[allow(unused_mut)]
-    pub fn try_cast<T: Any>(mut self) -> Option<T> {
+    pub fn try_cast<T: Any + Clone>(mut self) -> Option<T> {
         self.try_cast_result().ok()
     }
     /// Convert the [`Dynamic`] value into specific type.
@@ -1566,7 +1595,7 @@ impl Dynamic {
     ///
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[allow(unused_mut)]
-    pub fn try_cast_result<T: Any>(mut self) -> Result<T, Self> {
+    pub fn try_cast_result<T: Any + Clone>(mut self) -> Result<T, Self> {
         // Coded this way in order to maximally leverage potentials for dead-code removal.
 
         #[cfg(not(feature = "no_closure"))]
@@ -2014,6 +2043,10 @@ impl Dynamic {
         match self.0 {
             Union::OwnedVariant(ref v, ..) => v.as_any().downcast_ref::<T>(),
             #[cfg(not(feature = "no_closure"))]
+            Union::SharedVariant(ref v, .., generation) => (generation
+                == DYNAMIC_GENERATION.load(core::sync::atomic::Ordering::Relaxed))
+            .then(|| v.as_any().downcast_ref::<T>())
+            .flatten(),
             Union::Shared(..) => None,
             _ => None,
         }

@@ -174,6 +174,9 @@ impl Engine {
         allow_dynamic: bool,
     ) -> Option<&'s FnResolutionCacheEntry> {
         let mut hash = args.as_deref().map_or(hash_base, |args| {
+            args.iter()
+                .map(|a| a.type_name())
+                .for_each(|x| println!("{x}"));
             calc_fn_hash_full(hash_base, args.iter().map(|a| a.type_id()))
         });
 
@@ -352,6 +355,9 @@ impl Engine {
         pos: Position,
     ) -> RhaiResultOf<(Dynamic, bool)> {
         self.track_operation(global, pos)?;
+
+        println!("---------------");
+        println!("{}", name);
 
         // Check if function access already in the cache
         let local_entry = &mut None;

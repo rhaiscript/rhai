@@ -92,6 +92,7 @@
 #![allow(clippy::enum_glob_use)] // Sometimes useful to import all `Tokens` etc.
 #![allow(clippy::no_effect_underscore_binding)] // Underscored variables may be used by code within feature guards
 #![allow(clippy::semicolon_if_nothing_returned)] // One-liner `match` cases are sometimes formatted as multi-line blocks
+#![feature(thread_local)]
 
 #[cfg(feature = "no_std")]
 extern crate alloc;
@@ -322,6 +323,8 @@ pub use module::resolvers as module_resolvers;
 
 #[cfg(not(feature = "no_optimize"))]
 pub use optimizer::OptimizationLevel;
+
+pub use types::dynamic::dynamic_scope;
 
 #[cfg(feature = "internals")]
 pub use types::dynamic::{AccessMode, DynamicReadLock, DynamicWriteLock, Variant};
