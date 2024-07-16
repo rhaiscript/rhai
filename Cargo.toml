@@ -130,6 +130,8 @@ unstable = []
 ## Running under a testing environment.
 testing-environ = []
 
+dangerous = []
+
 [[bin]]
 name = "rhai-repl"
 required-features = ["rustyline"]

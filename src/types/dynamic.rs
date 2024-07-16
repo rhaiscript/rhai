@@ -34,27 +34,54 @@ pub enum AccessMode {
     ReadOnly,
 }
 
-pub struct SharedVariantPtr(*const dyn Variant);
+pub struct SharedVariantPtr(#[cfg(feature = "dangerous")] *const dyn Variant);
 impl SharedVariantPtr {
     fn type_id(&self) -> TypeId {
-        unsafe { (*self.0).type_id() }
+        #[cfg(feature = "dangerous")]
+        unsafe {
+            (*self.0).type_id()
+        }
+
+        #[cfg(not(feature = "dangerous"))]
+        unimplemented!("required `feature = dangerous`")
     }
 
     pub fn type_name(&self) -> &'static str {
-        unsafe { (*self.0).type_name() }
+        #[cfg(feature = "dangerous")]
+        unsafe {
+            (*self.0).type_name()
+        }
+
+        #[cfg(not(feature = "dangerous"))]
+        unimplemented!("required `feature = dangerous`")
     }
 
     fn as_any(&self) -> &dyn Any {
-        unsafe { (*self.0).as_any() }
+        #[cfg(feature = "dangerous")]
+        unsafe {
+            (*self.0).as_any()
+        }
+
+        #[cfg(not(feature = "dangerous"))]
+        unimplemented!("required `feature = dangerous`")
     }
 
     fn clone(&self) -> Self {
-        SharedVariantPtr(self.0)
+        #[cfg(feature = "dangerous")]
+        let _clone = SharedVariantPtr(self.0);
+        #[cfg(not(feature = "dangerous"))]
+        let _clone = unimplemented!("required `feature = dangerous`");
+        #[allow(unreachable_code)]
+        _clone
     }
 }
 
 pub struct OwnedVariant(Box<dyn Variant>);
 impl OwnedVariant {
+    fn new(boxed: Box<dyn Variant>) -> Self {
+        OwnedVariant(boxed)
+    }
+
     fn type_id(&self) -> TypeId {
         (*(*self).0).type_id()
     }
@@ -65,6 +92,10 @@ impl OwnedVariant {
 
     fn as_any(&self) -> &dyn Any {
         (*(*self).0).as_any()
+    }
+
+    fn as_boxed_any(self) -> Box<dyn Any> {
+        self.0.as_boxed_any()
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
@@ -249,8 +280,8 @@ impl Dynamic {
             | Union::Char(_, tag, _)
             | Union::Int(_, tag, _)
             | Union::FnPtr(_, tag, _)
-            | Union::SharedVariant(_, tag, _, _)
-            | Union::Variant(_, tag, _) => tag,
+            | Union::Variant(_, tag, _)
+            | Union::SharedVariant(_, tag, _, _) => tag,
 
             #[cfg(not(feature = "no_float"))]
             Union::Float(_, tag, _) => tag,
@@ -1392,7 +1423,7 @@ impl Dynamic {
     }
 
     ///
-    #[inline]
+    #[cfg(feature = "dangerous")]
     pub unsafe fn from_ref<T: Variant + Clone + 'static>(value: &T) -> Self {
         Self(Union::SharedVariant(
             SharedVariantPtr(value as &dyn Variant as *const dyn Variant),
@@ -1501,7 +1532,7 @@ impl Dynamic {
         reify! { value => |v: crate::Shared<crate::Locked<Self>>| return v.into() }
 
         Self(Union::Variant(
-            OwnedVariant(Box::new(value)),
+            OwnedVariant::new(Box::new(value)),
             DEFAULT_TAG_VALUE,
             ReadWrite,
         ))
@@ -1570,7 +1601,7 @@ impl Dynamic {
     #[inline(always)]
     #[must_use]
     #[allow(unused_mut)]
-    pub fn try_cast<T: Any + Clone>(mut self) -> Option<T> {
+    pub fn try_cast<T: Any>(mut self) -> Option<T> {
         self.try_cast_result().ok()
     }
     /// Convert the [`Dynamic`] value into specific type.
@@ -1593,7 +1624,7 @@ impl Dynamic {
     ///
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[allow(unused_mut)]
-    pub fn try_cast_result<T: Any + Clone>(mut self) -> Result<T, Self> {
+    pub fn try_cast_result<T: Any>(mut self) -> Result<T, Self> {
         // Coded this way in order to maximally leverage potentials for dead-code removal.
 
         #[cfg(not(feature = "no_closure"))]
@@ -1691,7 +1722,7 @@ impl Dynamic {
 
         match self.0 {
             Union::Variant(v, ..) if TypeId::of::<T>() == v.type_id() => {
-                Ok(v.0.as_boxed_any().downcast().map(|x| *x).unwrap())
+                Ok(v.as_boxed_any().downcast().map(|x| *x).unwrap())
             }
             _ => Err(self),
         }
