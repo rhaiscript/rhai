@@ -1,6 +1,6 @@
 #![cfg(not(feature = "no_index"))]
-use rhai::{Array, Dynamic, Engine, EvalAltResult, ParseErrorType, Position, INT};
-use std::{convert::TryInto, iter::FromIterator};
+use rhai::{Array, Dynamic, Engine, ParseErrorType, INT};
+use std::iter::FromIterator;
 
 #[test]
 fn test_arrays() {
@@ -504,6 +504,9 @@ fn test_arrays_elvis() {
 #[test]
 #[cfg(feature = "internals")]
 fn test_array_invalid_index_callback() {
+    use rhai::{EvalAltResult, Position};
+    use std::convert::TryInto;
+
     let mut engine = Engine::new();
 
     engine.on_invalid_array_index(|arr, index, _| match index {

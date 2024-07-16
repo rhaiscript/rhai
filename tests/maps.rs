@@ -1,6 +1,5 @@
 #![cfg(not(feature = "no_object"))]
-use rhai::{Dynamic, Engine, EvalAltResult, Map, ParseErrorType, Position, Scope, INT};
-use std::convert::TryInto;
+use rhai::{Engine, EvalAltResult, Map, ParseErrorType, Scope, INT};
 
 #[test]
 fn test_map_indexing() {
@@ -260,6 +259,9 @@ fn test_map_oop() {
 #[test]
 #[cfg(feature = "internals")]
 fn test_map_missing_property_callback() {
+    use rhai::{Dynamic, Position};
+    use std::convert::TryInto;
+
     let mut engine = Engine::new();
 
     engine.on_map_missing_property(|map, prop, _| match prop {
