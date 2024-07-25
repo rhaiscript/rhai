@@ -2535,7 +2535,7 @@ impl Dynamic {
     ///
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[inline]
-    pub fn get_string(&self) -> Option<DynamicReadLock<String>> {
+    pub fn get_immutable_string(&self) -> Option<DynamicReadLock<ImmutableString>> {
         self.read_lock()
     }
     /// Convert the [`Dynamic`] into an [`ImmutableString`].
@@ -2617,27 +2617,6 @@ impl Dynamic {
                 .ok_or_else(|| cell.type_name()),
             _ => Err(self.type_name()),
         }
-    }
-    /// Get a reference to a [`Vec`].
-    ///
-    /// Not available under `no_index`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the name of the actual type as an error if the cast fails.
-    ///
-    /// # Shared Value
-    ///
-    /// Under the `sync` feature, a _shared_ value may deadlock.
-    /// Otherwise, the data may currently be borrowed for write (so its type cannot be determined).
-    ///
-    /// Under these circumstances, the cast also fails.
-    ///
-    /// These normally shouldn't occur since most operations in Rhai are single-threaded.
-    #[cfg(not(feature = "no_index"))]
-    #[inline(always)]
-    pub fn get_typed_array<T: Variant + Clone>(&self) -> Option<DynamicReadLock<Vec<T>>> {
-        self.read_lock()
     }
     /// Convert the [`Dynamic`] into a [`Vec`].
     ///
@@ -2955,5 +2934,31 @@ impl From<InclusiveRange> for Dynamic {
     #[inline(always)]
     fn from(value: InclusiveRange) -> Self {
         Self::from(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_get_fn_conversions() {
+        let str = Dynamic::from_str("").unwrap();
+        assert!(str.get_immutable_string().unwrap().eq(""));
+        assert!(str.get_array().is_none());
+        assert!(str.get_blob().is_none());
+        let blob = Dynamic::from_blob(vec![1, 2, 3, 4]);
+        assert!(blob.get_immutable_string().is_none());
+        assert!(blob.get_array().is_none());
+        assert!(blob.get_blob().unwrap().eq(&[1, 2, 3, 4]));
+        let arr = Dynamic::from_array(vec!["a".into(), "b".into(), "c".into()]);
+        assert!(arr.get_immutable_string().is_none());
+        assert!(arr
+            .get_array()
+            .unwrap()
+            .iter()
+            .map(|elm| elm.get_immutable_string().unwrap().clone())
+            .collect::<Vec<ImmutableString>>()
+            .eq(&[String::from("a"), "b".into(), "c".into()]));
+        assert!(arr.get_blob().is_none());
     }
 }
