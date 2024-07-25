@@ -2524,12 +2524,7 @@ impl Dynamic {
         self.into_immutable_string()
             .map(ImmutableString::into_owned)
     }
-    /// Return a cloned [`ImmutableString`], which is a wrapper around a reference-counted
-    /// [`smartstring`], without taking ownership of the [`Dynamic`].
-    ///
-    /// # Errors
-    ///
-    /// Returns the name of the actual type as an error if the cast fails.
+    /// Get a reference to the inner string.
     ///
     /// # Shared Value
     ///
@@ -2540,18 +2535,8 @@ impl Dynamic {
     ///
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[inline]
-    pub fn ref_immutable_string(&self) -> Result<ImmutableString, &'static str> {
-        match &self.0 {
-            Union::Str(s, ..) => Ok(s.clone()),
-            #[cfg(not(feature = "no_closure"))]
-            Union::Shared(ref cell, ..) => crate::func::locked_read(cell)
-                .and_then(|guard| match guard.0 {
-                    Union::Str(ref s, ..) => Some(s.clone()),
-                    _ => None,
-                })
-                .ok_or_else(|| cell.type_name()),
-            _ => Err(self.type_name()),
-        }
+    pub fn get_string(&self) -> Option<DynamicReadLock<String>> {
+        self.read_lock()
     }
     /// Convert the [`Dynamic`] into an [`ImmutableString`].
     ///
@@ -2581,10 +2566,7 @@ impl Dynamic {
             _ => Err(self.type_name()),
         }
     }
-    /// Return an [`Array`][crate::Array] inside a [`Cow`][std::borrow::Cow].
-    ///
-    /// This gives a reference to the array converted from the [`Dynamic`], but under the exception
-    /// that the array is cloned if the value is _shared_.
+    /// Get a reference to the inner [`Array`][crate::Array].
     ///
     /// Not available under `no_index`.
     ///
@@ -2602,18 +2584,8 @@ impl Dynamic {
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[cfg(not(feature = "no_index"))]
     #[inline(always)]
-    pub fn ref_array(&self) -> Result<std::borrow::Cow<crate::Array>, &'static str> {
-        match &self.0 {
-            Union::Array(a, ..) => Ok(std::borrow::Cow::Borrowed(a.as_ref())),
-            #[cfg(not(feature = "no_closure"))]
-            Union::Shared(ref cell, ..) => crate::func::locked_read(cell)
-                .and_then(|guard| match guard.0 {
-                    Union::Array(ref a, ..) => Some(std::borrow::Cow::Owned(a.as_ref().clone())),
-                    _ => None,
-                })
-                .ok_or_else(|| cell.type_name()),
-            _ => Err(self.type_name()),
-        }
+    pub fn get_array(&self) -> Option<DynamicReadLock<crate::Array>> {
+        self.read_lock()
     }
     /// Convert the [`Dynamic`] into an [`Array`][crate::Array].
     ///
@@ -2645,6 +2617,27 @@ impl Dynamic {
                 .ok_or_else(|| cell.type_name()),
             _ => Err(self.type_name()),
         }
+    }
+    /// Get a reference to a [`Vec`].
+    ///
+    /// Not available under `no_index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the name of the actual type as an error if the cast fails.
+    ///
+    /// # Shared Value
+    ///
+    /// Under the `sync` feature, a _shared_ value may deadlock.
+    /// Otherwise, the data may currently be borrowed for write (so its type cannot be determined).
+    ///
+    /// Under these circumstances, the cast also fails.
+    ///
+    /// These normally shouldn't occur since most operations in Rhai are single-threaded.
+    #[cfg(not(feature = "no_index"))]
+    #[inline(always)]
+    pub fn get_typed_array<T: Variant + Clone>(&self) -> Option<DynamicReadLock<Vec<T>>> {
+        self.read_lock()
     }
     /// Convert the [`Dynamic`] into a [`Vec`].
     ///
@@ -2701,10 +2694,7 @@ impl Dynamic {
             _ => Err(self.type_name()),
         }
     }
-    /// Return a [`Blob`][crate::Blob] inside a [`Cow`][std::borrow::Cow].
-    ///
-    /// This gives a reference to the blob converted from the [`Dynamic`], but under the exception
-    /// that the blob is cloned if the value is _shared_.
+    /// Get a reference to a [`Blob`][crate::Blob].
     ///
     /// Not available under `no_index`.
     ///
@@ -2722,18 +2712,8 @@ impl Dynamic {
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[cfg(not(feature = "no_index"))]
     #[inline(always)]
-    pub fn ref_blob(&self) -> Result<std::borrow::Cow<crate::Blob>, &'static str> {
-        match &self.0 {
-            Union::Blob(b, ..) => Ok(std::borrow::Cow::Borrowed(b)),
-            #[cfg(not(feature = "no_closure"))]
-            Union::Shared(cell, ..) => crate::func::locked_read(cell)
-                .and_then(|guard| match guard.0 {
-                    Union::Blob(ref b, ..) => Some(std::borrow::Cow::Owned(b.as_ref().clone())),
-                    _ => None,
-                })
-                .ok_or_else(|| cell.type_name()),
-            _ => Err(self.type_name()),
-        }
+    pub fn get_blob(&self) -> Option<DynamicReadLock<crate::Blob>> {
+        self.read_lock()
     }
     /// Convert the [`Dynamic`] into a [`Blob`][crate::Blob].
     ///
