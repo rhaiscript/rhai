@@ -12,6 +12,7 @@ Bug fixes
 Enhancements
 ------------
 
+* New `as_immutable_string_ref`, `as_array_ref`, `as_blob_ref`, `as_map_ref` plus their `_mut` variants for `Dynamic`.
 * The `break`, `return` and `throw` statements can now be simply used as `switch` case statement expressions. Previously it is required that the statement be wrapped in a block.
 
 

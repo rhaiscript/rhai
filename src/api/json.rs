@@ -52,7 +52,7 @@ impl Engine {
     /// assert_eq!(map["b"].as_int().expect("b should exist"), 42);
     /// assert_eq!(map["d"].as_unit().expect("d should exist"), ());
     ///
-    /// let c = map["c"].read_lock::<Map>().expect("c should exist");
+    /// let c = map["c"].as_map_ref().expect("c should exist");
     /// assert_eq!(c["x"].as_bool().expect("x should be bool"), false);
     /// assert_eq!(c["y"].as_bool().expect("y should be bool"), true);
     /// assert_eq!(c["z"].as_char().expect("z should be char"), '$');

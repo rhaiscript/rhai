@@ -40,7 +40,7 @@ mod without_metadata {
         assert_eq!(map["age"].as_int().expect("age should exist"), 43);
         assert_eq!(map["phones"].clone().into_typed_array::<String>().expect("phones should exist"), ["+44 1234567", "+44 2345678"]);
 
-        let address = map["address"].read_lock::<Map>().expect("address should exist");
+        let address = map["address"].as_map_ref().expect("address should exist");
         assert_eq!(address["city"].clone().into_immutable_string().expect("address.city should exist"), "London");
         assert_eq!(address["street"].clone().into_immutable_string().expect("address.street should exist"), "10 Downing Street");
     }
@@ -135,7 +135,7 @@ mod with_metadata {
         assert_eq!(map["age"].as_int().expect("age should exist"), 43);
         assert_eq!(map["phones"].clone().into_typed_array::<String>().expect("phones should exist"), ["+44 1234567", "+44 2345678"]);
 
-        let address = map["address"].read_lock::<Map>().expect("address should exist");
+        let address = map["address"].as_map_ref().expect("address should exist");
         assert_eq!(address["city"].clone().into_immutable_string().expect("address.city should exist"), "London");
         assert_eq!(address["street"].clone().into_immutable_string().expect("address.street should exist"), "10 Downing Street");
     }

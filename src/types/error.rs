@@ -1,6 +1,6 @@
 //! Module containing error definitions for the evaluation process.
 
-use crate::{Dynamic, ImmutableString, ParseErrorType, Position, INT};
+use crate::{Dynamic, ParseErrorType, Position, INT};
 #[cfg(feature = "no_std")]
 use core_error::Error;
 #[cfg(not(feature = "no_std"))]
@@ -179,8 +179,7 @@ impl fmt::Display for EvalAltResult {
 
             Self::ErrorRuntime(d, ..) if d.is_unit() => f.write_str("Runtime error")?,
             Self::ErrorRuntime(d, ..)
-                if d.read_lock::<ImmutableString>()
-                    .map_or(false, |v| v.is_empty()) =>
+                if d.as_immutable_string_ref().map_or(false, |v| v.is_empty()) =>
             {
                 write!(f, "Runtime error")?
             }

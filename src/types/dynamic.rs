@@ -22,6 +22,12 @@ pub use std::time::Instant;
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
 pub use instant::Instant;
 
+#[cfg(not(feature = "no_index"))]
+use crate::{Array, Blob};
+
+#[cfg(not(feature = "no_object"))]
+use crate::Map;
+
 /// _(internals)_ Modes of access.
 /// Exported under the `internals` feature only.
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
@@ -72,13 +78,13 @@ pub enum Union {
     Decimal(Box<rust_decimal::Decimal>, Tag, AccessMode),
     /// An array value.
     #[cfg(not(feature = "no_index"))]
-    Array(Box<crate::Array>, Tag, AccessMode),
+    Array(Box<Array>, Tag, AccessMode),
     /// An blob (byte array).
     #[cfg(not(feature = "no_index"))]
-    Blob(Box<crate::Blob>, Tag, AccessMode),
+    Blob(Box<Blob>, Tag, AccessMode),
     /// An object map value.
     #[cfg(not(feature = "no_object"))]
-    Map(Box<crate::Map>, Tag, AccessMode),
+    Map(Box<Map>, Tag, AccessMode),
     /// A function pointer.
     FnPtr(Box<FnPtr>, Tag, AccessMode),
     /// A timestamp value.
@@ -280,15 +286,15 @@ impl Dynamic {
             return matches!(self.0, Union::Str(..));
         }
         #[cfg(not(feature = "no_index"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Array>() {
+        if TypeId::of::<T>() == TypeId::of::<Array>() {
             return matches!(self.0, Union::Array(..));
         }
         #[cfg(not(feature = "no_index"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Blob>() {
+        if TypeId::of::<T>() == TypeId::of::<Blob>() {
             return matches!(self.0, Union::Blob(..));
         }
         #[cfg(not(feature = "no_object"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Map>() {
+        if TypeId::of::<T>() == TypeId::of::<Map>() {
             return matches!(self.0, Union::Map(..));
         }
         #[cfg(feature = "decimal")]
@@ -324,11 +330,11 @@ impl Dynamic {
             #[cfg(feature = "decimal")]
             Union::Decimal(..) => TypeId::of::<rust_decimal::Decimal>(),
             #[cfg(not(feature = "no_index"))]
-            Union::Array(..) => TypeId::of::<crate::Array>(),
+            Union::Array(..) => TypeId::of::<Array>(),
             #[cfg(not(feature = "no_index"))]
-            Union::Blob(..) => TypeId::of::<crate::Blob>(),
+            Union::Blob(..) => TypeId::of::<Blob>(),
             #[cfg(not(feature = "no_object"))]
-            Union::Map(..) => TypeId::of::<crate::Map>(),
+            Union::Map(..) => TypeId::of::<Map>(),
             Union::FnPtr(..) => TypeId::of::<FnPtr>(),
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => TypeId::of::<Instant>(),
@@ -1045,22 +1051,22 @@ impl Dynamic {
     pub fn from_decimal(value: rust_decimal::Decimal) -> Self {
         Self(Union::Decimal(value.into(), DEFAULT_TAG_VALUE, ReadWrite))
     }
-    /// Create a [`Dynamic`] from an [`Array`][crate::Array].
+    /// Create a [`Dynamic`] from an [`Array`].
     #[cfg(not(feature = "no_index"))]
     #[inline(always)]
-    pub fn from_array(array: crate::Array) -> Self {
+    pub fn from_array(array: Array) -> Self {
         Self(Union::Array(array.into(), DEFAULT_TAG_VALUE, ReadWrite))
     }
-    /// Create a [`Dynamic`] from a [`Blob`][crate::Blob].
+    /// Create a [`Dynamic`] from a [`Blob`].
     #[cfg(not(feature = "no_index"))]
     #[inline(always)]
-    pub fn from_blob(blob: crate::Blob) -> Self {
+    pub fn from_blob(blob: Blob) -> Self {
         Self(Union::Blob(blob.into(), DEFAULT_TAG_VALUE, ReadWrite))
     }
-    /// Create a [`Dynamic`] from a [`Map`][crate::Map].
+    /// Create a [`Dynamic`] from a [`Map`].
     #[cfg(not(feature = "no_object"))]
     #[inline(always)]
-    pub fn from_map(map: crate::Map) -> Self {
+    pub fn from_map(map: Map) -> Self {
         Self(Union::Map(map.into(), DEFAULT_TAG_VALUE, ReadWrite))
     }
     /// Create a new [`Dynamic`] from an [`Instant`].
@@ -1306,20 +1312,20 @@ impl Dynamic {
     ///
     /// # Arrays
     ///
-    /// Beware that you need to pass in an [`Array`][crate::Array] type for it to be recognized as
-    /// an [`Array`][crate::Array]. A [`Vec<T>`][Vec] does not get automatically converted to an
-    /// [`Array`][crate::Array], but will be a custom type instead (stored as a trait object).
+    /// Beware that you need to pass in an [`Array`] type for it to be recognized as
+    /// an [`Array`]. A [`Vec<T>`][Vec] does not get automatically converted to an
+    /// [`Array`], but will be a custom type instead (stored as a trait object).
     ///
     /// Use `array.into()` or `array.into_iter()` to convert a [`Vec<T>`][Vec] into a [`Dynamic`] as
-    /// an [`Array`][crate::Array] value.  See the examples for details.
+    /// an [`Array`] value.  See the examples for details.
     ///
     /// # Hash Maps
     ///
     /// Similarly, passing in a [`HashMap<String, T>`][std::collections::HashMap] or
-    /// [`BTreeMap<String, T>`][std::collections::BTreeMap] will not get a [`Map`][crate::Map] but a
+    /// [`BTreeMap<String, T>`][std::collections::BTreeMap] will not get a [`Map`] but a
     /// custom type.
     ///
-    /// Again, use `map.into()` to get a [`Dynamic`] with a [`Map`][crate::Map] value.
+    /// Again, use `map.into()` to get a [`Dynamic`] with a [`Map`] value.
     /// See the examples for details.
     ///
     /// # Examples
@@ -1387,12 +1393,12 @@ impl Dynamic {
         reify! { value => |v: ()| return v.into() }
 
         #[cfg(not(feature = "no_index"))]
-        reify! { value => |v: crate::Array| return v.into() }
+        reify! { value => |v: Array| return v.into() }
         #[cfg(not(feature = "no_index"))]
         // don't use blob.into() because it'll be converted into an Array
-        reify! { value => |v: crate::Blob| return Self::from_blob(v) }
+        reify! { value => |v: Blob| return Self::from_blob(v) }
         #[cfg(not(feature = "no_object"))]
-        reify! { value => |v: crate::Map| return v.into() }
+        reify! { value => |v: Map| return v.into() }
         reify! { value => |v: FnPtr| return v.into() }
 
         #[cfg(not(feature = "no_time"))]
@@ -1555,21 +1561,21 @@ impl Dynamic {
             };
         }
         #[cfg(not(feature = "no_index"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Array>() {
+        if TypeId::of::<T>() == TypeId::of::<Array>() {
             return match self.0 {
                 Union::Array(a, ..) => Ok(reify! { *a => !!! T }),
                 _ => Err(self),
             };
         }
         #[cfg(not(feature = "no_index"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Blob>() {
+        if TypeId::of::<T>() == TypeId::of::<Blob>() {
             return match self.0 {
                 Union::Blob(b, ..) => Ok(reify! { *b => !!! T }),
                 _ => Err(self),
             };
         }
         #[cfg(not(feature = "no_object"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Map>() {
+        if TypeId::of::<T>() == TypeId::of::<Map>() {
             return match self.0 {
                 Union::Map(m, ..) => Ok(reify! { *m => !!! T }),
                 _ => Err(self),
@@ -1895,21 +1901,21 @@ impl Dynamic {
             };
         }
         #[cfg(not(feature = "no_index"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Array>() {
+        if TypeId::of::<T>() == TypeId::of::<Array>() {
             return match self.0 {
                 Union::Array(ref v, ..) => v.as_ref().as_any().downcast_ref::<T>(),
                 _ => None,
             };
         }
         #[cfg(not(feature = "no_index"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Blob>() {
+        if TypeId::of::<T>() == TypeId::of::<Blob>() {
             return match self.0 {
                 Union::Blob(ref v, ..) => v.as_ref().as_any().downcast_ref::<T>(),
                 _ => None,
             };
         }
         #[cfg(not(feature = "no_object"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Map>() {
+        if TypeId::of::<T>() == TypeId::of::<Map>() {
             return match self.0 {
                 Union::Map(ref v, ..) => v.as_ref().as_any().downcast_ref::<T>(),
                 _ => None,
@@ -1998,21 +2004,21 @@ impl Dynamic {
             };
         }
         #[cfg(not(feature = "no_index"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Array>() {
+        if TypeId::of::<T>() == TypeId::of::<Array>() {
             return match self.0 {
                 Union::Array(ref mut v, ..) => v.as_mut().as_any_mut().downcast_mut::<T>(),
                 _ => None,
             };
         }
         #[cfg(not(feature = "no_index"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Blob>() {
+        if TypeId::of::<T>() == TypeId::of::<Blob>() {
             return match self.0 {
                 Union::Blob(ref mut v, ..) => v.as_mut().as_any_mut().downcast_mut::<T>(),
                 _ => None,
             };
         }
         #[cfg(not(feature = "no_object"))]
-        if TypeId::of::<T>() == TypeId::of::<crate::Map>() {
+        if TypeId::of::<T>() == TypeId::of::<Map>() {
             return match self.0 {
                 Union::Map(ref mut v, ..) => v.as_mut().as_any_mut().downcast_mut::<T>(),
                 _ => None,
@@ -2208,7 +2214,7 @@ impl Dynamic {
             _ => false,
         }
     }
-    /// Return `true` if the [`Dynamic`] holds an [`Array`][crate::Array].
+    /// Return `true` if the [`Dynamic`] holds an [`Array`].
     ///
     /// Not available under `no_index`.
     ///
@@ -2233,7 +2239,7 @@ impl Dynamic {
             _ => false,
         }
     }
-    /// Return `true` if the [`Dynamic`] holds a [`Blob`][crate::Blob].
+    /// Return `true` if the [`Dynamic`] holds a [`Blob`].
     ///
     /// Not available under `no_index`.
     ///
@@ -2258,7 +2264,7 @@ impl Dynamic {
             _ => false,
         }
     }
-    /// Return `true` if the [`Dynamic`] holds a [`Map`][crate::Map].
+    /// Return `true` if the [`Dynamic`] holds a [`Map`].
     ///
     /// Not available under `no_object`.
     ///
@@ -2503,6 +2509,177 @@ impl Dynamic {
             _ => Err(self.type_name()),
         }
     }
+    /// Cast the [`Dynamic`] as an [`ImmutableString`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the name of the actual type as an error if the cast fails.
+    ///
+    /// # Shared Value
+    ///
+    /// Under the `sync` feature, a _shared_ value may deadlock.
+    /// Otherwise, the data may currently be borrowed for write (so its type cannot be determined).
+    ///
+    /// Under these circumstances, the cast also fails.
+    ///
+    /// These normally shouldn't occur since most operations in Rhai are single-threaded.
+    #[inline]
+    pub fn as_immutable_string_ref(
+        &self,
+    ) -> Result<impl Deref<Target = ImmutableString> + '_, &'static str> {
+        self.read_lock::<ImmutableString>()
+            .ok_or_else(|| self.type_name())
+    }
+    /// Cast the [`Dynamic`] as a mutable reference to an [`ImmutableString`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the name of the actual type as an error if the cast fails.
+    ///
+    /// # Shared Value
+    ///
+    /// Under the `sync` feature, a _shared_ value may deadlock.
+    /// Otherwise, the data may currently be borrowed for write (so its type cannot be determined).
+    ///
+    /// Under these circumstances, the cast also fails.
+    ///
+    /// These normally shouldn't occur since most operations in Rhai are single-threaded.
+    #[inline]
+    pub fn as_immutable_string_mut(
+        &mut self,
+    ) -> Result<impl DerefMut<Target = ImmutableString> + '_, &'static str> {
+        let type_name = self.type_name();
+        self.write_lock::<ImmutableString>().ok_or(type_name)
+    }
+    /// Cast the [`Dynamic`] as an [`Array`].
+    ///
+    /// Not available under `no_index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the name of the actual type as an error if the cast fails.
+    ///
+    /// # Shared Value
+    ///
+    /// Under the `sync` feature, a _shared_ value may deadlock.
+    /// Otherwise, the data may currently be borrowed for write (so its type cannot be determined).
+    ///
+    /// Under these circumstances, the cast also fails.
+    ///
+    /// These normally shouldn't occur since most operations in Rhai are single-threaded.
+    #[cfg(not(feature = "no_index"))]
+    #[inline(always)]
+    pub fn as_array_ref(&self) -> Result<impl Deref<Target = Array> + '_, &'static str> {
+        self.read_lock::<Array>().ok_or_else(|| self.type_name())
+    }
+    /// Cast the [`Dynamic`] as a mutable reference to an [`Array`].
+    ///
+    /// Not available under `no_index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the name of the actual type as an error if the cast fails.
+    ///
+    /// # Shared Value
+    ///
+    /// Under the `sync` feature, a _shared_ value may deadlock.
+    /// Otherwise, the data may currently be borrowed for write (so its type cannot be determined).
+    ///
+    /// Under these circumstances, the cast also fails.
+    ///
+    /// These normally shouldn't occur since most operations in Rhai are single-threaded.
+    #[cfg(not(feature = "no_index"))]
+    #[inline(always)]
+    pub fn as_array_mut(&mut self) -> Result<impl DerefMut<Target = Array> + '_, &'static str> {
+        let type_name = self.type_name();
+        self.write_lock::<Array>().ok_or(type_name)
+    }
+    /// Cast the [`Dynamic`] as a [`Blob`].
+    ///
+    /// Not available under `no_index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the name of the actual type as an error if the cast fails.
+    ///
+    /// # Shared Value
+    ///
+    /// Under the `sync` feature, a _shared_ value may deadlock.
+    /// Otherwise, the data may currently be borrowed for write (so its type cannot be determined).
+    ///
+    /// Under these circumstances, the cast also fails.
+    ///
+    /// These normally shouldn't occur since most operations in Rhai are single-threaded.
+    #[cfg(not(feature = "no_index"))]
+    #[inline(always)]
+    pub fn as_blob_ref(&self) -> Result<impl Deref<Target = Blob> + '_, &'static str> {
+        self.read_lock::<Blob>().ok_or_else(|| self.type_name())
+    }
+    /// Cast the [`Dynamic`] as a mutable reference to a [`Blob`].
+    ///
+    /// Not available under `no_index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the name of the actual type as an error if the cast fails.
+    ///
+    /// # Shared Value
+    ///
+    /// Under the `sync` feature, a _shared_ value may deadlock.
+    /// Otherwise, the data may currently be borrowed for write (so its type cannot be determined).
+    ///
+    /// Under these circumstances, the cast also fails.
+    ///
+    /// These normally shouldn't occur since most operations in Rhai are single-threaded.
+    #[cfg(not(feature = "no_index"))]
+    #[inline(always)]
+    pub fn as_blob_mut(&mut self) -> Result<impl DerefMut<Target = Blob> + '_, &'static str> {
+        let type_name = self.type_name();
+        self.write_lock::<Blob>().ok_or(type_name)
+    }
+    /// Cast the [`Dynamic`] as a [`Map`].
+    ///
+    /// Not available under `no_object`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the name of the actual type as an error if the cast fails.
+    ///
+    /// # Shared Value
+    ///
+    /// Under the `sync` feature, a _shared_ value may deadlock.
+    /// Otherwise, the data may currently be borrowed for write (so its type cannot be determined).
+    ///
+    /// Under these circumstances, the cast also fails.
+    ///
+    /// These normally shouldn't occur since most operations in Rhai are single-threaded.
+    #[cfg(not(feature = "no_object"))]
+    #[inline(always)]
+    pub fn as_map_ref(&self) -> Result<impl Deref<Target = Map> + '_, &'static str> {
+        self.read_lock::<Map>().ok_or_else(|| self.type_name())
+    }
+    /// Cast the [`Dynamic`] as a mutable reference to a [`Map`].
+    ///
+    /// Not available under `no_object`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the name of the actual type as an error if the cast fails.
+    ///
+    /// # Shared Value
+    ///
+    /// Under the `sync` feature, a _shared_ value may deadlock.
+    /// Otherwise, the data may currently be borrowed for write (so its type cannot be determined).
+    ///
+    /// Under these circumstances, the cast also fails.
+    ///
+    /// These normally shouldn't occur since most operations in Rhai are single-threaded.
+    #[cfg(not(feature = "no_object"))]
+    #[inline(always)]
+    pub fn as_map_mut(&mut self) -> Result<impl DerefMut<Target = Map> + '_, &'static str> {
+        let type_name = self.type_name();
+        self.write_lock::<Map>().ok_or(type_name)
+    }
     /// Convert the [`Dynamic`] into a [`String`].
     ///
     /// If there are other references to the same string, a cloned copy is returned.
@@ -2535,8 +2712,8 @@ impl Dynamic {
     ///
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[inline]
-    pub fn get_immutable_string(&self) -> Option<DynamicReadLock<ImmutableString>> {
-        self.read_lock()
+    pub fn get_immutable_string(&self) -> Option<impl Deref<Target = ImmutableString> + '_> {
+        self.as_immutable_string_ref().ok()
     }
     /// Convert the [`Dynamic`] into an [`ImmutableString`].
     ///
@@ -2584,10 +2761,10 @@ impl Dynamic {
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[cfg(not(feature = "no_index"))]
     #[inline(always)]
-    pub fn get_array(&self) -> Option<DynamicReadLock<crate::Array>> {
-        self.read_lock()
+    pub fn get_array(&self) -> Option<impl Deref<Target = crate::Array> + '_> {
+        self.as_array_ref().ok()
     }
-    /// Convert the [`Dynamic`] into an [`Array`][crate::Array].
+    /// Convert the [`Dynamic`] into an [`Array`].
     ///
     /// Not available under `no_index`.
     ///
@@ -2605,7 +2782,7 @@ impl Dynamic {
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[cfg(not(feature = "no_index"))]
     #[inline(always)]
-    pub fn into_array(self) -> Result<crate::Array, &'static str> {
+    pub fn into_array(self) -> Result<Array, &'static str> {
         match self.0 {
             Union::Array(a, ..) => Ok(*a),
             #[cfg(not(feature = "no_closure"))]
@@ -2691,10 +2868,10 @@ impl Dynamic {
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[cfg(not(feature = "no_index"))]
     #[inline(always)]
-    pub fn get_blob(&self) -> Option<DynamicReadLock<crate::Blob>> {
-        self.read_lock()
+    pub fn get_blob(&self) -> Option<impl Deref<Target = Vec<u8>> + '_> {
+        self.as_blob_ref().ok()
     }
-    /// Convert the [`Dynamic`] into a [`Blob`][crate::Blob].
+    /// Convert the [`Dynamic`] into a [`Blob`].
     ///
     /// Not available under `no_index`.
     ///
@@ -2712,7 +2889,7 @@ impl Dynamic {
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
     #[cfg(not(feature = "no_index"))]
     #[inline(always)]
-    pub fn into_blob(self) -> Result<crate::Blob, &'static str> {
+    pub fn into_blob(self) -> Result<Blob, &'static str> {
         match self.0 {
             Union::Blob(b, ..) => Ok(*b),
             #[cfg(not(feature = "no_closure"))]

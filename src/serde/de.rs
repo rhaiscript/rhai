@@ -470,9 +470,9 @@ impl<'de> Deserializer<'de> for DynamicDeserializer<'de> {
         _variants: &'static [&'static str],
         visitor: V,
     ) -> RhaiResultOf<V::Value> {
-        match self.0.read_lock::<ImmutableString>() {
-            Some(s) => visitor.visit_enum(s.into_deserializer()),
-            None => {
+        match self.0.as_immutable_string_ref() {
+            Ok(s) => visitor.visit_enum(s.into_deserializer()),
+            Err(_) => {
                 #[cfg(not(feature = "no_object"))]
                 return self.0.downcast_ref::<crate::Map>().map_or_else(
                     || self.type_error(),

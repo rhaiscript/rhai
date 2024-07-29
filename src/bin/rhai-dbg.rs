@@ -1,5 +1,5 @@
 use rhai::debugger::{BreakPoint, DebuggerCommand, DebuggerEvent};
-use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, Position, Scope, INT};
+use rhai::{Dynamic, Engine, EvalAltResult, Position, Scope, INT};
 
 use std::{
     env,
@@ -63,7 +63,7 @@ fn print_current_source(
         .global_runtime_state_mut()
         .debugger_mut()
         .state_mut()
-        .write_lock::<ImmutableString>()
+        .as_immutable_string_mut()
         .unwrap();
     let src = source.unwrap_or("");
     if src != current_source {

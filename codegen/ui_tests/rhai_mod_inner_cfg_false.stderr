@@ -10,3 +10,14 @@ note: found an item that was configured out
 12 |     pub mod test_mod {
    |             ^^^^^^^^
    = note: the item is gated behind the `unset_feature` feature
+
+warning: unexpected `cfg` condition value: `unset_feature`
+  --> ui_tests/rhai_mod_inner_cfg_false.rs:11:11
+   |
+11 |     #[cfg(feature = "unset_feature")]
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `default` and `metadata`
+   = help: consider adding `unset_feature` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default

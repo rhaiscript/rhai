@@ -5,12 +5,8 @@ use syn::{
     spanned::Spanned,
 };
 
-#[cfg(no_std)]
-use alloc::format;
-#[cfg(not(no_std))]
-use std::format;
-
 use std::borrow::Cow;
+use std::format;
 
 use crate::attrs::{ExportInfo, ExportScope, ExportedParams};
 

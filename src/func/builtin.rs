@@ -236,8 +236,8 @@ pub fn get_builtin_binary_op_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Option<
             return match op {
                 Plus => Some((
                     |_ctx, args| {
-                        let s1 = &*args[0].read_lock::<ImmutableString>().unwrap();
-                        let s2 = &*args[1].read_lock::<ImmutableString>().unwrap();
+                        let s1 = &*args[0].as_immutable_string_ref().unwrap();
+                        let s2 = &*args[1].as_immutable_string_ref().unwrap();
 
                         #[cfg(not(feature = "unchecked"))]
                         _ctx.unwrap()
@@ -294,11 +294,11 @@ pub fn get_builtin_binary_op_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Option<
             return match op {
                 Plus => Some((
                     |_ctx, args| {
-                        let b2 = &*args[1].read_lock::<Blob>().unwrap();
+                        let b2 = &*args[1].as_blob_ref().unwrap();
                         if b2.is_empty() {
                             return Ok(args[0].flatten_clone());
                         }
-                        let b1 = &*args[0].read_lock::<Blob>().unwrap();
+                        let b1 = &*args[0].as_blob_ref().unwrap();
                         if b1.is_empty() {
                             return Ok(args[1].flatten_clone());
                         }
@@ -475,7 +475,7 @@ pub fn get_builtin_binary_op_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Option<
     if (type1, type2) == (TypeId::of::<char>(), TypeId::of::<ImmutableString>()) {
         fn get_s1s2(args: &FnCallArgs) -> ([Option<char>; 2], [Option<char>; 2]) {
             let x = args[0].as_char().unwrap();
-            let y = &*args[1].read_lock::<ImmutableString>().unwrap();
+            let y = &*args[1].as_immutable_string_ref().unwrap();
             let s1 = [Some(x), None];
             let mut y = y.chars();
             let s2 = [y.next(), y.next()];
@@ -486,7 +486,7 @@ pub fn get_builtin_binary_op_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Option<
             Plus => Some((
                 |_ctx, args| {
                     let x = args[0].as_char().unwrap();
-                    let y = &*args[1].read_lock::<ImmutableString>().unwrap();
+                    let y = &*args[1].as_immutable_string_ref().unwrap();
 
                     let mut result = SmartString::new_const();
                     result.push(x);
@@ -511,7 +511,7 @@ pub fn get_builtin_binary_op_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Option<
     // string op char
     if (type1, type2) == (TypeId::of::<ImmutableString>(), TypeId::of::<char>()) {
         fn get_s1s2(args: &FnCallArgs) -> ([Option<char>; 2], [Option<char>; 2]) {
-            let x = &*args[0].read_lock::<ImmutableString>().unwrap();
+            let x = &*args[0].as_immutable_string_ref().unwrap();
             let y = args[1].as_char().unwrap();
             let mut x = x.chars();
             let s1 = [x.next(), x.next()];
@@ -522,7 +522,7 @@ pub fn get_builtin_binary_op_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Option<
         return match op {
             Plus => Some((
                 |_ctx, args| {
-                    let x = &*args[0].read_lock::<ImmutableString>().unwrap();
+                    let x = &*args[0].as_immutable_string_ref().unwrap();
                     let y = args[1].as_char().unwrap();
                     let result = x + y;
 
@@ -535,7 +535,7 @@ pub fn get_builtin_binary_op_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Option<
             )),
             Minus => Some((
                 |_, args| {
-                    let x = &*args[0].read_lock::<ImmutableString>().unwrap();
+                    let x = &*args[0].as_immutable_string_ref().unwrap();
                     let y = args[1].as_char().unwrap();
                     Ok((x - y).into())
                 },
@@ -576,13 +576,11 @@ pub fn get_builtin_binary_op_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Option<
     // blob
     #[cfg(not(feature = "no_index"))]
     if type1 == TypeId::of::<crate::Blob>() {
-        use crate::Blob;
-
         if type2 == TypeId::of::<char>() {
             return match op {
                 Plus => Some((
                     |_ctx, args| {
-                        let mut blob = args[0].read_lock::<Blob>().unwrap().clone();
+                        let mut blob = args[0].as_blob_ref().unwrap().clone();
                         let mut buf = [0_u8; 4];
                         let x = args[1].as_char().unwrap().encode_utf8(&mut buf);
 
@@ -794,8 +792,8 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                 PlusAssign => Some((
                     |_ctx, args| {
                         let (first, second) = args.split_first_mut().unwrap();
-                        let x = &mut *first.write_lock::<ImmutableString>().unwrap();
-                        let y = &*second[0].read_lock::<ImmutableString>().unwrap();
+                        let x = &mut *first.as_immutable_string_mut().unwrap();
+                        let y = &*second[0].as_immutable_string_ref().unwrap();
 
                         #[cfg(not(feature = "unchecked"))]
                         if !x.is_empty() && !y.is_empty() {
@@ -812,8 +810,8 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                 MinusAssign => Some((
                     |_, args| {
                         let (first, second) = args.split_first_mut().unwrap();
-                        let x = &mut *first.write_lock::<ImmutableString>().unwrap();
-                        let y = &*second[0].read_lock::<ImmutableString>().unwrap();
+                        let x = &mut *first.as_immutable_string_mut().unwrap();
+                        let y = &*second[0].as_immutable_string_ref().unwrap();
                         *x -= y;
                         Ok(Dynamic::UNIT)
                     },
@@ -827,7 +825,6 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
         if type1 == TypeId::of::<crate::Array>() {
             #[allow(clippy::wildcard_imports)]
             use crate::packages::array_basic::array_functions::*;
-            use crate::Array;
 
             return match op {
                 PlusAssign => Some((
@@ -839,14 +836,14 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                         }
 
                         #[cfg(not(feature = "unchecked"))]
-                        if !args[0].read_lock::<Array>().unwrap().is_empty() {
+                        if !args[0].as_array_ref().unwrap().is_empty() {
                             _ctx.unwrap().engine().check_data_size(
                                 &*args[0].read_lock().unwrap(),
                                 crate::Position::NONE,
                             )?;
                         }
 
-                        let array = &mut *args[0].write_lock::<Array>().unwrap();
+                        let array = &mut *args[0].as_array_mut().unwrap();
 
                         append(array, x);
 
@@ -862,13 +859,12 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
         if type1 == TypeId::of::<crate::Blob>() {
             #[allow(clippy::wildcard_imports)]
             use crate::packages::blob_basic::blob_functions::*;
-            use crate::Blob;
 
             return match op {
                 PlusAssign => Some((
                     |_ctx, args| {
                         let blob2 = args[1].take().into_blob().unwrap();
-                        let blob1 = &mut *args[0].write_lock::<Blob>().unwrap();
+                        let blob1 = &mut *args[0].as_blob_mut().unwrap();
 
                         #[cfg(not(feature = "unchecked"))]
                         _ctx.unwrap()
@@ -958,7 +954,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                 |_ctx, args| {
                     let mut buf = [0_u8; 4];
                     let ch = &*args[1].as_char().unwrap().encode_utf8(&mut buf);
-                    let mut x = args[0].write_lock::<ImmutableString>().unwrap();
+                    let mut x = args[0].as_immutable_string_mut().unwrap();
 
                     #[cfg(not(feature = "unchecked"))]
                     _ctx.unwrap()
@@ -981,7 +977,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
             PlusAssign => Some((
                 |_ctx, args| {
                     let ch = {
-                        let s = &*args[1].read_lock::<ImmutableString>().unwrap();
+                        let s = &*args[1].as_immutable_string_ref().unwrap();
 
                         if s.is_empty() {
                             return Ok(Dynamic::UNIT);
@@ -1013,14 +1009,13 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
     if type1 == TypeId::of::<crate::Array>() {
         #[allow(clippy::wildcard_imports)]
         use crate::packages::array_basic::array_functions::*;
-        use crate::Array;
 
         return match op {
             PlusAssign => Some((
                 |_ctx, args| {
                     {
                         let x = args[1].take();
-                        let array = &mut *args[0].write_lock::<Array>().unwrap();
+                        let array = &mut *args[0].as_array_mut().unwrap();
                         push(array, x);
                     }
 
@@ -1050,7 +1045,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                 PlusAssign => Some((
                     |_ctx, args| {
                         let x = args[1].as_int().unwrap();
-                        let blob = &mut *args[0].write_lock::<Blob>().unwrap();
+                        let blob = &mut *args[0].as_blob_mut().unwrap();
 
                         #[cfg(not(feature = "unchecked"))]
                         _ctx.unwrap()
@@ -1076,7 +1071,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                 PlusAssign => Some((
                     |_ctx, args| {
                         let x = args[1].as_char().unwrap();
-                        let blob = &mut *args[0].write_lock::<Blob>().unwrap();
+                        let blob = &mut *args[0].as_blob_mut().unwrap();
 
                         #[cfg(not(feature = "unchecked"))]
                         _ctx.unwrap()
@@ -1102,8 +1097,8 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                 PlusAssign => Some((
                     |_ctx, args| {
                         let (first, second) = args.split_first_mut().unwrap();
-                        let blob = &mut *first.write_lock::<Blob>().unwrap();
-                        let s = &*second[0].read_lock::<ImmutableString>().unwrap();
+                        let blob = &mut *first.as_blob_mut().unwrap();
+                        let s = &*second[0].as_immutable_string_ref().unwrap();
 
                         if s.is_empty() {
                             return Ok(Dynamic::UNIT);
