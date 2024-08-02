@@ -11,7 +11,7 @@ use std::any::{type_name, TypeId};
 use std::prelude::v1::*;
 
 #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
-use crate::func::register::Mut;
+use crate::func::register::{Mut, Ref};
 
 impl Engine {
     /// Get a mutable reference to the global namespace module
@@ -74,7 +74,6 @@ impl Engine {
         func: impl RhaiNativeFunc<A, N, X, R, F> + SendSync + 'static,
     ) -> &mut Self {
         FuncRegistration::new(name.into()).register_into_engine(self, func);
-
         self
     }
     /// Register a function of the [`Engine`].
@@ -279,7 +278,7 @@ impl Engine {
     ///         Self { field: 1 }
     ///     }
     ///     // Even a getter must start with `&mut self` and not `&self`.
-    ///     fn get_field(&mut self) -> i64  {
+    ///     fn get_field(&self) -> i64  {
     ///         self.field
     ///     }
     /// }
@@ -305,7 +304,7 @@ impl Engine {
     pub fn register_get<T: Variant + Clone, const X: bool, R: Variant + Clone, const F: bool>(
         &mut self,
         name: impl AsRef<str>,
-        get_fn: impl RhaiNativeFunc<(Mut<T>,), 1, X, R, F> + SendSync + 'static,
+        get_fn: impl RhaiNativeFunc<(Ref<T>,), 1, X, R, F> + SendSync + 'static,
     ) -> &mut Self {
         self.register_fn(crate::engine::make_getter(name.as_ref()), get_fn)
     }
@@ -380,7 +379,7 @@ impl Engine {
     ///         Self { field: 1 }
     ///     }
     ///     // Even a getter must start with `&mut self` and not `&self`.
-    ///     fn get_field(&mut self) -> i64 {
+    ///     fn get_field(&self) -> i64 {
     ///         self.field
     ///     }
     ///     fn set_field(&mut self, new_val: i64) {
@@ -417,7 +416,7 @@ impl Engine {
     >(
         &mut self,
         name: impl AsRef<str>,
-        get_fn: impl RhaiNativeFunc<(Mut<T>,), 1, X1, R, F1> + SendSync + 'static,
+        get_fn: impl RhaiNativeFunc<(Ref<T>,), 1, X1, R, F1> + SendSync + 'static,
         set_fn: impl RhaiNativeFunc<(Mut<T>, R), 2, X2, (), F2> + SendSync + 'static,
     ) -> &mut Self {
         self.register_get(&name, get_fn).register_set(&name, set_fn)
