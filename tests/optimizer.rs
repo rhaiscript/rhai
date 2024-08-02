@@ -1,5 +1,5 @@
 #![cfg(not(feature = "no_optimize"))]
-use rhai::{Engine, FuncRegistration, Module, OptimizationLevel, Scope, INT};
+use rhai::{Engine, FuncRegistration, OptimizationLevel, Scope, INT};
 
 #[test]
 fn test_optimizer() {
@@ -61,6 +61,8 @@ fn test_optimizer_run() {
 #[cfg(not(feature = "no_position"))]
 #[test]
 fn test_optimizer_parse() {
+    use rhai::Module;
+
     let mut engine = Engine::new();
 
     engine.set_optimization_level(OptimizationLevel::Simple);
