@@ -156,7 +156,8 @@ codegen-units = 1
 #panic = 'abort'     # remove stack backtrace for no-std
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-web-time = { version = "1.1.0" }# WASM implementation of std::time::Instant
+[target.'cfg(not(feature = "no_time"))'.dependencies]
+web-time = { version = "1.1.0" ,optional = true}# WASM implementation of std::time::Instant
 
 [package.metadata.docs.rs]
 features = ["document-features", "metadata", "serde", "internals", "decimal", "debugging"]
