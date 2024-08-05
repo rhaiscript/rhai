@@ -11,7 +11,7 @@ use crate::FLOAT;
 use std::time::{Duration, Instant};
 
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-use instant::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 def_package! {
     /// Package of basic timing utilities.
