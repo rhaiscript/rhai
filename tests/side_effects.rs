@@ -45,7 +45,7 @@ fn test_side_effects_command() {
         let val = command.get();
         command.action(val + x);
     });
-    engine.register_get("value", |command: &mut API| command.lock().unwrap().get());
+    engine.register_get("value", |command: &API| command.lock().unwrap().get());
 
     assert_eq!(
         engine
