@@ -72,7 +72,7 @@ bin-features = ["decimal", "metadata", "serde", "debugging", "rustyline"]
 ## Enable fuzzing via the [`arbitrary`](https://crates.io/crates/arbitrary) crate.
 fuzz = ["arbitrary", "rust_decimal/rust-fuzz", "serde"]
 ## Enable serialization/deserialization of AST.
-ast_serde = ["serde","bitflags/serde"]
+ast-serde = ["internals","serde","bitflags/serde"]
 
 #! ### System Configuration Features
 
