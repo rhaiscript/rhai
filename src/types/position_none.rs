@@ -11,6 +11,7 @@ use std::{
 
 /// A location (line number + character position) in the input script.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Default)]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Position;
 
 impl Position {
@@ -107,6 +108,7 @@ impl AddAssign for Position {
 /// _(internals)_ A span consisting of a starting and an ending [positions][Position].
 /// Exported under the `internals` feature only.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Default)]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Span;
 
 impl Span {
