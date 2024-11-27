@@ -14,7 +14,7 @@ use std::prelude::v1::*;
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 #[non_exhaustive]
 #[must_use]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LexError {
     /// An unexpected symbol is encountered.
     UnexpectedInput(String),

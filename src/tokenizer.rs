@@ -60,7 +60,7 @@ pub type TokenStream<'a> = Peekable<TokenIterator<'a>>;
 /// Exported under the `internals` feature only.
 #[derive(Debug, PartialEq, Clone, Hash)]
 #[non_exhaustive]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Token {
     /// An `INT` constant.
     IntegerConstant(INT),

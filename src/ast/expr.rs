@@ -23,7 +23,7 @@ use std::{
 /// _(internals)_ A binary expression.
 /// Exported under the `internals` feature only.
 #[derive(Debug, Clone, Hash, Default)]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BinaryExpr {
     /// LHS expression.
     pub lhs: Expr,
@@ -37,7 +37,7 @@ pub struct BinaryExpr {
 /// Not available under `no_custom_syntax`.
 #[cfg(not(feature = "no_custom_syntax"))]
 #[derive(Debug, Clone, Hash)]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CustomExpr {
     /// List of keywords.
     pub inputs: FnArgsVec<Expr>,
@@ -92,7 +92,7 @@ impl CustomExpr {
 ///   name plus the types of the arguments.  This is due to possible function overloading for
 ///   different parameter types.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FnCallHashes {
     /// Pre-calculated hash for a script-defined function ([`None`] if native functions only).
     #[cfg(not(feature = "no_function"))]
@@ -185,7 +185,7 @@ impl FnCallHashes {
 /// _(internals)_ A function call.
 /// Exported under the `internals` feature only.
 #[derive(Clone, Hash)]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FnCallExpr {
     /// Namespace of the function, if any.
     #[cfg(not(feature = "no_module"))]
@@ -259,7 +259,7 @@ impl FnCallExpr {
 #[derive(Clone, Hash)]
 #[non_exhaustive]
 #[allow(clippy::type_complexity)]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Expr {
     /// Dynamic constant.
     ///

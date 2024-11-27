@@ -40,7 +40,7 @@ pub struct OpAssignment {
     pos: Position,
 }
 
-#[cfg(feature = "ast_serde")]
+#[cfg(feature = "ast-serde")]
 impl serde::Serialize for OpAssignment {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -54,10 +54,10 @@ impl serde::Serialize for OpAssignment {
     } 
 }
 
-#[cfg(feature = "ast_serde")]
+#[cfg(feature = "ast-serde")]
 struct OpAssignmentVisitor;
 
-#[cfg(feature = "ast_serde")]
+#[cfg(feature = "ast-serde")]
 impl<'de> serde::de::Visitor<'de> for OpAssignmentVisitor {
     type Value = OpAssignment;
     #[inline(always)]
@@ -117,7 +117,7 @@ impl<'de> serde::de::Visitor<'de> for OpAssignmentVisitor {
     }
 }
 
-#[cfg(feature = "ast_serde")]
+#[cfg(feature = "ast-serde")]
 impl<'de> serde::Deserialize<'de> for OpAssignment {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -269,7 +269,7 @@ impl fmt::Debug for OpAssignment {
 /// _(internals)_ A type containing a range case for a `switch` statement.
 /// Exported under the `internals` feature only.
 #[derive(Clone, Hash)]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RangeCase {
     /// Exclusive range.
     ExclusiveInt(Range<INT>, usize),
@@ -418,7 +418,7 @@ pub type CaseBlocksList = smallvec::SmallVec<[usize; 2]>;
 /// _(internals)_ A type containing all cases for a `switch` statement.
 /// Exported under the `internals` feature only.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SwitchCasesCollection {
     /// List of conditional expressions: LHS = condition, RHS = expression.
     pub expressions: FnArgsVec<BinaryExpr>,
@@ -464,7 +464,7 @@ pub type StmtBlockContainer = crate::StaticVec<Stmt>;
 /// _(internals)_ A scoped block of statements.
 /// Exported under the `internals` feature only.
 #[derive(Clone, Hash, Default)]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StmtBlock {
     /// List of [statements][Stmt].
     block: StmtBlockContainer,
@@ -663,7 +663,7 @@ impl Extend<Stmt> for StmtBlock {
 ///
 /// Exported under the `internals` feature only.
 #[derive(Debug, Clone, Hash)]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FlowControl {
     /// Flow control expression.
     pub expr: Expr,
@@ -678,7 +678,7 @@ pub struct FlowControl {
 #[derive(Debug, Clone, Hash)]
 #[non_exhaustive]
 #[allow(clippy::type_complexity)]
-#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ast-serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Stmt {
     /// No-op.
     Noop(Position),
