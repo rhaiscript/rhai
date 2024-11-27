@@ -17,6 +17,7 @@ use num_traits::float::FloatCore as Float;
 /// Not available under `no_float`.
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
 #[must_use]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize),serde(transparent))]
 pub struct FloatWrapper<F>(F);
 
 impl Hash for FloatWrapper<crate::FLOAT> {

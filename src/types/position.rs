@@ -17,6 +17,7 @@ use std::{
 ///
 /// Advancing beyond the maximum line length or maximum number of lines is not an error but has no effect.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Position {
     /// Line number: 0 = none
     line: u16,
@@ -192,6 +193,7 @@ impl AddAssign for Position {
 /// _(internals)_ A span consisting of a starting and an ending [positions][Position].
 /// Exported under the `internals` feature only.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Span {
     /// Starting [position][Position].
     start: Position,

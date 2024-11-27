@@ -40,6 +40,93 @@ pub struct OpAssignment {
     pos: Position,
 }
 
+#[cfg(feature = "ast_serde")]
+impl serde::Serialize for OpAssignment {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("OpAssignment", 2)?;
+        state.serialize_field("op_assign", &self.op_assign)?;
+        state.serialize_field("position", &self.pos)?;
+        state.end()
+    } 
+}
+
+#[cfg(feature = "ast_serde")]
+struct OpAssignmentVisitor;
+
+#[cfg(feature = "ast_serde")]
+impl<'de> serde::de::Visitor<'de> for OpAssignmentVisitor {
+    type Value = OpAssignment;
+    #[inline(always)]
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("OpAssignment")
+    }
+    fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error> 
+    where
+        V: serde::de::SeqAccess<'de>
+    {
+        let op_assign = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+        let position = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+        match &op_assign {
+            Token::Equals => {// Workaround for "="
+                return Ok(Self::Value::new_assignment(position));
+            }
+            _=>{
+                return Ok(Self::Value::new_op_assignment_from_token(op_assign,position));
+            }
+        }
+    }
+    fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
+        where
+            V: serde::de::MapAccess<'de>
+    {
+        let mut op_assign = None;
+        let mut position = None;
+        while let Some(key) = map.next_key()? {
+            match key {
+                "op_assign" => {
+                    if op_assign.is_some() {
+                        return Err(serde::de::Error::duplicate_field("op_assign"));
+                    }
+                    op_assign = Some(map.next_value()?);
+                }
+                "position" => {
+                    if position.is_some() {
+                        return Err(serde::de::Error::duplicate_field("position"));
+                    }
+                    position = Some(map.next_value()?);
+                }
+                _=>{
+                    return Err(serde::de::Error::unknown_field(key,&["op_assign","position"]));
+                }
+            }
+        }
+        let op_assign = op_assign.ok_or_else(|| serde::de::Error::missing_field("op_assign"))?;
+        let position = position.ok_or_else(|| serde::de::Error::missing_field("position"))?;
+        match &op_assign {
+            Token::Equals => {// Workaround for "="
+                return Ok(Self::Value::new_assignment(position));
+            }
+            _=>{
+                return Ok(Self::Value::new_op_assignment_from_token(op_assign,position));
+            }
+        }
+    }
+}
+
+#[cfg(feature = "ast_serde")]
+impl<'de> serde::Deserialize<'de> for OpAssignment {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>
+    {
+        deserializer.deserialize_struct("OpAssignment", &["op_assign","position"], OpAssignmentVisitor)
+    }
+}
+
 impl OpAssignment {
     /// Create a new [`OpAssignment`] that is only a straight assignment.
     #[must_use]
@@ -182,6 +269,7 @@ impl fmt::Debug for OpAssignment {
 /// _(internals)_ A type containing a range case for a `switch` statement.
 /// Exported under the `internals` feature only.
 #[derive(Clone, Hash)]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RangeCase {
     /// Exclusive range.
     ExclusiveInt(Range<INT>, usize),
@@ -330,6 +418,7 @@ pub type CaseBlocksList = smallvec::SmallVec<[usize; 2]>;
 /// _(internals)_ A type containing all cases for a `switch` statement.
 /// Exported under the `internals` feature only.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SwitchCasesCollection {
     /// List of conditional expressions: LHS = condition, RHS = expression.
     pub expressions: FnArgsVec<BinaryExpr>,
@@ -375,6 +464,7 @@ pub type StmtBlockContainer = crate::StaticVec<Stmt>;
 /// _(internals)_ A scoped block of statements.
 /// Exported under the `internals` feature only.
 #[derive(Clone, Hash, Default)]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StmtBlock {
     /// List of [statements][Stmt].
     block: StmtBlockContainer,
@@ -573,6 +663,7 @@ impl Extend<Stmt> for StmtBlock {
 ///
 /// Exported under the `internals` feature only.
 #[derive(Debug, Clone, Hash)]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FlowControl {
     /// Flow control expression.
     pub expr: Expr,
@@ -587,6 +678,7 @@ pub struct FlowControl {
 #[derive(Debug, Clone, Hash)]
 #[non_exhaustive]
 #[allow(clippy::type_complexity)]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Stmt {
     /// No-op.
     Noop(Position),

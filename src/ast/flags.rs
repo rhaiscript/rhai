@@ -44,6 +44,7 @@ bitflags! {
     /// _(internals)_ Bit-flags containing [`AST`][crate::AST] node configuration options.
     /// Exported under the `internals` feature only.
     #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+    #[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize),serde(transparent))]
     pub struct ASTFlags: u8 {
         /// The [`AST`][crate::AST] node is read-only.
         const CONSTANT = 0b_0000_0001;

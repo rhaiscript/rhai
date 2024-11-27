@@ -19,6 +19,7 @@ use std::{fmt, num::NonZeroUsize};
 /// one level, and it is wasteful to always allocate a [`Vec`] with one element.
 #[derive(Clone, Eq, PartialEq, Default, Hash)]
 #[non_exhaustive]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Namespace {
     /// Path segments.
     pub path: StaticVec<Ident>,

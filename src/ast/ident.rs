@@ -8,6 +8,7 @@ use std::{borrow::Borrow, fmt, hash::Hash};
 /// _(internals)_ An identifier containing a name and a [position][Position].
 /// Exported under the `internals` feature only.
 #[derive(Clone, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "ast_serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Ident {
     /// Identifier name.
     pub name: ImmutableString,
