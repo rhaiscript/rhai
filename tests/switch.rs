@@ -146,7 +146,7 @@ mod test_switch_enum {
     }
 
     impl MyEnum {
-        fn get_enum_data(&mut self) -> Array {
+        fn get_enum_data(&self) -> Array {
             match self {
                 Self::Foo => vec!["Foo".into()] as Array,
                 Self::Bar(num) => vec!["Bar".into(), (*num).into()] as Array,

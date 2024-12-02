@@ -75,10 +75,10 @@ fn test_expressions_eval() {
     }
 
     impl AGENT {
-        pub fn get_gender(&mut self) -> String {
+        pub fn get_gender(&self) -> String {
             self.gender.clone()
         }
-        pub fn get_age(&mut self) -> INT {
+        pub fn get_age(&self) -> INT {
             self.age
         }
     }

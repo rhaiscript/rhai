@@ -12,7 +12,7 @@ use std::any::TypeId;
 use std::prelude::v1::*;
 
 #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
-use crate::func::register::Mut;
+use crate::func::register::{Mut, Ref};
 
 #[cfg(not(feature = "no_std"))]
 #[cfg(any(not(target_family = "wasm"), not(target_os = "unknown")))]
@@ -221,7 +221,7 @@ impl Engine {
     pub fn register_get_result<T: Variant + Clone, const X: bool, R: Variant + Clone>(
         &mut self,
         name: impl AsRef<str>,
-        get_fn: impl RhaiNativeFunc<(Mut<T>,), 1, X, R, true> + SendSync + 'static,
+        get_fn: impl RhaiNativeFunc<(Ref<T>,), 1, X, R, true> + SendSync + 'static,
     ) -> &mut Self {
         self.register_get(name, get_fn)
     }
