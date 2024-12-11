@@ -1,7 +1,15 @@
 //! Evaluation context.
 
 use super::{Caches, GlobalRuntimeState};
-use crate::{expose_under_internals, Dynamic, Engine, Scope};
+use crate::{
+    ast::FnCallHashes,
+    expose_under_internals,
+    func::calc_fn_hash,
+    tokenizer::{is_valid_function_name, Token},
+    types::Variant,
+    Dynamic, Engine, FnArgsVec, FuncArgs, Position, RhaiResult, RhaiResultOf,
+    Scope, StaticVec, ERR,
+};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -32,14 +40,178 @@ impl<'a, 's, 'ps, 'g, 'c, 't> EvalContext<'a, 's, 'ps, 'g, 'c, 't> {
         scope: &'s mut Scope<'ps>,
         this_ptr: Option<&'t mut Dynamic>,
     ) -> Self {
-        Self {
-            engine,
-            global,
-            caches,
-            scope,
-            this_ptr,
+        Self { engine, global, caches, scope, this_ptr }
+    }
+
+    /// Call a function inside the call context with the provided arguments.
+    #[inline]
+    pub fn call_fn<T: Variant + Clone>(
+        &self,
+        fn_name: impl AsRef<str>,
+        args: impl FuncArgs,
+    ) -> RhaiResultOf<T> {
+        let mut arg_values = StaticVec::new_const();
+        args.parse(&mut arg_values);
+
+        let args = &mut arg_values.iter_mut().collect::<FnArgsVec<_>>();
+
+        self._call_fn_raw(fn_name, args, false, false, false).and_then(
+            |result| {
+                result.try_cast_result().map_err(|r| {
+                    let result_type =
+                        self.engine().map_type_name(r.type_name());
+                    let cast_type = match std::any::type_name::<T>() {
+                        typ if typ.contains("::") => {
+                            self.engine.map_type_name(typ)
+                        }
+                        typ => typ,
+                    };
+                    ERR::ErrorMismatchOutputType(
+                        cast_type.into(),
+                        result_type.into(),
+                        Position::NONE,
+                    )
+                    .into()
+                })
+            },
+        )
+    }
+
+    /// Call a registered native Rust function inside the call context with the provided arguments.
+    #[inline]
+    pub fn call_native_fn<T: Variant + Clone>(
+        &self,
+        fn_name: impl AsRef<str>,
+        args: impl FuncArgs,
+    ) -> RhaiResultOf<T> {
+        let mut arg_values = StaticVec::new_const();
+        args.parse(&mut arg_values);
+
+        let args = &mut arg_values.iter_mut().collect::<FnArgsVec<_>>();
+
+        self._call_fn_raw(fn_name, args, true, false, false).and_then(
+            |result| {
+                result.try_cast_result().map_err(|r| {
+                    let result_type =
+                        self.engine().map_type_name(r.type_name());
+                    let cast_type = match std::any::type_name::<T>() {
+                        typ if typ.contains("::") => {
+                            self.engine.map_type_name(typ)
+                        }
+                        typ => typ,
+                    };
+                    ERR::ErrorMismatchOutputType(
+                        cast_type.into(),
+                        result_type.into(),
+                        Position::NONE,
+                    )
+                    .into()
+                })
+            },
+        )
+    }
+
+    /// Call a function (native Rust or scripted) inside the call context.
+    #[inline(always)]
+    pub fn call_fn_raw(
+        &self,
+        fn_name: impl AsRef<str>,
+        is_ref_mut: bool,
+        is_method_call: bool,
+        args: &mut [&mut Dynamic],
+    ) -> RhaiResult {
+        let name = fn_name.as_ref();
+        let native_only = !is_valid_function_name(name);
+        #[cfg(not(feature = "no_function"))]
+        let native_only = native_only && !crate::parser::is_anonymous_fn(name);
+
+        self._call_fn_raw(
+            fn_name,
+            args,
+            native_only,
+            is_ref_mut,
+            is_method_call,
+        )
+    }
+
+    /// Call a registered native Rust function inside the call context.
+    #[inline(always)]
+    pub fn call_native_fn_raw(
+        &self,
+        fn_name: impl AsRef<str>,
+        is_ref_mut: bool,
+        args: &mut [&mut Dynamic],
+    ) -> RhaiResult {
+        self._call_fn_raw(fn_name, args, true, is_ref_mut, false)
+    }
+
+    /// To call a function native to rust or scripted.
+    fn _call_fn_raw(
+        &self,
+        fn_name: impl AsRef<str>,
+        args: &mut [&mut Dynamic],
+        native_only: bool,
+        is_ref_mut: bool,
+        is_method_call: bool,
+    ) -> RhaiResult {
+        let global = &mut self.global.clone();
+        global.level += 1;
+
+        let caches = &mut Caches::new();
+
+        let fn_name = fn_name.as_ref();
+
+        let op_token = Token::lookup_symbol_from_syntax(fn_name);
+
+        let args_len = args.len();
+
+        if native_only {
+            self.engine
+                .exec_native_fn_call(
+                    global,
+                    caches,
+                    fn_name,
+                    op_token.as_ref(),
+                    calc_fn_hash(None, fn_name, args_len),
+                    args,
+                    is_ref_mut,
+                    false,
+                    Position::NONE,
+                )
+                .map(|(r, _)| r)
+        } else {
+            let hash = match is_method_call {
+                #[cfg(not(feature = "no_function"))]
+                true => FnCallHashes::from_script_and_native(
+                    calc_fn_hash(None, fn_name, args_len - 1),
+                    calc_fn_hash(None, fn_name, args_len),
+                ),
+                #[cfg(feature = "no_function")]
+                true => FnCallHashes::from_native_only(calc_fn_hash(
+                    None, fn_name, args_len,
+                )),
+                _ => FnCallHashes::from_hash(calc_fn_hash(
+                    None, fn_name, args_len,
+                )),
+            };
+
+            self.engine()
+                .exec_fn_call(
+                    global,
+                    caches,
+                    None,
+                    fn_name,
+                    op_token.as_ref(),
+                    hash,
+                    args,
+                    is_ref_mut,
+                    is_method_call,
+                    Position::NONE,
+                )
+                .map(|(r, ..)| r)
         }
     }
+
     /// The current [`Engine`].
     #[inline(always)]
     #[must_use]
@@ -68,7 +240,9 @@ impl<'a, 's, 'ps, 'g, 'c, 't> EvalContext<'a, 's, 'ps, 'g, 'c, 't> {
     /// in reverse order (i.e. modules imported last come first).
     #[cfg(not(feature = "no_module"))]
     #[inline(always)]
-    pub fn iter_imports(&self) -> impl Iterator<Item = (&str, &crate::Module)> {
+    pub fn iter_imports(
+        &self,
+    ) -> impl Iterator<Item = (&str, &crate::Module)> {
         self.global.iter_imports()
     }
     /// Custom state kept in a [`Dynamic`].
@@ -142,7 +316,10 @@ impl<'a, 's, 'ps, 'g, 'c, 't> EvalContext<'a, 's, 'ps, 'g, 'c, 't> {
     /// This function is very low level.  It evaluates an expression from an [`AST`][crate::AST].
     #[cfg(not(feature = "no_custom_syntax"))]
     #[inline(always)]
-    pub fn eval_expression_tree(&mut self, expr: &crate::Expression) -> crate::RhaiResult {
+    pub fn eval_expression_tree(
+        &mut self,
+        expr: &crate::Expression,
+    ) -> crate::RhaiResult {
         #[allow(deprecated)]
         self.eval_expression_tree_raw(expr, true)
     }
@@ -179,9 +356,13 @@ impl<'a, 's, 'ps, 'g, 'c, 't> EvalContext<'a, 's, 'ps, 'g, 'c, 't> {
                 stmts.statements(),
                 rewind_scope,
             ),
-            _ => self
-                .engine
-                .eval_expr(self.global, self.caches, self.scope, this_ptr, expr),
+            _ => self.engine.eval_expr(
+                self.global,
+                self.caches,
+                self.scope,
+                this_ptr,
+                expr,
+            ),
         }
     }
 }
