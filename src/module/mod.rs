@@ -430,6 +430,7 @@ impl FuncRegistration {
                     .map(|ty| format!("_: {}", engine.format_param_type(ty)))
                     .collect::<crate::FnArgsVec<_>>();
 
+
                 if FUNC::return_type() != TypeId::of::<()>() {
                     param_type_names
                         .push(engine.format_param_type(FUNC::return_type_name()).into());
