@@ -11,7 +11,7 @@ fn test_get_set() {
     }
 
     impl TestStruct {
-        fn get_x(&mut self) -> INT {
+        fn get_x(&self) -> INT {
             self.x
         }
 
@@ -19,7 +19,7 @@ fn test_get_set() {
             self.x = new_x;
         }
 
-        fn get_y(&mut self) -> INT {
+        fn get_y(&self) -> INT {
             self.y
         }
 
@@ -61,7 +61,7 @@ fn test_get_set_chain_with_write_back() {
     }
 
     impl TestChild {
-        fn get_x(&mut self) -> INT {
+        fn get_x(&self) -> INT {
             self.x
         }
 
@@ -80,7 +80,7 @@ fn test_get_set_chain_with_write_back() {
     }
 
     impl TestParent {
-        fn get_child(&mut self) -> TestChild {
+        fn get_child(&self) -> TestChild {
             self.child.clone()
         }
 
@@ -128,7 +128,7 @@ fn test_get_set_op_assignment() {
     struct Num(INT);
 
     impl Num {
-        fn get(&mut self) -> INT {
+        fn get(&self) -> INT {
             self.0
         }
         fn set(&mut self, x: INT) {
@@ -163,9 +163,9 @@ fn test_get_set_chain_without_write_back() {
 
     engine
         .register_type::<Inner>()
-        .register_get_set("value", |t: &mut Inner| t.value, |_: NativeCallContext, _: &mut Inner, new: INT| panic!("Inner::value setter called with {}", new))
+        .register_get_set("value", |t: &Inner| t.value, |_: NativeCallContext, _: &mut Inner, new: INT| panic!("Inner::value setter called with {}", new))
         .register_type::<Outer>()
-        .register_get_set("inner", |_: NativeCallContext, t: &mut Outer| t.inner.clone(), |_: &mut Outer, new: Inner| panic!("Outer::inner setter called with {:?}", new));
+        .register_get_set("inner", |_: NativeCallContext, t: &Outer| t.inner.clone(), |_: &mut Outer, new: Inner| panic!("Outer::inner setter called with {:?}", new));
 
     #[cfg(not(feature = "no_index"))]
     engine.register_indexer_get_set(|t: &mut Outer, n: INT| Inner { value: t.inner.value * n }, |_: &mut Outer, n: INT, new: Inner| panic!("Outer::inner index setter called with {} and {:?}", n, new));
@@ -193,7 +193,7 @@ fn test_get_set_collection() {
         .register_iterator::<MyBag>()
         .register_fn("new_bag", MyBag::new)
         .register_fn("len", |col: &mut MyBag| col.len() as INT)
-        .register_get("len", |col: &mut MyBag| col.len() as INT)
+        .register_get("len", |col: &MyBag| col.len() as INT)
         .register_fn("clear", |col: &mut MyBag| col.clear())
         .register_fn("contains", |col: &mut MyBag, item: INT| col.contains(&item))
         .register_fn("add", |col: &mut MyBag, item: MyItem| col.insert(item))

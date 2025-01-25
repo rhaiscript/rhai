@@ -32,11 +32,102 @@ use crate::Map;
 /// Exported under the `internals` feature only.
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 #[non_exhaustive]
+#[repr(u8)]
 pub enum AccessMode {
     /// Mutable.
     ReadWrite,
     /// Immutable.
     ReadOnly,
+}
+
+pub struct SharedVariantPtr(#[cfg(feature = "dangerous")] *const dyn Variant);
+impl SharedVariantPtr {
+    fn type_id(&self) -> TypeId {
+        #[cfg(feature = "dangerous")]
+        unsafe {
+            (*self.0).type_id()
+        }
+
+        #[cfg(not(feature = "dangerous"))]
+        unimplemented!("required `feature = dangerous`")
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        #[cfg(feature = "dangerous")]
+        unsafe {
+            (*self.0).type_name()
+        }
+
+        #[cfg(not(feature = "dangerous"))]
+        unimplemented!("required `feature = dangerous`")
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        #[cfg(feature = "dangerous")]
+        unsafe {
+            (*self.0).as_any()
+        }
+
+        #[cfg(not(feature = "dangerous"))]
+        unimplemented!("required `feature = dangerous`")
+    }
+
+    fn clone(&self) -> Self {
+        #[cfg(feature = "dangerous")]
+        let _clone = SharedVariantPtr(self.0);
+        #[cfg(not(feature = "dangerous"))]
+        let _clone = unimplemented!("required `feature = dangerous`");
+        #[allow(unreachable_code)]
+        _clone
+    }
+}
+
+pub struct OwnedVariant(Box<dyn Variant>);
+impl OwnedVariant {
+    fn new(boxed: Box<dyn Variant>) -> Self {
+        OwnedVariant(boxed)
+    }
+
+    fn type_id(&self) -> TypeId {
+        (*(*self).0).type_id()
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        (*(*self).0).type_name()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        (*(*self).0).as_any()
+    }
+
+    fn as_boxed_any(self) -> Box<dyn Any> {
+        self.0.as_boxed_any()
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        (*(*self).0).as_any_mut()
+    }
+
+    fn clone(&self) -> Self {
+        OwnedVariant(self.0.clone_object())
+    }
+
+    pub fn is<T: 'static>(&self) -> bool {
+        self.0.is::<T>()
+    }
+}
+
+#[thread_local]
+pub static DYNAMIC_GENERATION: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+
+/// dynamic scope
+pub fn dynamic_scope<R>(func: impl FnOnce() -> R) -> R {
+    let current_generation = DYNAMIC_GENERATION.load(core::sync::atomic::Ordering::Acquire);
+    let result = func();
+    if current_generation != DYNAMIC_GENERATION.fetch_add(1, core::sync::atomic::Ordering::AcqRel) {
+        panic!("nested dynnamic scopes not supproted yet");
+    }
+    result
 }
 
 /// Arbitrary data attached to a [`Dynamic`] value.
@@ -93,9 +184,12 @@ pub enum Union {
 
     /// Any type as a trait object.
     ///
+    /// We needed to support both variants shared and owned
+    ///
     /// An extra level of redirection is used in order to avoid bloating the size of [`Dynamic`]
     /// because `Box<dyn Variant>` is a fat pointer.
-    Variant(Box<Box<dyn Variant>>, Tag, AccessMode),
+    Variant(OwnedVariant, Tag, AccessMode),
+    SharedVariant(SharedVariantPtr, Tag, AccessMode, u16),
 
     /// A _shared_ value of any type.
     #[cfg(not(feature = "no_closure"))]
@@ -192,7 +286,8 @@ impl Dynamic {
             | Union::Char(_, tag, _)
             | Union::Int(_, tag, _)
             | Union::FnPtr(_, tag, _)
-            | Union::Variant(_, tag, _) => tag,
+            | Union::Variant(_, tag, _)
+            | Union::SharedVariant(_, tag, _, _) => tag,
 
             #[cfg(not(feature = "no_float"))]
             Union::Float(_, tag, _) => tag,
@@ -217,7 +312,8 @@ impl Dynamic {
             | Union::Char(_, ref mut tag, _)
             | Union::Int(_, ref mut tag, _)
             | Union::FnPtr(_, ref mut tag, _)
-            | Union::Variant(_, ref mut tag, _) => *tag = value,
+            | Union::Variant(_, ref mut tag, _)
+            | Union::SharedVariant(_, ref mut tag, _, _) => *tag = value,
 
             #[cfg(not(feature = "no_float"))]
             Union::Float(_, ref mut tag, _) => *tag = value,
@@ -239,7 +335,7 @@ impl Dynamic {
     #[inline(always)]
     #[must_use]
     pub const fn is_variant(&self) -> bool {
-        matches!(self.0, Union::Variant(..))
+        matches!(self.0, Union::Variant(..)) || matches!(self.0, Union::SharedVariant(..))
     }
     /// Is the value held by this [`Dynamic`] shared?
     ///
@@ -339,7 +435,8 @@ impl Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => TypeId::of::<Instant>(),
 
-            Union::Variant(ref v, ..) => (***v).type_id(),
+            Union::SharedVariant(ref v, ..) => v.type_id(),
+            Union::Variant(ref v, ..) => v.type_id(),
 
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(ref cell, ..) => (*crate::func::locked_read(cell).unwrap()).type_id(),
@@ -373,7 +470,8 @@ impl Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => "timestamp",
 
-            Union::Variant(ref v, ..) => (***v).type_name(),
+            Union::SharedVariant(ref v, ..) => v.type_name(),
+            Union::Variant(ref v, ..) => v.type_name(),
 
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(ref cell, ..) => (*crate::func::locked_read(cell).unwrap()).type_name(),
@@ -418,8 +516,12 @@ impl Hash for Dynamic {
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(ref cell, ..) => (*crate::func::locked_read(cell).unwrap()).hash(state),
 
-            Union::Variant(ref v, ..) => {
-                let _value_any = (***v).as_any();
+            Union::Variant(..) | Union::SharedVariant(..) => {
+                let _value_any = match self.0 {
+                    Union::Variant(ref v, ..) => v.as_any(),
+                    Union::SharedVariant(ref v, ..) => v.as_any(),
+                    _ => unimplemented!("unknown type"),
+                };
 
                 #[cfg(not(feature = "only_i32"))]
                 #[cfg(not(feature = "only_i64"))]
@@ -498,8 +600,12 @@ impl fmt::Display for Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => f.write_str("<timestamp>"),
 
-            Union::Variant(ref v, ..) => {
-                let _value_any = (***v).as_any();
+            Union::Variant(..) | Union::SharedVariant(..) => {
+                let (_value_any, _type_name) = match self.0 {
+                    Union::Variant(ref v, ..) => (v.as_any(), v.type_name()),
+                    Union::SharedVariant(ref v, ..) => (v.as_any(), v.type_name()),
+                    _ => unimplemented!("unknown type"),
+                };
                 let _type_id = _value_any.type_id();
 
                 #[cfg(not(feature = "only_i32"))]
@@ -556,7 +662,7 @@ impl fmt::Display for Dynamic {
                     };
                 }
 
-                f.write_str((***v).type_name())
+                f.write_str(_type_name)
             }
 
             #[cfg(not(feature = "no_closure"))]
@@ -666,8 +772,12 @@ impl fmt::Debug for Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => write!(f, "<timestamp>"),
 
-            Union::Variant(ref v, ..) => {
-                let _value_any = (***v).as_any();
+            Union::SharedVariant(..) | Union::Variant(..) => {
+                let (_value_any, _type_name) = match self.0 {
+                    Union::Variant(ref v, ..) => (v.as_any(), v.type_name()),
+                    Union::SharedVariant(ref v, ..) => (v.as_any(), v.type_name()),
+                    _ => unimplemented!("unknown type"),
+                };
                 let _type_id = _value_any.type_id();
 
                 #[cfg(not(feature = "only_i32"))]
@@ -724,7 +834,7 @@ impl fmt::Debug for Dynamic {
                     };
                 }
 
-                f.write_str((***v).type_name())
+                f.write_str(_type_name)
             }
 
             #[cfg(not(feature = "no_closure"))]
@@ -839,10 +949,13 @@ impl Clone for Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(ref v, tag, ..) => Self(Union::TimeStamp(v.clone(), tag, ReadWrite)),
 
-            Union::Variant(ref v, tag, ..) => Self(Union::Variant(
-                v.as_ref().as_ref().clone_object().into(),
+            Union::Variant(ref v, tag, ..) => Self(Union::Variant(v.clone(), tag, ReadWrite)),
+
+            Union::SharedVariant(ref v, tag, ..) => Self(Union::SharedVariant(
+                v.clone(),
                 tag,
                 ReadWrite,
+                DYNAMIC_GENERATION.load(core::sync::atomic::Ordering::Relaxed),
             )),
 
             #[cfg(not(feature = "no_closure"))]
@@ -1085,6 +1198,7 @@ impl Dynamic {
             | Union::Char(.., access)
             | Union::Int(.., access)
             | Union::FnPtr(.., access)
+            | Union::SharedVariant(.., access, _)
             | Union::Variant(.., access) => access,
 
             #[cfg(not(feature = "no_float"))]
@@ -1110,6 +1224,7 @@ impl Dynamic {
             | Union::Char(.., ref mut access)
             | Union::Int(.., ref mut access)
             | Union::FnPtr(.., ref mut access)
+            | Union::SharedVariant(.., ref mut access, _)
             | Union::Variant(.., ref mut access) => *access = typ,
 
             #[cfg(not(feature = "no_float"))]
@@ -1223,8 +1338,12 @@ impl Dynamic {
             #[cfg(not(feature = "no_time"))]
             Union::TimeStamp(..) => false,
 
-            Union::Variant(ref v, ..) => {
-                let _value_any = (***v).as_any();
+            Union::SharedVariant(..) | Union::Variant(..) => {
+                let _value_any = match self.0 {
+                    Union::Variant(ref v, ..) => v.as_any(),
+                    Union::SharedVariant(ref v, ..) => v.as_any(),
+                    _ => unimplemented!("unknown type"),
+                };
                 let _type_id = _value_any.type_id();
 
                 #[cfg(not(feature = "only_i32"))]
@@ -1305,6 +1424,18 @@ impl Dynamic {
             }
         }
     }
+
+    ///
+    #[cfg(feature = "dangerous")]
+    pub unsafe fn from_ref<T: Variant + Clone + 'static>(value: &T) -> Self {
+        Self(Union::SharedVariant(
+            SharedVariantPtr(value as &dyn Variant as *const dyn Variant),
+            0,
+            ReadOnly,
+            DYNAMIC_GENERATION.load(core::sync::atomic::Ordering::Relaxed) as u16,
+        ))
+    }
+
     /// Create a [`Dynamic`] from any type.  A [`Dynamic`] value is simply returned as is.
     ///
     /// # Arrays
@@ -1404,7 +1535,7 @@ impl Dynamic {
         reify! { value => |v: crate::Shared<crate::Locked<Self>>| return v.into() }
 
         Self(Union::Variant(
-            Box::new(Box::new(value)),
+            OwnedVariant::new(Box::new(value)),
             DEFAULT_TAG_VALUE,
             ReadWrite,
         ))
@@ -1593,8 +1724,8 @@ impl Dynamic {
         }
 
         match self.0 {
-            Union::Variant(v, ..) if TypeId::of::<T>() == (**v).type_id() => {
-                Ok((*v).as_boxed_any().downcast().map(|x| *x).unwrap())
+            Union::Variant(v, ..) if TypeId::of::<T>() == v.type_id() => {
+                Ok(v.as_boxed_any().downcast().map(|x| *x).unwrap())
             }
             _ => Err(self),
         }
@@ -1942,8 +2073,12 @@ impl Dynamic {
         }
 
         match self.0 {
-            Union::Variant(ref v, ..) => (***v).as_any().downcast_ref::<T>(),
+            Union::Variant(ref v, ..) => v.as_any().downcast_ref::<T>(),
             #[cfg(not(feature = "no_closure"))]
+            Union::SharedVariant(ref v, .., generation) => (generation
+                == DYNAMIC_GENERATION.load(core::sync::atomic::Ordering::Relaxed))
+            .then(|| v.as_any().downcast_ref::<T>())
+            .flatten(),
             Union::Shared(..) => None,
             _ => None,
         }
@@ -2045,7 +2180,7 @@ impl Dynamic {
         }
 
         match self.0 {
-            Union::Variant(ref mut v, ..) => (***v).as_any_mut().downcast_mut::<T>(),
+            Union::Variant(ref mut v, ..) => v.as_any_mut().downcast_mut::<T>(),
             #[cfg(not(feature = "no_closure"))]
             Union::Shared(..) => None,
             _ => None,

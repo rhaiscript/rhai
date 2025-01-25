@@ -22,7 +22,7 @@ fn check_struct_sizes() {
         } else if IS_32_BIT {
             12
         } else {
-            16
+            24
         }
     );
     assert_eq!(
@@ -32,7 +32,7 @@ fn check_struct_sizes() {
         } else if IS_32_BIT {
             12
         } else {
-            16
+            24
         }
     );
     assert_eq!(

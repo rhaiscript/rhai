@@ -8,7 +8,7 @@
 use super::call::FnCallArgs;
 use super::function::RhaiFunc;
 use super::native::{SendSync, Shared};
-use crate::types::dynamic::{DynamicWriteLock, Union, Variant};
+use crate::types::dynamic::{DynamicReadLock, DynamicWriteLock, Union, Variant};
 use crate::{Dynamic, Identifier, NativeCallContext, RhaiResultOf};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -35,13 +35,19 @@ use std::{
 ///
 /// These types are not actually used anywhere.
 pub struct Mut<T>(T);
-//pub struct Ref<T>(T);
+pub struct Ref<T>(T);
 
 /// Dereference into [`DynamicWriteLock`]
 #[inline(always)]
 pub fn by_ref<T: Variant + Clone>(data: &mut Dynamic) -> DynamicWriteLock<T> {
     // Directly cast the &mut Dynamic into DynamicWriteLock to access the underlying data.
     data.write_lock::<T>().unwrap()
+}
+
+#[inline(always)]
+pub fn by_ref_read<T: Variant + Clone>(data: &mut Dynamic) -> DynamicReadLock<T> {
+    // Directly cast the &mut Dynamic into DynamicWriteLock to access the underlying data.
+    data.read_lock::<T>().unwrap()
 }
 
 /// Dereference into value.
@@ -145,7 +151,7 @@ macro_rules! def_register {
             #[inline(always)] fn param_types() -> [TypeId;$n] { [$(TypeId::of::<$par>()),*] }
             #[cfg(feature = "metadata")] #[inline(always)] fn param_names() -> [&'static str;$n] { [$(type_name::<$param>()),*] }
             #[inline(always)] fn into_rhai_function(self, is_pure: bool, is_volatile: bool) -> RhaiFunc {
-                RhaiFunc::$abi { func: Shared::new(move |_, args: &mut FnCallArgs| {
+                RhaiFunc::$abi { func: Shared::new(move |ctx: _, args: &mut FnCallArgs| {
                     // The arguments are assumed to be of the correct number and types!
                     let mut drain = args.iter_mut();
                     $(let mut $par = $clone(drain.next().unwrap()); )*
@@ -173,6 +179,7 @@ macro_rules! def_register {
                     // The arguments are assumed to be of the correct number and types!
                     let mut drain = args.iter_mut();
                     $(let mut $par = $clone(drain.next().unwrap()); )*
+
 
                     // Call the function with each argument value
                     let r = self(ctx, $($arg),*);
@@ -230,6 +237,7 @@ macro_rules! def_register {
     ($p0:ident:$n0:expr $(, $p:ident: $n:expr)*) => {
         def_register!(imp Pure   : $n0 ; $p0 => $p0      => $p0      => $p0      => by_value $(, $p => $p => $p => $p => by_value)*);
         def_register!(imp Method : $n0 ; $p0 => &mut $p0 => Mut<$p0> => &mut $p0 => by_ref   $(, $p => $p => $p => $p => by_value)*);
+        def_register!(imp Method : $n0 ; $p0 => & $p0 => Ref<$p0> => & $p0 => by_ref_read   $(, $p => $p => $p => $p => by_value)*);
         //                ^ RhaiFunc constructor
         //                         ^ number of arguments                            ^ first parameter passed through
         //                                                                                       ^ others passed by value (by_value)
