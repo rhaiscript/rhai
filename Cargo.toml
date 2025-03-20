@@ -158,7 +158,6 @@ codegen-units = 1
 instant = { version = "0.1.10", optional = true } # WASM implementation of std::time::Instant
 getrandom = { version = "0.2.7", features = ["js"] }
 
-
 [package.metadata.docs.rs]
 features = ["document-features", "metadata", "serde", "internals", "decimal", "debugging"]
 
