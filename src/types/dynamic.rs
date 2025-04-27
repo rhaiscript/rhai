@@ -2872,6 +2872,16 @@ impl Dynamic {
     }
 }
 
+impl From<Option<i64>> for Dynamic {
+    #[inline(always)]
+    fn from(value: Option<i64>) -> Self {
+        if let Some(value) = value {
+            Self::from_int(value)
+        } else {
+            Self::UNIT
+        }
+    }
+}
 impl From<()> for Dynamic {
     #[inline(always)]
     fn from(value: ()) -> Self {
