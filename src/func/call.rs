@@ -397,7 +397,7 @@ impl Engine {
             // Run external function
             let context = func
                 .has_context()
-                .then(|| (self, name, source.as_deref(), &*global, pos).into());
+                .then(|| (self, name, global.source(), &*global, pos).into());
 
             let mut _result = match func {
                 // If function is not pure, there must be at least one argument
