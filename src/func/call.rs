@@ -355,7 +355,7 @@ impl Engine {
         let a = Some(&mut *args);
         let func = self.resolve_fn(global, caches, local_entry, op_token, hash, a, true);
 
-        if let Some(FnResolutionCacheEntry { func, source }) = func {
+        if let Some(FnResolutionCacheEntry { func, source: _ }) = func {
             debug_assert!(func.is_native());
 
             if non_volatile_only && func.is_volatile() {
