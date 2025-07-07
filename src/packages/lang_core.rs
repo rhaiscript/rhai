@@ -179,10 +179,7 @@ mod core_functions {
         let out = serde_json::from_str(json).map_err(|err| err.to_string().into());
 
         #[cfg(not(feature = "metadata"))]
-        let out = _ctx
-            .engine()
-            .parse_json(json, true)
-            .map(|map_object| Dynamic::from(map_object));
+        let out = _ctx.engine().parse_json(json, true).map(Dynamic::from);
 
         out
     }
@@ -214,7 +211,7 @@ mod reflection_functions {
                  script,
              }|
              -> Option<Dynamic> {
-                let Some(ref func) = script else { return None };
+                let func = script.as_ref()?;
 
                 if !filter(
                     metadata.namespace,

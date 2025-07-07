@@ -29,7 +29,7 @@ impl Foo {
     }
 
     fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder.with_fn("new_foo", || Self::default());
+        builder.with_fn("new_foo", Self::default);
     }
 }
 

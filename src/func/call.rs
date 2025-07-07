@@ -750,7 +750,7 @@ impl Engine {
                         defer! { let orig_level = global.level; global.level += 1 }
 
                         self.call_script_fn(
-                            global, caches, scope, None, env, &*fn_def, &mut args, true, pos,
+                            global, caches, scope, None, env, fn_def, &mut args, true, pos,
                         )
                         .map(|v| (v, false))
                     }

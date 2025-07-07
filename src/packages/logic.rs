@@ -246,7 +246,7 @@ mod f32_functions {
             if max == 0.0 {
                 return true;
             }
-            return (x - y).abs() / max <= f32::EPSILON;
+            (x - y).abs() / max <= f32::EPSILON
         }
     }
     #[rhai_fn(name = "==")]
@@ -265,7 +265,7 @@ mod f32_functions {
             if max == 0.0 {
                 return true;
             }
-            return (x - y).abs() / max <= f32::EPSILON;
+            (x - y).abs() / max <= f32::EPSILON
         }
     }
     #[rhai_fn(name = "!=")]
@@ -284,7 +284,7 @@ mod f32_functions {
             if max == 0.0 {
                 return false;
             }
-            return (x - y).abs() / max > f32::EPSILON;
+            (x - y).abs() / max > f32::EPSILON
         }
     }
     #[rhai_fn(name = "!=")]
@@ -303,7 +303,7 @@ mod f32_functions {
             if max == 0.0 {
                 return false;
             }
-            return (x - y).abs() / max > f32::EPSILON;
+            (x - y).abs() / max > f32::EPSILON
         }
     }
     #[rhai_fn(name = ">")]
@@ -322,7 +322,7 @@ mod f32_functions {
             if max == 0.0 {
                 return false;
             }
-            return (x - y) / max > f32::EPSILON;
+            (x - y) / max > f32::EPSILON
         }
     }
     #[rhai_fn(name = ">")]
@@ -341,7 +341,7 @@ mod f32_functions {
             if max == 0.0 {
                 return false;
             }
-            return (x - y) / max > f32::EPSILON;
+            (x - y) / max > f32::EPSILON
         }
     }
     #[rhai_fn(name = ">=")]
@@ -360,7 +360,7 @@ mod f32_functions {
             if max == 0.0 {
                 return true;
             }
-            return (x - y) / max > -f32::EPSILON;
+            (x - y) / max > -f32::EPSILON
         }
     }
     #[rhai_fn(name = ">=")]
@@ -379,7 +379,7 @@ mod f32_functions {
             if max == 0.0 {
                 return true;
             }
-            return (x - y) / max > -f32::EPSILON;
+            (x - y) / max > -f32::EPSILON
         }
     }
     #[rhai_fn(name = "<")]
@@ -398,7 +398,7 @@ mod f32_functions {
             if max == 0.0 {
                 return false;
             }
-            return (y - x) / max > f32::EPSILON;
+            (y - x) / max > f32::EPSILON
         }
     }
     #[rhai_fn(name = "<")]
@@ -417,7 +417,7 @@ mod f32_functions {
             if max == 0.0 {
                 return false;
             }
-            return (y - x) / max > f32::EPSILON;
+            (y - x) / max > f32::EPSILON
         }
     }
     #[rhai_fn(name = "<=")]
@@ -436,7 +436,7 @@ mod f32_functions {
             if max == 0.0 {
                 return true;
             }
-            return (y - x) / max > -f32::EPSILON;
+            (y - x) / max > -f32::EPSILON
         }
     }
     #[rhai_fn(name = "<=")]
@@ -455,7 +455,7 @@ mod f32_functions {
             if max == 0.0 {
                 return true;
             }
-            return (y - x) / max > -f32::EPSILON;
+            (y - x) / max > -f32::EPSILON
         }
     }
 

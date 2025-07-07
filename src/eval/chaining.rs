@@ -217,8 +217,7 @@ impl Engine {
                         ERR::ErrorBitFieldBounds(crate::INT_BITS, start, idx_pos).into()
                     })?;
                     let end = super::calc_index(crate::INT_BITS, end, false, || {
-                        if end >= 0
-                            && end < crate::MAX_USIZE_INT
+                        if (0..crate::MAX_USIZE_INT).contains(&end)
                             && (end as usize) <= crate::INT_BITS
                         {
                             // Handle largest value
@@ -405,7 +404,7 @@ impl Engine {
                         let value = if start == 0 && end >= chars_count {
                             s.clone().into()
                         } else {
-                            let take = if end > start { end - start } else { 0 };
+                            let take = end.saturating_sub(start);
                             s.chars().skip(start).take(take).collect::<String>().into()
                         };
 

@@ -282,7 +282,7 @@ mod string_functions {
         }
 
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let len = len.min(MAX_USIZE_INT) as usize;
+        let len = len as usize;
         if let Some((index, _)) = string.char_indices().nth(len) {
             let copy = string.make_mut();
             copy.truncate(index);
@@ -359,7 +359,7 @@ mod string_functions {
             return ctx.engine().const_empty_string();
         }
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let len = len.min(MAX_USIZE_INT) as usize;
+        let len = len as usize;
 
         let mut chars = Vec::<char>::with_capacity(len);
 
@@ -961,7 +961,7 @@ mod string_functions {
             chars.extend(string.chars());
         }
 
-        let len = len.min(MAX_USIZE_INT) as usize;
+        let len = len as usize;
 
         let len = if offset + len > chars.len() {
             chars.len() - offset
@@ -1113,7 +1113,7 @@ mod string_functions {
             chars.extend(string.chars());
         }
 
-        let len = len.min(MAX_USIZE_INT) as usize;
+        let len = len as usize;
 
         let len = if offset + len > chars.len() {
             chars.len() - offset
@@ -1279,7 +1279,7 @@ mod string_functions {
             return Ok(());
         }
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let len = len.min(MAX_USIZE_INT) as usize;
+        let len = len as usize;
         let _ctx = ctx;
 
         // Check if string will be over max size limit
@@ -1343,7 +1343,7 @@ mod string_functions {
             return Ok(());
         }
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let len = len.min(MAX_USIZE_INT) as usize;
+        let len = len as usize;
         let _ctx = ctx;
 
         // Check if string will be over max size limit
@@ -1574,7 +1574,7 @@ mod string_functions {
             if segments < 1 {
                 return [string.into()].into();
             }
-            let segments = segments.min(MAX_USIZE_INT) as usize;
+            let segments = segments as usize;
             let pieces: usize = if segments < 1 { 1 } else { segments };
             string.splitn(pieces, delimiter).map(Into::into).collect()
         }
@@ -1609,7 +1609,7 @@ mod string_functions {
             if segments < 1 {
                 return [string.into()].into();
             }
-            let segments = segments.min(MAX_USIZE_INT) as usize;
+            let segments = segments as usize;
             let pieces: usize = if segments < 1 { 1 } else { segments };
             string.splitn(pieces, delimiter).map(Into::into).collect()
         }
@@ -1645,7 +1645,7 @@ mod string_functions {
             if segments < 1 {
                 return [string.into()].into();
             }
-            let segments = segments.min(MAX_USIZE_INT) as usize;
+            let segments = segments as usize;
             let pieces: usize = if segments < 1 { 1 } else { segments };
             string.rsplitn(pieces, delimiter).map(Into::into).collect()
         }
@@ -1681,7 +1681,7 @@ mod string_functions {
             if segments < 1 {
                 return [string.into()].into();
             }
-            let segments = segments.min(MAX_USIZE_INT) as usize;
+            let segments = segments as usize;
             let pieces: usize = if segments < 1 { 1 } else { segments };
             string.rsplitn(pieces, delimiter).map(Into::into).collect()
         }

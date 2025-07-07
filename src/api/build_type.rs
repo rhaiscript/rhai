@@ -196,7 +196,7 @@ impl<T: Variant + Clone> TypeBuilder<'_, T> {
 
         for &hash in &self.hashes {
             if let Some(f) = module.get_fn_metadata_mut(hash) {
-                f.comments = comments.into_iter().map(|&s| s.into()).collect();
+                f.comments = comments.iter().map(|&s| s.into()).collect();
             }
         }
 

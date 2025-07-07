@@ -194,7 +194,7 @@ impl CharsStream {
         if len <= 0 || from > MAX_USIZE_INT {
             return Self(Vec::new().into_iter());
         }
-        let len = len.min(MAX_USIZE_INT) as usize;
+        let len = len as usize;
 
         if from >= 0 {
             return Self(
@@ -209,11 +209,7 @@ impl CharsStream {
 
         let abs_from = from.unsigned_abs() as usize;
         let num_chars = string.chars().count();
-        let offset = if num_chars < abs_from {
-            0
-        } else {
-            num_chars - abs_from
-        };
+        let offset = num_chars.saturating_sub(abs_from);
         Self(
             string
                 .chars()
@@ -525,7 +521,7 @@ mod iterator_functions {
     pub fn bits_from_inclusive_range(value: INT, range: InclusiveRange) -> RhaiResultOf<BitRange> {
         let from = INT::max(*range.start(), 0);
         let to = INT::min(INT::max(*range.end(), from - 1), INT::MAX - 1);
-        return BitRange::new(value, from, to - from + 1);
+        BitRange::new(value, from, to - from + 1)
     }
     /// Return an iterator over a portion of bits in the number.
     ///

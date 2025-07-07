@@ -368,7 +368,7 @@ pub mod blob_functions {
             return Ok(());
         }
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let len = len.min(MAX_USIZE_INT) as usize;
+        let len = len as usize;
 
         #[allow(clippy::cast_sign_loss)]
         let value = (value & 0x0000_00ff) as u8;
@@ -500,7 +500,7 @@ pub mod blob_functions {
         }
 
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let len = len.min(MAX_USIZE_INT) as usize;
+        let len = len as usize;
 
         if len > 0 {
             blob.truncate(len);
