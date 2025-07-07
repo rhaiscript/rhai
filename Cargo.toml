@@ -114,6 +114,10 @@ no_optimize = []
 ## Turn on `no-std` compilation (nightly only).
 no_std = ["no-std-compat", "num-traits/libm", "core-error", "libm", "hashbrown", "no_time"]
 
+#! ### Feature flags formerly required for WASM support
+wasm-bindgen = []
+stdweb = []
+
 #! ### Features used in testing environments only
 
 ## Compiled with a non-stable compiler (i.e. beta or nightly)
