@@ -20,7 +20,7 @@ pub use std::time::Instant;
 
 #[cfg(not(feature = "no_time"))]
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-pub use instant::Instant;
+pub use web_time::Instant;
 
 #[cfg(not(feature = "no_index"))]
 use crate::{Array, Blob};
