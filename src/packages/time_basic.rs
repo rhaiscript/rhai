@@ -200,7 +200,7 @@ mod time_functions {
     #[inline]
     fn add_impl(timestamp: Instant, seconds: INT) -> RhaiResultOf<Instant> {
         if seconds < 0 {
-            subtract_inner(timestamp, seconds.unsigned_abs())
+            subtract_inner(timestamp, seconds.unsigned_abs().into())
         } else {
             #[allow(clippy::cast_sign_loss)]
             add_inner(timestamp, seconds as u64)
@@ -222,7 +222,7 @@ mod time_functions {
     #[inline]
     fn subtract_impl(timestamp: Instant, seconds: INT) -> RhaiResultOf<Instant> {
         if seconds < 0 {
-            add_inner(timestamp, seconds.unsigned_abs())
+            add_inner(timestamp, seconds.unsigned_abs().into())
         } else {
             #[allow(clippy::cast_sign_loss)]
             subtract_inner(timestamp, seconds as u64)
