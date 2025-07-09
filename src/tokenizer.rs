@@ -1255,11 +1255,7 @@ pub fn parse_raw_string_literal(
     let mut seen_hashes: Option<usize> = None;
     let mut result = SmartString::new_const();
 
-    loop {
-        let next_char = match stream.get_next() {
-            Some(ch) => ch,
-            None => break, // Allow unterminated string
-        };
+    while let Some(next_char) = stream.get_next() {
         pos.advance();
 
         match (next_char, &mut seen_hashes) {
@@ -1269,7 +1265,7 @@ pub fn parse_raw_string_literal(
             ('"', Some(count)) => {
                 // result.reserve(*count as usize+c.len());
                 result.push('"');
-                result.extend(repeat('#').take(*count as usize));
+                result.extend(repeat('#').take(*count));
                 seen_hashes = Some(0);
             }
             // Continue attempt to close string
@@ -1284,7 +1280,7 @@ pub fn parse_raw_string_literal(
             (c, Some(count)) => {
                 // result.reserve(*count as usize +1+c.len());
                 result.push('"');
-                result.extend(repeat('#').take(*count as usize));
+                result.extend(repeat('#').take(*count));
                 result.push(c);
                 seen_hashes = None;
             }
@@ -1403,7 +1399,7 @@ pub fn parse_string_literal(
         if allow_interpolation
             && next_char == '$'
             && escape.is_empty()
-            && stream.peek_next().map_or(false, |ch| ch == '{')
+            && (stream.peek_next() == Some('{'))
         {
             interpolated = true;
             state.is_within_text_terminated_by = None;
@@ -1421,7 +1417,7 @@ pub fn parse_string_literal(
         // Close wrapper
         if termination_char == next_char && escape.is_empty() {
             // Double wrapper
-            if stream.peek_next().map_or(false, |c| c == termination_char) {
+            if stream.peek_next() == Some(termination_char) {
                 stream.eat_next_and_advance(pos);
                 if let Some(ref mut last) = state.last_token {
                     last.push(termination_char);
@@ -1438,7 +1434,7 @@ pub fn parse_string_literal(
 
         match next_char {
             // \r - ignore if followed by \n
-            '\r' if stream.peek_next().map_or(false, |ch| ch == '\n') => (),
+            '\r' if stream.peek_next() == Some('\n') => (),
             // \r
             'r' if !escape.is_empty() => {
                 escape.clear();

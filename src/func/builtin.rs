@@ -849,75 +849,69 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                 _ => (),
             }
 
-            return match op {
+            match op {
                 AndAssign => impl_op!(INT &= as_int),
                 OrAssign => impl_op!(INT |= as_int),
                 XOrAssign => impl_op!(INT ^= as_int),
                 _ => None,
-            };
-        }
-
-        (Union::Bool(..), Union::Bool(..), _) => {
-            return match op {
-                AndAssign => impl_op!(bool = x && as_bool),
-                OrAssign => impl_op!(bool = x || as_bool),
-                XOrAssign => impl_op!(bool = x ^ as_bool),
-                _ => None,
             }
         }
 
+        (Union::Bool(..), Union::Bool(..), _) => match op {
+            AndAssign => impl_op!(bool = x && as_bool),
+            OrAssign => impl_op!(bool = x || as_bool),
+            XOrAssign => impl_op!(bool = x ^ as_bool),
+            _ => None,
+        },
+
         // char += char
-        (Union::Char(..), Union::Char(..), PlusAssign) => {
-            return Some((
-                |_, args| {
-                    let y = args[1].as_char().unwrap();
-                    let x = &mut *args[0].write_lock::<Dynamic>().unwrap();
+        (Union::Char(..), Union::Char(..), PlusAssign) => Some((
+            |_, args| {
+                let y = args[1].as_char().unwrap();
+                let x = &mut *args[0].write_lock::<Dynamic>().unwrap();
 
-                    let mut buf = SmartString::new_const();
-                    buf.push(x.as_char().unwrap());
-                    buf.push(y);
+                let mut buf = SmartString::new_const();
+                buf.push(x.as_char().unwrap());
+                buf.push(y);
 
-                    *x = buf.into();
+                *x = buf.into();
+
+                Ok(Dynamic::UNIT)
+            },
+            false,
+        )),
+
+        (Union::Str(..), Union::Str(..), _) => match op {
+            PlusAssign => Some((
+                |_ctx, args| {
+                    let (first, second) = args.split_first_mut().unwrap();
+                    let x = &mut *first.as_immutable_string_mut().unwrap();
+                    let y = &*second[0].as_immutable_string_ref().unwrap();
+
+                    #[cfg(not(feature = "unchecked"))]
+                    if !x.is_empty() && !y.is_empty() {
+                        let total_len = x.len() + y.len();
+                        _ctx.unwrap().engine().throw_on_size((0, 0, total_len))?;
+                    }
+
+                    *x += y;
 
                     Ok(Dynamic::UNIT)
                 },
+                CHECKED_BUILD,
+            )),
+            MinusAssign => Some((
+                |_, args| {
+                    let (first, second) = args.split_first_mut().unwrap();
+                    let x = &mut *first.as_immutable_string_mut().unwrap();
+                    let y = &*second[0].as_immutable_string_ref().unwrap();
+                    *x -= y;
+                    Ok(Dynamic::UNIT)
+                },
                 false,
-            ));
-        }
-
-        (Union::Str(..), Union::Str(..), _) => {
-            return match op {
-                PlusAssign => Some((
-                    |_ctx, args| {
-                        let (first, second) = args.split_first_mut().unwrap();
-                        let x = &mut *first.as_immutable_string_mut().unwrap();
-                        let y = &*second[0].as_immutable_string_ref().unwrap();
-
-                        #[cfg(not(feature = "unchecked"))]
-                        if !x.is_empty() && !y.is_empty() {
-                            let total_len = x.len() + y.len();
-                            _ctx.unwrap().engine().throw_on_size((0, 0, total_len))?;
-                        }
-
-                        *x += y;
-
-                        Ok(Dynamic::UNIT)
-                    },
-                    CHECKED_BUILD,
-                )),
-                MinusAssign => Some((
-                    |_, args| {
-                        let (first, second) = args.split_first_mut().unwrap();
-                        let x = &mut *first.as_immutable_string_mut().unwrap();
-                        let y = &*second[0].as_immutable_string_ref().unwrap();
-                        *x -= y;
-                        Ok(Dynamic::UNIT)
-                    },
-                    false,
-                )),
-                _ => None,
-            };
-        }
+            )),
+            _ => None,
+        },
 
         // array += array
         #[cfg(not(feature = "no_index"))]
@@ -925,7 +919,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
             #[allow(clippy::wildcard_imports)]
             use crate::packages::array_basic::array_functions::*;
 
-            return Some((
+            Some((
                 |_ctx, args| {
                     let x = args[1].take().into_array().unwrap();
 
@@ -948,7 +942,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                     Ok(Dynamic::UNIT)
                 },
                 CHECKED_BUILD,
-            ));
+            ))
         }
 
         // blob += blob
@@ -957,7 +951,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
             #[allow(clippy::wildcard_imports)]
             use crate::packages::blob_basic::blob_functions::*;
 
-            return Some((
+            Some((
                 |_ctx, args| {
                     let blob2 = args[1].take().into_blob().unwrap();
                     let blob1 = &mut *args[0].as_blob_mut().unwrap();
@@ -972,7 +966,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                     Ok(Dynamic::UNIT)
                 },
                 CHECKED_BUILD,
-            ));
+            ))
         }
 
         #[cfg(not(feature = "no_float"))]
@@ -996,58 +990,54 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
         }
 
         // string op= char
-        (Union::Str(..), Union::Char(..), _) => {
-            return match op {
-                PlusAssign => Some((
-                    |_ctx, args| {
-                        let mut buf = [0_u8; 4];
-                        let ch = &*args[1].as_char().unwrap().encode_utf8(&mut buf);
-                        let mut x = args[0].as_immutable_string_mut().unwrap();
-
-                        #[cfg(not(feature = "unchecked"))]
-                        _ctx.unwrap()
-                            .engine()
-                            .throw_on_size((0, 0, x.len() + ch.len()))?;
-
-                        *x += ch;
-
-                        Ok(Dynamic::UNIT)
-                    },
-                    CHECKED_BUILD,
-                )),
-                MinusAssign => impl_op!(ImmutableString -= as_char as char),
-                _ => None,
-            }
-        }
-        // char += string
-        (Union::Char(..), Union::Str(..), PlusAssign) => {
-            return Some((
+        (Union::Str(..), Union::Char(..), _) => match op {
+            PlusAssign => Some((
                 |_ctx, args| {
-                    let ch = {
-                        let s = &*args[1].as_immutable_string_ref().unwrap();
+                    let mut buf = [0_u8; 4];
+                    let ch = &*args[1].as_char().unwrap().encode_utf8(&mut buf);
+                    let mut x = args[0].as_immutable_string_mut().unwrap();
 
-                        if s.is_empty() {
-                            return Ok(Dynamic::UNIT);
-                        }
+                    #[cfg(not(feature = "unchecked"))]
+                    _ctx.unwrap()
+                        .engine()
+                        .throw_on_size((0, 0, x.len() + ch.len()))?;
 
-                        let mut ch = args[0].as_char().unwrap().to_string();
-
-                        #[cfg(not(feature = "unchecked"))]
-                        _ctx.unwrap()
-                            .engine()
-                            .throw_on_size((0, 0, ch.len() + s.len()))?;
-
-                        ch += s;
-                        ch
-                    };
-
-                    *args[0].write_lock::<Dynamic>().unwrap() = ch.into();
+                    *x += ch;
 
                     Ok(Dynamic::UNIT)
                 },
                 CHECKED_BUILD,
-            ));
-        }
+            )),
+            MinusAssign => impl_op!(ImmutableString -= as_char as char),
+            _ => None,
+        },
+        // char += string
+        (Union::Char(..), Union::Str(..), PlusAssign) => Some((
+            |_ctx, args| {
+                let ch = {
+                    let s = &*args[1].as_immutable_string_ref().unwrap();
+
+                    if s.is_empty() {
+                        return Ok(Dynamic::UNIT);
+                    }
+
+                    let mut ch = args[0].as_char().unwrap().to_string();
+
+                    #[cfg(not(feature = "unchecked"))]
+                    _ctx.unwrap()
+                        .engine()
+                        .throw_on_size((0, 0, ch.len() + s.len()))?;
+
+                    ch += s;
+                    ch
+                };
+
+                *args[0].write_lock::<Dynamic>().unwrap() = ch.into();
+
+                Ok(Dynamic::UNIT)
+            },
+            CHECKED_BUILD,
+        )),
 
         // array += any
         #[cfg(not(feature = "no_index"))]
@@ -1055,7 +1045,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
             #[allow(clippy::wildcard_imports)]
             use crate::packages::array_basic::array_functions::*;
 
-            return Some((
+            Some((
                 |_ctx, args| {
                     {
                         let x = args[1].take();
@@ -1071,7 +1061,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                     Ok(Dynamic::UNIT)
                 },
                 CHECKED_BUILD,
-            ));
+            ))
         }
 
         // blob += int
@@ -1080,7 +1070,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
             #[allow(clippy::wildcard_imports)]
             use crate::packages::blob_basic::blob_functions::*;
 
-            return Some((
+            Some((
                 |_ctx, args| {
                     let x = args[1].as_int().unwrap();
                     let blob = &mut *args[0].as_blob_mut().unwrap();
@@ -1095,7 +1085,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                     Ok(Dynamic::UNIT)
                 },
                 CHECKED_BUILD,
-            ));
+            ))
         }
 
         // blob += char
@@ -1104,7 +1094,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
             #[allow(clippy::wildcard_imports)]
             use crate::packages::blob_basic::blob_functions::*;
 
-            return Some((
+            Some((
                 |_ctx, args| {
                     let x = args[1].as_char().unwrap();
                     let blob = &mut *args[0].as_blob_mut().unwrap();
@@ -1119,7 +1109,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                     Ok(Dynamic::UNIT)
                 },
                 CHECKED_BUILD,
-            ));
+            ))
         }
 
         // blob += string
@@ -1128,7 +1118,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
             #[allow(clippy::wildcard_imports)]
             use crate::packages::blob_basic::blob_functions::*;
 
-            return Some((
+            Some((
                 |_ctx, args| {
                     let (first, second) = args.split_first_mut().unwrap();
                     let blob = &mut *first.as_blob_mut().unwrap();
@@ -1148,7 +1138,7 @@ pub fn get_builtin_op_assignment_fn(op: &Token, x: &Dynamic, y: &Dynamic) -> Opt
                     Ok(Dynamic::UNIT)
                 },
                 CHECKED_BUILD,
-            ));
+            ))
         }
 
         _ => None,

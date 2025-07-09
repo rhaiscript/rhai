@@ -131,7 +131,7 @@ impl StringsInterner {
             let mut index = 0;
 
             for (&k, v) in &self.cache {
-                if skip_hash.map_or(true, |hash| k != hash)
+                if (skip_hash != Some(k))
                     && (v.strong_count() < min_count
                         || (v.strong_count() == min_count && v.len() > max_len))
                 {

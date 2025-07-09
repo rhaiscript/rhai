@@ -405,7 +405,7 @@ impl Engine {
                         let value = if start == 0 && end >= chars_count {
                             s.clone().into()
                         } else {
-                            let take = if end > start { end - start } else { 0 };
+                            let take = end.saturating_sub(start);
                             s.chars().skip(start).take(take).collect::<String>().into()
                         };
 
