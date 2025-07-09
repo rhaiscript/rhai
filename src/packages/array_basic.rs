@@ -7,7 +7,7 @@ use crate::plugin::*;
 use crate::types::fn_ptr::FnPtrType;
 use crate::{
     def_package, Array, Dynamic, ExclusiveRange, FnPtr, InclusiveRange, NativeCallContext,
-    Position, RhaiResultOf, ERR, INT,
+    Position, RhaiResultOf, ERR, INT, MAX_USIZE_INT,
 };
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -231,7 +231,7 @@ pub mod array_functions {
         }
 
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let len = len as usize;
+        let len = len.min(MAX_USIZE_INT) as usize;
 
         if len <= array.len() {
             return Ok(());
@@ -356,7 +356,7 @@ pub mod array_functions {
         }
 
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let len = len as usize;
+        let len = len.min(MAX_USIZE_INT) as usize;
 
         if len > 0 {
             array.truncate(len);
@@ -392,7 +392,7 @@ pub mod array_functions {
         }
 
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let len = len as usize;
+        let len = len.min(MAX_USIZE_INT) as usize;
 
         if len == 0 {
             array.clear();

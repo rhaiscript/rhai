@@ -194,7 +194,7 @@ impl CharsStream {
         if len <= 0 || from > MAX_USIZE_INT {
             return Self(Vec::new().into_iter());
         }
-        let len = len as usize;
+        let len = len.min(MAX_USIZE_INT) as usize;
 
         if from >= 0 {
             return Self(

@@ -217,7 +217,8 @@ impl Engine {
                         ERR::ErrorBitFieldBounds(crate::INT_BITS, start, idx_pos).into()
                     })?;
                     let end = super::calc_index(crate::INT_BITS, end, false, || {
-                        if (0..crate::MAX_USIZE_INT).contains(&end)
+                        if end >= 0
+                            && end < crate::MAX_USIZE_INT
                             && (end as usize) <= crate::INT_BITS
                         {
                             // Handle largest value
