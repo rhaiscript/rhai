@@ -1403,11 +1403,7 @@ impl Dynamic {
         #[cfg(not(feature = "no_closure"))]
         reify! { value => |v: crate::Shared<crate::Locked<Self>>| return v.into() }
 
-        Self(Union::Variant(
-            Box::new(Box::new(value)),
-            DEFAULT_TAG_VALUE,
-            ReadWrite,
-        ))
+        Self(Union::Variant(Box::new(Box::new(value)), 0, ReadWrite))
     }
     /// Turn the [`Dynamic`] value into a shared [`Dynamic`] value backed by an
     /// [`Rc<RefCell<Dynamic>>`][std::rc::Rc] or [`Arc<RwLock<Dynamic>>`][std::sync::Arc]
@@ -1594,7 +1590,7 @@ impl Dynamic {
 
         match self.0 {
             Union::Variant(v, ..) if TypeId::of::<T>() == (**v).type_id() => {
-                Ok((*v).as_boxed_any().downcast().map(|x| *x).unwrap())
+                Ok(*(*v).as_boxed_any().downcast().unwrap())
             }
             _ => Err(self),
         }

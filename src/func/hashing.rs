@@ -8,11 +8,8 @@ use std::{
     hash::{BuildHasher, Hash, Hasher},
 };
 
-#[cfg(feature = "no_std")]
 pub type StraightHashMap<V> = hashbrown::HashMap<u64, V, StraightHasherBuilder>;
 
-#[cfg(not(feature = "no_std"))]
-pub type StraightHashMap<V> = std::collections::HashMap<u64, V, StraightHasherBuilder>;
 /// A hasher that only takes one single [`u64`] and returns it as a hash key.
 ///
 /// # Panics

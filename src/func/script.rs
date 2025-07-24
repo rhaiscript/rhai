@@ -26,7 +26,7 @@ impl Engine {
         global: &mut GlobalRuntimeState,
         caches: &mut Caches,
         scope: &mut Scope,
-        mut this_ptr: Option<&mut Dynamic>,
+        this_ptr: Option<&mut Dynamic>,
         _env: Option<&EncapsulatedEnviron>,
         fn_def: &ScriptFuncDef,
         args: &mut FnCallArgs,
@@ -123,7 +123,7 @@ impl Engine {
                 global,
                 caches,
                 scope,
-                this_ptr.as_deref_mut(),
+                this_ptr,
                 fn_def.body.statements(),
                 rewind_scope,
             )

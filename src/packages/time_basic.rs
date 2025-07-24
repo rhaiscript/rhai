@@ -224,7 +224,7 @@ mod time_functions {
     #[inline]
     fn subtract_impl(timestamp: Instant, seconds: INT) -> RhaiResultOf<Instant> {
         if seconds < 0 {
-            add_inner(timestamp, u64::try_from(seconds.unsigned_abs()).unwrap())
+            add_inner(timestamp, seconds.unsigned_abs())
         } else {
             subtract_inner(timestamp, u64::try_from(seconds).unwrap())
         }

@@ -2,7 +2,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::types::dynamic::Variant;
+use crate::types::dynamic::{AccessMode, Union, Variant};
 use crate::Dynamic;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -62,14 +62,26 @@ pub trait FuncArgs {
 impl<T: Variant + Clone> FuncArgs for Vec<T> {
     #[inline]
     fn parse<ARGS: Extend<Dynamic>>(self, args: &mut ARGS) {
-        args.extend(self.into_iter().map(Dynamic::from));
+        args.extend(self.into_iter().map(|value| {
+            Dynamic(Union::Variant(
+                Box::new(Box::new(value)),
+                0,
+                AccessMode::ReadWrite,
+            ))
+        }));
     }
 }
 
 impl<T: Variant + Clone, const N: usize> FuncArgs for [T; N] {
     #[inline]
     fn parse<ARGS: Extend<Dynamic>>(self, args: &mut ARGS) {
-        args.extend(IntoIterator::into_iter(self).map(Dynamic::from));
+        args.extend(IntoIterator::into_iter(self).map(|value| {
+            Dynamic(Union::Variant(
+                Box::new(Box::new(value)),
+                0,
+                AccessMode::ReadWrite,
+            ))
+        }));
     }
 }
 
@@ -82,7 +94,11 @@ macro_rules! impl_args {
             #[allow(unused_variables)]
             fn parse<ARGS: Extend<Dynamic>>(self, args: &mut ARGS) {
                 let ($($p,)*) = self;
-                $(args.extend(Some(Dynamic::from($p)));)*
+                $(args.extend(Some(Dynamic(Union::Variant(
+					Box::new(Box::new($p)),
+					0,
+					AccessMode::ReadWrite,
+				))));)*
             }
         }
 

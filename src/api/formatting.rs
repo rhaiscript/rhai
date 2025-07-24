@@ -203,20 +203,20 @@ impl Engine {
     #[inline]
     #[must_use]
     pub fn map_type_name<'a>(&'a self, name: &'a str) -> &'a str {
-        self.global_modules
-            .iter()
-            .find_map(|m| m.get_custom_type_display_by_name(name))
-            .or_else(|| {
-                #[cfg(not(feature = "no_module"))]
-                return self
-                    .global_sub_modules
-                    .values()
-                    .find_map(|m| m.get_custom_type_display_by_name(name));
+        for m in &self.global_modules {
+            if let Some(val) = m.get_custom_type_display_by_name(name) {
+                return val;
+            }
+        }
 
-                #[cfg(feature = "no_module")]
-                return None;
-            })
-            .unwrap_or_else(|| map_std_type_name(name, true))
+        #[cfg(not(feature = "no_module"))]
+        for m in self.global_sub_modules.values() {
+            if let Some(val) = m.get_custom_type_display_by_name(name) {
+                return val;
+            }
+        }
+
+        map_std_type_name(name, true)
     }
 
     /// Format a Rust parameter type.

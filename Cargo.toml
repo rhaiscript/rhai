@@ -29,7 +29,7 @@ rhai_codegen = { version = "3.1.0", path = "codegen" }
 
 no-std-compat = { git = "https://gitlab.com/jD91mZM2/no-std-compat.git", version = "0.4.1", default-features = false, features = ["alloc"], optional = true }
 libm = { version = "0.2.0", default-features = false, optional = true }
-hashbrown = { version = "0.15.0", optional = true }
+hashbrown = { version = "0.15.0" }
 core-error = { version = "0.0.0", default-features = false, features = ["alloc"], optional = true }
 serde = { version = "1.0.136", default-features = false, features = ["derive", "alloc"], optional = true }
 serde_json = { version = "1.0.45", default-features = false, features = ["alloc"], optional = true }
@@ -113,7 +113,7 @@ no_optimize = []
 #! ### Compiling for `no-std`
 
 ## Turn on `no-std` compilation (nightly only).
-no_std = ["no-std-compat", "num-traits/libm", "core-error", "libm", "hashbrown", "no_time"]
+no_std = ["no-std-compat", "num-traits/libm", "core-error", "libm", "no_time"]
 
 #! ### JavaScript Interface for WASM
 

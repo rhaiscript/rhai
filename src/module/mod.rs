@@ -12,10 +12,7 @@ use crate::{
     Identifier, ImmutableString, RhaiResultOf, Shared, SharedModule, SmartString,
 };
 use bitflags::bitflags;
-#[cfg(feature = "no_std")]
 use hashbrown::hash_map::Entry;
-#[cfg(not(feature = "no_std"))]
-use std::collections::hash_map::Entry;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{
@@ -1028,11 +1025,14 @@ impl Module {
     ///
     /// assert_eq!(module.get_custom_type_display_by_name(name), Some("MyType"));
     /// ```
-    #[inline]
+    #[inline(always)]
     #[must_use]
     pub fn get_custom_type_display_by_name(&self, type_name: &str) -> Option<&str> {
-        self.get_custom_type_by_name_raw(type_name)
-            .map(|typ| typ.display_name.as_str())
+        if let Some(typ) = self.get_custom_type_by_name_raw(type_name) {
+            Some(typ.display_name.as_str())
+        } else {
+            None
+        }
     }
     /// Get the display name of a registered custom type.
     ///
@@ -1912,10 +1912,13 @@ impl Module {
     #[inline]
     #[must_use]
     pub(crate) fn get_fn(&self, hash_native: u64) -> Option<&RhaiFunc> {
-        self.functions
-            .as_ref()
-            .and_then(|m| m.get(&hash_native))
-            .map(|(f, _)| f)
+        if let Some(funcs) = &self.functions {
+            if let Some(func) = funcs.get(&hash_native) {
+                return Some(&func.0);
+            }
+        }
+
+        None
     }
 
     /// Can the particular function with [`Dynamic`] parameter(s) exist in the [`Module`]?

@@ -14,10 +14,7 @@ use crate::{
     calc_fn_hash, calc_fn_hash_full, Dynamic, Engine, FnArgsVec, FnPtr, ImmutableString, Position,
     RhaiResult, RhaiResultOf, Scope, Shared, ERR,
 };
-#[cfg(feature = "no_std")]
 use hashbrown::hash_map::Entry;
-#[cfg(not(feature = "no_std"))]
-use std::collections::hash_map::Entry;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{
@@ -170,9 +167,11 @@ impl Engine {
         args: Option<&mut FnCallArgs>,
         allow_dynamic: bool,
     ) -> Option<&'s FnResolutionCacheEntry> {
-        let mut hash = args.as_deref().map_or(hash_base, |args| {
+        let mut hash = if let Some(args) = &args {
             calc_fn_hash_full(hash_base, args.iter().map(|a| a.type_id()))
-        });
+        } else {
+            hash_base
+        };
 
         let cache = caches.fn_resolution_cache_mut();
 
@@ -185,33 +184,46 @@ impl Engine {
                 let mut bitmask = 1usize; // Bitmask of which parameter to replace with `Dynamic`
 
                 loop {
+                    let mut func = None;
                     // First check scripted functions in the AST or embedded environments
                     #[cfg(not(feature = "no_function"))]
-                    let func = _global
-                        .lib
-                        .iter()
-                        .rev()
-                        .find_map(|m| m.get_fn(hash).map(|f| (f, m.id_raw())));
-                    #[cfg(feature = "no_function")]
-                    let func = None;
+                    {
+                        for m in 0.._global.lib.len() {
+                            let m = &_global.lib[_global.lib.len() - m - 1];
+                            if let Some(f) = m.get_fn(hash) {
+                                func = Some((f, m.id_raw()));
+                                break;
+                            }
+                        }
+                    }
 
                     // Then check the global namespace
-                    let func = func.or_else(|| {
-                        self.global_modules
-                            .iter()
-                            .find_map(|m| m.get_fn(hash).map(|f| (f, m.id_raw())))
-                    });
+                    if func.is_none() {
+                        for m in 0..self.global_modules.len() {
+                            let m = &self.global_modules[self.global_modules.len() - m - 1];
+                            if let Some(f) = m.get_fn(hash) {
+                                func = Some((f, m.id_raw()));
+                                break;
+                            }
+                        }
+                    }
 
                     // Then check imported modules for global functions, then global sub-modules for global functions
                     #[cfg(not(feature = "no_module"))]
-                    let func = func
-                        .or_else(|| _global.get_qualified_fn(hash, true))
-                        .or_else(|| {
-                            self.global_sub_modules
-                                .values()
-                                .filter(|m| m.contains_indexed_global_functions())
-                                .find_map(|m| m.get_qualified_fn(hash).map(|f| (f, m.id_raw())))
-                        });
+                    if func.is_none() {
+                        if let Some(val) = _global.get_qualified_fn(hash, true) {
+                            func = Some(val);
+                        } else {
+                            for m in self.global_sub_modules.values() {
+                                if m.contains_indexed_global_functions() {
+                                    if let Some(f) = m.get_qualified_fn(hash) {
+                                        func = Some((f, m.id_raw()));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     if let Some((f, s)) = func {
                         // Specific version found

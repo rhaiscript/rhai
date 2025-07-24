@@ -223,7 +223,7 @@ impl Engine {
 
         let orig_tag = options.tag.map(|v| mem::replace(&mut global.tag, v));
 
-        let mut this_ptr = options.this_ptr;
+        let this_ptr = options.this_ptr;
 
         #[cfg(not(feature = "no_module"))]
         let orig_embedded_module_resolver =
@@ -259,28 +259,27 @@ impl Engine {
             #[cfg(not(feature = "no_closure"))]
             crate::func::ensure_no_data_race(name, args, false)?;
 
-            ast.shared_lib()
-                .get_script_fn(name, args.len())
-                .map_or_else(
-                    || Err(ERR::ErrorFunctionNotFound(name.into(), Position::NONE).into()),
-                    |fn_def| {
-                        self.call_script_fn(
-                            global,
-                            caches,
-                            scope,
-                            this_ptr.as_deref_mut(),
-                            None,
-                            fn_def,
-                            args,
-                            rewind_scope,
-                            Position::NONE,
-                        )
+            if let Some(fn_def) = ast.shared_lib().get_script_fn(name, args.len()) {
+                match self.call_script_fn(
+                    global,
+                    caches,
+                    scope,
+                    this_ptr,
+                    None,
+                    fn_def,
+                    args,
+                    rewind_scope,
+                    Position::NONE,
+                ) {
+                    Ok(val) => Ok(val),
+                    Err(err) => match *err {
+                        ERR::Exit(out, ..) => Ok(out),
+                        _ => Err(err),
                     },
-                )
-                .or_else(|err| match *err {
-                    ERR::Exit(out, ..) => Ok(out),
-                    _ => Err(err),
-                })
+                }
+            } else {
+                Err(ERR::ErrorFunctionNotFound(name.into(), Position::NONE).into())
+            }
         });
 
         #[cfg(feature = "debugging")]
