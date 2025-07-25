@@ -3658,23 +3658,17 @@ impl Engine {
 
         args.push(fn_expr);
 
-        args.extend(
-            externals
-                .as_ref()
-                .iter()
-                .cloned()
-                .map(|Ident { name, pos }| {
-                    let (index, is_func) = self.access_var(state, &name, pos);
-                    let idx = match index {
-                        Some(n) if !is_func => u8::try_from(n.get()).ok().and_then(NonZeroU8::new),
-                        _ => None,
-                    };
-                    #[cfg(not(feature = "no_module"))]
-                    return Expr::Variable((index, name, <_>::default(), 0).into(), idx, pos);
-                    #[cfg(feature = "no_module")]
-                    return Expr::Variable((index, name).into(), idx, pos);
-                }),
-        );
+        args.extend(externals.as_ref().iter().map(|Ident { name, pos }| {
+            let (index, is_func) = self.access_var(state, name, *pos);
+            let idx = match index {
+                Some(n) if !is_func => u8::try_from(n.get()).ok().and_then(NonZeroU8::new),
+                _ => None,
+            };
+            #[cfg(not(feature = "no_module"))]
+            return Expr::Variable((index, name.clone(), <_>::default(), 0).into(), idx, *pos);
+            #[cfg(feature = "no_module")]
+            return Expr::Variable((index, name.clone()).into(), idx, pos);
+        }));
 
         let expr = FnCallExpr {
             #[cfg(not(feature = "no_module"))]

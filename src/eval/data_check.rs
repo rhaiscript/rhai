@@ -194,12 +194,12 @@ impl Engine {
             return Err(ERR::ErrorTooManyOperations(pos).into());
         }
 
-        self.progress
-            .as_ref()
-            .and_then(|progress| {
-                progress(global.num_operations)
-                    .map(|token| Err(ERR::ErrorTerminated(token, pos).into()))
-            })
-            .unwrap_or(Ok(()))
+        if let Some(progress) = &self.progress {
+            if let Some(token) = progress(global.num_operations) {
+                return Err(ERR::ErrorTerminated(token, pos).into());
+            }
+        }
+
+        Ok(())
     }
 }

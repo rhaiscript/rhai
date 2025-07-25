@@ -102,8 +102,7 @@ impl Engine {
              }| {
                 imports
                     .iter()
-                    .cloned()
-                    .for_each(|(n, m)| global.push_import(n, m));
+                    .for_each(|(n, m)| global.push_import(n, m.clone()));
 
                 global.lib.extend(lib.clone());
 

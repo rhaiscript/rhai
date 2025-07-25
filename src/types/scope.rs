@@ -855,21 +855,21 @@ impl Scope<'_> {
         let len = self.len();
         let mut scope = Self::new();
 
-        self.names.iter().rev().enumerate().for_each(|(i, name)| {
+        let name_len = self.names.len();
+        for i in 0..name_len {
+            let name = &self.names[name_len - i - 1];
             if scope.names.contains(name) {
-                return;
+                continue;
             }
 
-            let index = len - 1 - i;
-            let v1 = &self.values[index];
-
+            let v1 = &self.values[len - i - 1];
             scope.push_entry(name.clone(), v1.access_mode(), v1.clone());
 
-            if self.aliases.len() > index {
+            if self.aliases.len() > i {
                 scope.aliases.resize(scope.len() - 1, <_>::default());
-                scope.aliases.push(self.aliases[index].clone());
+                scope.aliases.push(self.aliases[i].clone());
             }
-        });
+        }
 
         scope
     }
@@ -939,14 +939,14 @@ impl Scope<'_> {
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn remove_range(&mut self, start: usize, len: usize) {
-        self.values.drain(start..start + len).for_each(|_| {});
-        self.names.drain(start..start + len).for_each(|_| {});
+        self.values.drain(start..start + len);
+        self.names.drain(start..start + len);
 
         if self.aliases.len() > start {
             if self.aliases.len() <= start + len {
                 self.aliases.truncate(start);
             } else {
-                self.aliases.drain(start..start + len).for_each(|_| {});
+                self.aliases.drain(start..start + len);
             }
         }
     }
