@@ -131,13 +131,13 @@ mod types;
 /// Error encountered when parsing a script.
 type PERR = ParseErrorType;
 /// Evaluation result.
-type ERR = EvalAltResult;
+pub type ERR = EvalAltResult;
 /// General evaluation error for Rhai scripts.
-type RhaiError = Box<ERR>;
+pub type RhaiError = Box<ERR>;
 /// Generic [`Result`] type for Rhai functions.
-type RhaiResultOf<T> = Result<T, RhaiError>;
+pub type RhaiResultOf<T> = Result<T, RhaiError>;
 /// General [`Result`] type for Rhai functions returning [`Dynamic`] values.
-type RhaiResult = RhaiResultOf<Dynamic>;
+pub type RhaiResult = RhaiResultOf<Dynamic>;
 
 /// The system integer type. It is defined as [`i64`].
 ///
