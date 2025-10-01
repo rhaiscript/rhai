@@ -45,6 +45,23 @@
 //! assert_eq!(value, restored);
 //! # Ok::<_, Box<rhai::EvalAltResult>>(())
 //! ```
+//!
+//! # API Compatibility with serde
+//!
+//! For users familiar with [`serde`](../serde/index.html), similar function names are provided:
+//!
+//! ```ignore
+//! use rhai::rkyv::{to_dynamic, from_dynamic};
+//!
+//! // Serialize (same as to_bytes)
+//! let bytes = to_dynamic(&value)?;
+//!
+//! // Deserialize (same as from_bytes_owned)
+//! let value: Dynamic = from_dynamic(&bytes)?;
+//! ```
+//!
+//! Note: Unlike serde's `to_dynamic`/`from_dynamic` which work with Dynamic values,
+//! rkyv's functions work with byte arrays for zero-copy serialization.
 
 mod archive;
 mod de;
@@ -55,3 +72,8 @@ pub use de::{
     from_bytes_owned_unchecked_generic,
 };
 pub use ser::to_bytes;
+
+// API compatibility aliases matching serde naming convention
+// Note: These work with bytes, not Dynamic, unlike serde's versions
+pub use de::from_bytes_owned as from_dynamic;
+pub use ser::to_bytes as to_dynamic;
