@@ -61,6 +61,64 @@ pub unsafe fn from_bytes_owned_unchecked(bytes: &[u8]) -> RhaiResultOf<Dynamic> 
     Ok(dynamic)
 }
 
+/// Deserialize a Dynamic value from bytes (safe wrapper).
+///
+/// This is a safe wrapper around `from_bytes_owned_unchecked` for convenience.
+/// It assumes the bytes come from a trusted source (created by `to_bytes`).
+///
+/// For maximum performance in trusted environments, use the unsafe version directly.
+///
+/// # Example
+///
+/// ```ignore
+/// use rhai::Dynamic;
+/// use rhai::rkyv::{to_bytes, from_bytes_owned};
+///
+/// let value = Dynamic::from(42);
+/// let bytes = to_bytes(&value)?;
+///
+/// let restored: Dynamic = from_bytes_owned(&bytes)?;
+/// assert_eq!(42, restored.as_int().unwrap());
+/// # Ok::<_, Box<rhai::EvalAltResult>>(())
+/// ```
+#[inline(always)]
+pub fn from_bytes_owned(bytes: &[u8]) -> RhaiResultOf<Dynamic> {
+    // SAFETY: This is marked as safe because it's meant for convenience when
+    // deserializing data from trusted sources (e.g., your own serialized data).
+    // Users should only call this with data created by `to_bytes`.
+    unsafe { from_bytes_owned_unchecked(bytes) }
+}
+
+/// Deserialize bytes into a specific type T (safe wrapper).
+///
+/// This is a safe wrapper for deserializing types that directly implement Archive.
+/// For Dynamic values, use [`from_bytes_owned`] instead.
+///
+/// # Example
+///
+/// ```ignore
+/// use rhai::ImmutableString;
+/// use rhai::rkyv::{to_bytes, from_bytes_owned_generic};
+///
+/// let value = ImmutableString::from("Hello, World!");
+/// let bytes = to_bytes(&value)?;
+///
+/// let restored: ImmutableString = from_bytes_owned_generic(&bytes)?;
+/// assert_eq!(value, restored);
+/// # Ok::<_, Box<rhai::EvalAltResult>>(())
+/// ```
+#[inline(always)]
+pub fn from_bytes_owned_generic<T>(bytes: &[u8]) -> RhaiResultOf<T>
+where
+    T: rkyv::Archive,
+    T::Archived: Deserialize<T, Infallible>,
+{
+    // SAFETY: This is marked as safe because it's meant for convenience when
+    // deserializing data from trusted sources (e.g., your own serialized data).
+    // Users should only call this with data created by `to_bytes`.
+    unsafe { from_bytes_owned_unchecked_generic(bytes) }
+}
+
 /// Deserialize bytes into a specific type T without validation (unsafe).
 ///
 /// This is a generic deserialization function for types that directly implement Archive.

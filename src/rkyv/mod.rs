@@ -50,5 +50,8 @@ mod archive;
 mod de;
 mod ser;
 
-pub use de::from_bytes_owned_unchecked;
+pub use de::{
+    from_bytes_owned, from_bytes_owned_generic, from_bytes_owned_unchecked,
+    from_bytes_owned_unchecked_generic,
+};
 pub use ser::to_bytes;

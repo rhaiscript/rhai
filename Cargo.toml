@@ -200,6 +200,10 @@ codegen-units = 1
 #opt-level = "z"     # optimize for size
 #panic = 'abort'     # remove stack backtrace for no-std
 
+[[bench]]
+name = "rkyv"
+required-features = ["rkyv", "serde"]
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 instant = { version = "0.1.10" } # WASM implementation of std::time::Instant
 
