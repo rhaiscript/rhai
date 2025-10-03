@@ -11,6 +11,20 @@
 //! * Embedded systems - Lower memory footprint
 //! * Large data structures - Access without full deserialization
 //!
+//! # Supported Types
+//!
+//! | Category | Types |
+//! | --- | --- |
+//! | Scalars | `INT`, `bool`, `char`, `()` |
+//! | Strings | `ImmutableString`, `String` |
+//! | Numbers | `FLOAT` (when the `no_float` feature is disabled) |
+//! | Binary  | `Blob` (when the `no_index` feature is disabled) |
+//! | Collections | `Array`, `Map` (feature-gated; nested values are archived recursively) |
+//!
+//! Arrays and maps store each nested [`Dynamic`] as an embedded rkyv blob. This keeps the
+//! serialization pipeline zero-copy friendly while avoiding recursive derive limitations in
+//! rkyv 0.7. Nested collections (arrays of arrays, maps-of-maps) are fully supported.
+//!
 //! # When to Use
 //!
 //! Use `rkyv` when you need:

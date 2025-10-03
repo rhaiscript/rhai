@@ -34,7 +34,7 @@ fn bench_serde_json_serialize_int(bench: &mut Bencher) {
 fn bench_rkyv_deserialize_int(bench: &mut Bencher) {
     let value = Dynamic::from(42_i64);
     let bytes = rhai::rkyv::to_bytes(&value).unwrap();
-    
+
     bench.iter(|| {
         let restored: Dynamic = rhai::rkyv::from_bytes_owned(&bytes).unwrap();
         test::black_box(restored);
@@ -45,7 +45,7 @@ fn bench_rkyv_deserialize_int(bench: &mut Bencher) {
 fn bench_serde_json_deserialize_int(bench: &mut Bencher) {
     let value = Dynamic::from(42_i64);
     let json = serde_json::to_string(&value).unwrap();
-    
+
     bench.iter(|| {
         let restored: Dynamic = serde_json::from_str(&json).unwrap();
         test::black_box(restored);
@@ -98,7 +98,7 @@ fn bench_serde_json_serialize_string(bench: &mut Bencher) {
 fn bench_rkyv_deserialize_string(bench: &mut Bencher) {
     let value = Dynamic::from("Hello, World! This is a benchmark string.");
     let bytes = rhai::rkyv::to_bytes(&value).unwrap();
-    
+
     bench.iter(|| {
         let restored: Dynamic = rhai::rkyv::from_bytes_owned(&bytes).unwrap();
         test::black_box(restored);
@@ -109,7 +109,7 @@ fn bench_rkyv_deserialize_string(bench: &mut Bencher) {
 fn bench_serde_json_deserialize_string(bench: &mut Bencher) {
     let value = Dynamic::from("Hello, World! This is a benchmark string.");
     let json = serde_json::to_string(&value).unwrap();
-    
+
     bench.iter(|| {
         let restored: Dynamic = serde_json::from_str(&json).unwrap();
         test::black_box(restored);

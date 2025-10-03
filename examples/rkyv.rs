@@ -63,16 +63,60 @@ fn main() -> Result<(), Box<rhai::EvalAltResult>> {
         println!("  Restored result: {:?}\n", restored);
     }
 
-    // Example 4: Complex structures
+    // Example 4: Arrays and nested arrays
+    #[cfg(not(feature = "no_index"))]
+    {
+        println!("Example 4: Serializing arrays and nested arrays");
+        use rhai::rkyv::{from_bytes_owned, to_bytes};
+        use rhai::Array;
+
+        let nested: Array = vec![Dynamic::from(2), Dynamic::from(3)];
+        let array: Array = vec![
+            Dynamic::from(1),
+            Dynamic::from_array(nested.clone()),
+            Dynamic::from(4),
+        ];
+
+        let value = Dynamic::from_array(array.clone());
+        println!("  Original array: {:?}", value);
+
+        let bytes = to_bytes(&value)?;
+        println!("  Serialized to {} bytes", bytes.len());
+
+        let restored: Dynamic = from_bytes_owned(&bytes)?;
+        println!("  Restored array: {:?}", restored);
+        println!(
+            "  Nested check -> {}",
+            restored.clone().into_array().unwrap()[1]
+                .clone()
+                .into_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_int().unwrap())
+                .collect::<Vec<_>>()
+                == vec![2, 3]
+        );
+        println!();
+    }
+
+    // Example 5: Complex maps with nested structures
     #[cfg(not(feature = "no_object"))]
     {
-        println!("Example 4: Serializing complex structures (maps)");
+        println!("Example 5: Serializing maps with nested data");
         use rhai::rkyv::{from_bytes_owned, to_bytes};
+        #[cfg(not(feature = "no_index"))]
+        use rhai::Array;
 
         let mut map = Map::new();
         map.insert("name".into(), Dynamic::from("Alice"));
         map.insert("age".into(), Dynamic::from(30));
         map.insert("active".into(), Dynamic::from(true));
+
+        #[cfg(not(feature = "no_index"))]
+        {
+            let favorites: Array = vec![Dynamic::from("reading"), Dynamic::from("hiking")];
+            map.insert("favorites".into(), Dynamic::from_array(favorites));
+        }
 
         let value = Dynamic::from(map);
         println!("  Original map: {:?}", value);
@@ -84,8 +128,8 @@ fn main() -> Result<(), Box<rhai::EvalAltResult>> {
         println!("  Restored map: {:?}\n", restored);
     }
 
-    // Example 5: ImmutableString
-    println!("Example 5: Serializing ImmutableString directly");
+    // Example 6: ImmutableString
+    println!("Example 6: Serializing ImmutableString directly");
     {
         use rhai::rkyv::{from_bytes_owned, to_bytes};
 

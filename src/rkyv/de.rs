@@ -3,11 +3,9 @@
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
+use super::archive::SimpleDynamic;
 use crate::{Dynamic, RhaiResultOf};
 use rkyv::{Deserialize, Infallible};
-
-// Import SimpleDynamic from the archive module
-use super::archive::SimpleDynamic;
 
 /// Deserialize a Dynamic value from bytes without validation (unsafe, but fast).
 ///
@@ -39,26 +37,10 @@ use super::archive::SimpleDynamic;
 /// # Ok::<_, Box<rhai::EvalAltResult>>(())
 /// ```
 pub unsafe fn from_bytes_owned_unchecked(bytes: &[u8]) -> RhaiResultOf<Dynamic> {
-    // Dynamic is serialized through SimpleDynamic, so we deserialize SimpleDynamic first
+    // Deserialize using SimpleDynamic as intermediate, then convert to Dynamic
     let archived = rkyv::archived_root::<SimpleDynamic>(bytes);
     let simple: SimpleDynamic = archived.deserialize(&mut Infallible).unwrap();
-
-    // Convert SimpleDynamic to Dynamic manually to avoid Dynamic::from wrapping it as Variant
-    let dynamic = match simple {
-        SimpleDynamic::Unit => Dynamic::UNIT,
-        SimpleDynamic::Bool(v) => Dynamic::from(v),
-        SimpleDynamic::Str(s) => Dynamic::from(s),
-        SimpleDynamic::Char(c) => Dynamic::from(c),
-        SimpleDynamic::Int(i) => Dynamic::from(i),
-
-        #[cfg(not(feature = "no_float"))]
-        SimpleDynamic::Float(f) => Dynamic::from(f),
-
-        #[cfg(not(feature = "no_index"))]
-        SimpleDynamic::Blob(blob) => Dynamic::from(blob),
-    };
-
-    Ok(dynamic)
+    Ok(simple.into())
 }
 
 /// Deserialize a Dynamic value from bytes (safe wrapper).
