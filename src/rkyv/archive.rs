@@ -91,148 +91,199 @@ pub enum SimpleDynamic {
 
 impl From<&Dynamic> for SimpleDynamic {
     fn from(value: &Dynamic) -> Self {
-        println!(
-            "From<&Dynamic> for SimpleDynamic: type={}, is_int={}",
-            value.type_name(),
-            value.is_int()
-        );
-        println!("Union variant: {:?}", std::mem::discriminant(&value.0));
-        let result = match &value.0 {
-            Union::Unit(_, _, _) => {
-                println!("Matched Union::Unit");
-                SimpleDynamic::Unit
-            }
-            Union::Bool(v, _, _) => {
-                println!("Matched Union::Bool({})", *v);
-                SimpleDynamic::Bool(*v)
-            }
-            Union::Str(s, _, _) => {
-                println!("Matched Union::Str({})", s.as_str());
-                SimpleDynamic::Str(String::from(s.as_str()))
-            }
-            Union::Char(c, _, _) => {
-                println!("Matched Union::Char({})", *c);
-                SimpleDynamic::Char(*c)
-            }
-            Union::Int(i, _, _) => {
-                println!("Matched Union::Int({})", *i);
-                SimpleDynamic::Int(*i)
-            }
+        match &value.0 {
+            Union::Unit(_, _, _) => SimpleDynamic::Unit,
+            Union::Bool(v, _, _) => SimpleDynamic::Bool(*v),
+            Union::Str(s, _, _) => SimpleDynamic::Str(String::from(s.as_str())),
+            Union::Char(c, _, _) => SimpleDynamic::Char(*c),
+            Union::Int(i, _, _) => SimpleDynamic::Int(*i),
 
             #[cfg(not(feature = "no_float"))]
-            Union::Float(f, _, _) => {
-                println!("Matched Union::Float({})", **f);
-                SimpleDynamic::Float(**f)
-            }
+            Union::Float(f, _, _) => SimpleDynamic::Float(**f),
 
             #[cfg(not(feature = "no_index"))]
-            Union::Blob(blob, _, _) => {
-                println!("Matched Union::Blob");
-                SimpleDynamic::Blob(blob.to_vec())
-            }
+            Union::Blob(blob, _, _) => SimpleDynamic::Blob(blob.to_vec()),
 
             #[cfg(not(feature = "no_index"))]
-            Union::Array(array, _, _) => {
-                println!("Matched Union::Array with {} elements", array.len());
-                SimpleDynamic::Array(
-                    array
-                        .iter()
-                        .map(|item| serialize_nested_dynamic(item))
-                        .collect(),
-                )
-            }
+            Union::Array(array, _, _) => SimpleDynamic::Array(
+                array
+                    .iter()
+                    .map(|item| serialize_nested_dynamic(item))
+                    .collect(),
+            ),
 
             #[cfg(not(feature = "no_object"))]
-            Union::Map(map, _, _) => {
-                println!("Matched Union::Map with {} entries", map.len());
-                SimpleDynamic::Map(
-                    map.iter()
-                        .map(|(key, value)| {
-                            (String::from(key.as_str()), serialize_nested_dynamic(value))
-                        })
-                        .collect(),
-                )
-            }
+            Union::Map(map, _, _) => SimpleDynamic::Map(
+                map.iter()
+                    .map(|(key, value)| {
+                        (String::from(key.as_str()), serialize_nested_dynamic(value))
+                    })
+                    .collect(),
+            ),
 
             #[cfg(not(feature = "no_closure"))]
             #[cfg(feature = "sync")]
             Union::Shared(cell, _, _) => SimpleDynamic::from(&*cell.read().unwrap()),
 
-            _ => {
-                println!("Fell through to fallback path");
-                // Fallback path using safe Dynamic API conversions
-                // INT
-                if let Ok(i) = value.as_int() {
-                    println!("Fallback: converting int {}", i);
-                    return SimpleDynamic::Int(i);
+            // Handle Variant types (like i32, u32, etc.)
+            Union::Variant(variant, _, _) => {
+                // Try to downcast to specific types first
+                if let Some(i) = value.downcast_ref::<i32>() {
+                    return SimpleDynamic::Int(*i as INT);
                 }
-                // Bool
-                if let Ok(b) = value.as_bool() {
-                    println!("Fallback: converting bool {}", b);
-                    return SimpleDynamic::Bool(b);
+                if let Some(i) = value.downcast_ref::<i64>() {
+                    return SimpleDynamic::Int(*i as INT);
                 }
-                // Char
-                if let Ok(c) = value.as_char() {
-                    println!("Fallback: converting char {}", c);
-                    return SimpleDynamic::Char(c);
+                if let Some(i) = value.downcast_ref::<u32>() {
+                    return SimpleDynamic::Int(*i as INT);
                 }
-                // String
-                if let Ok(s) = value.clone().into_immutable_string() {
-                    println!("Fallback: converting string {}", s);
+                if let Some(i) = value.downcast_ref::<u64>() {
+                    return SimpleDynamic::Int(*i as INT);
+                }
+                if let Some(i) = value.downcast_ref::<i16>() {
+                    return SimpleDynamic::Int(*i as INT);
+                }
+                if let Some(i) = value.downcast_ref::<u16>() {
+                    return SimpleDynamic::Int(*i as INT);
+                }
+                if let Some(i) = value.downcast_ref::<i8>() {
+                    return SimpleDynamic::Int(*i as INT);
+                }
+                if let Some(i) = value.downcast_ref::<u8>() {
+                    return SimpleDynamic::Int(*i as INT);
+                }
+                if let Some(b) = value.downcast_ref::<bool>() {
+                    return SimpleDynamic::Bool(*b);
+                }
+                if let Some(c) = value.downcast_ref::<char>() {
+                    return SimpleDynamic::Char(*c);
+                }
+                if let Some(s) = value.downcast_ref::<String>() {
+                    return SimpleDynamic::Str(s.clone());
+                }
+                if let Some(s) = value.downcast_ref::<ImmutableString>() {
                     return SimpleDynamic::Str(String::from(s.as_str()));
                 }
-                // Blob
-                #[cfg(not(feature = "no_index"))]
-                if let Ok(blob) = value.clone().into_blob() {
-                    println!("Fallback: converting blob");
-                    return SimpleDynamic::Blob(blob);
+                #[cfg(not(feature = "no_float"))]
+                if let Some(f) = value.downcast_ref::<f32>() {
+                    return SimpleDynamic::Float(*f as crate::FLOAT);
                 }
-                // Array
+                #[cfg(not(feature = "no_float"))]
+                if let Some(f) = value.downcast_ref::<f64>() {
+                    return SimpleDynamic::Float(*f as crate::FLOAT);
+                }
                 #[cfg(not(feature = "no_index"))]
-                if let Ok(arr) = value.clone().into_array() {
-                    println!("Fallback: converting array");
+                if let Some(blob) = value.downcast_ref::<Vec<u8>>() {
+                    return SimpleDynamic::Blob(blob.clone());
+                }
+                #[cfg(not(feature = "no_index"))]
+                if let Some(arr) = value.downcast_ref::<Array>() {
                     let serialized = arr
                         .iter()
                         .map(|item| serialize_nested_dynamic(item))
                         .collect();
                     return SimpleDynamic::Array(serialized);
                 }
-                // Map
+                #[cfg(not(feature = "no_object"))]
+                if let Some(map) = value.downcast_ref::<Map>() {
+                    let entries = map
+                        .iter()
+                        .map(|(k, v)| (String::from(k.as_str()), serialize_nested_dynamic(v)))
+                        .collect();
+                    return SimpleDynamic::Map(entries);
+                }
+                // Fallback to safe Dynamic API conversions
+                if let Ok(i) = value.as_int() {
+                    return SimpleDynamic::Int(i);
+                }
+                if let Ok(b) = value.as_bool() {
+                    return SimpleDynamic::Bool(b);
+                }
+                if let Ok(c) = value.as_char() {
+                    return SimpleDynamic::Char(c);
+                }
+                if let Ok(s) = value.clone().into_immutable_string() {
+                    return SimpleDynamic::Str(String::from(s.as_str()));
+                }
+                #[cfg(not(feature = "no_float"))]
+                if let Ok(f) = value.as_float() {
+                    return SimpleDynamic::Float(f);
+                }
+                #[cfg(not(feature = "no_index"))]
+                if let Ok(blob) = value.clone().into_blob() {
+                    return SimpleDynamic::Blob(blob);
+                }
+                #[cfg(not(feature = "no_index"))]
+                if let Ok(arr) = value.clone().into_array() {
+                    let serialized = arr
+                        .iter()
+                        .map(|item| serialize_nested_dynamic(item))
+                        .collect();
+                    return SimpleDynamic::Array(serialized);
+                }
                 #[cfg(not(feature = "no_object"))]
                 if let Some(map) = value.clone().try_cast::<Map>() {
-                    println!("Fallback: converting map");
                     let entries = map
                         .into_iter()
                         .map(|(k, v)| (String::from(k.as_str()), serialize_nested_dynamic(&v)))
                         .collect();
                     return SimpleDynamic::Map(entries);
                 }
-                println!(
-                    "Fallback: converting to unit for type {}",
-                    value.type_name()
-                );
                 SimpleDynamic::Unit
             }
-        };
-        println!(
-            "From<&Dynamic> result: {:?}",
-            std::mem::discriminant(&result)
-        );
-        result
+
+            _ => {
+                // Fallback path using safe Dynamic API conversions
+                if let Ok(i) = value.as_int() {
+                    return SimpleDynamic::Int(i);
+                }
+                if let Ok(b) = value.as_bool() {
+                    return SimpleDynamic::Bool(b);
+                }
+                if let Ok(c) = value.as_char() {
+                    return SimpleDynamic::Char(c);
+                }
+                if let Ok(s) = value.clone().into_immutable_string() {
+                    return SimpleDynamic::Str(String::from(s.as_str()));
+                }
+                #[cfg(not(feature = "no_float"))]
+                if let Ok(f) = value.as_float() {
+                    return SimpleDynamic::Float(f);
+                }
+                #[cfg(not(feature = "no_index"))]
+                if let Ok(blob) = value.clone().into_blob() {
+                    return SimpleDynamic::Blob(blob);
+                }
+                #[cfg(not(feature = "no_index"))]
+                if let Ok(arr) = value.clone().into_array() {
+                    let serialized = arr
+                        .iter()
+                        .map(|item| serialize_nested_dynamic(item))
+                        .collect();
+                    return SimpleDynamic::Array(serialized);
+                }
+                #[cfg(not(feature = "no_object"))]
+                if let Some(map) = value.clone().try_cast::<Map>() {
+                    let entries = map
+                        .into_iter()
+                        .map(|(k, v)| (String::from(k.as_str()), serialize_nested_dynamic(&v)))
+                        .collect();
+                    return SimpleDynamic::Map(entries);
+                }
+                SimpleDynamic::Unit
+            }
+        }
     }
 }
 
 impl From<SimpleDynamic> for Dynamic {
     fn from(value: SimpleDynamic) -> Self {
-        let result = match value {
+        match value {
             SimpleDynamic::Unit => Dynamic::UNIT,
             SimpleDynamic::Bool(v) => Dynamic::from(v),
             SimpleDynamic::Str(s) => Dynamic::from(s),
             SimpleDynamic::Char(c) => Dynamic::from(c),
-            SimpleDynamic::Int(i) => {
-                println!("Converting SimpleDynamic::Int({}) to Dynamic", i);
-                Dynamic::from(i)
-            }
+            SimpleDynamic::Int(i) => Dynamic::from(i),
 
             #[cfg(not(feature = "no_float"))]
             SimpleDynamic::Float(f) => Dynamic::from(f),
@@ -242,10 +293,6 @@ impl From<SimpleDynamic> for Dynamic {
 
             #[cfg(not(feature = "no_index"))]
             SimpleDynamic::Array(elements) => {
-                println!(
-                    "Converting SimpleDynamic::Array with {} elements",
-                    elements.len()
-                );
                 let array: Array = elements
                     .into_iter()
                     .map(|bytes| deserialize_nested_dynamic(&bytes))
@@ -261,9 +308,7 @@ impl From<SimpleDynamic> for Dynamic {
                 }
                 Dynamic::from_map(map)
             }
-        };
-        println!("SimpleDynamic::from result: type={}", result.type_name());
-        result
+        }
     }
 }
 
