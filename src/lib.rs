@@ -122,6 +122,8 @@ mod module;
 mod optimizer;
 pub mod packages;
 mod parser;
+#[cfg(feature = "rkyv")]
+pub mod rkyv;
 #[cfg(feature = "serde")]
 pub mod serde;
 mod tests;
