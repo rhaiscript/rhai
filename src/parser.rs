@@ -3653,6 +3653,9 @@ impl Engine {
                         state.stack.push(s.clone(), ());
                         params.push((s, pos));
                     }
+                    (token, pos) if token.is_standard_keyword() || token.is_reserved() => {
+                        return Err(PERR::Reserved(token.to_string()).into_err(pos))
+                    }
                     (Token::LexError(err), pos) => return Err(err.into_err(pos)),
                     (.., pos) => {
                         return Err(PERR::MissingToken(
@@ -3814,6 +3817,9 @@ impl Engine {
                         let s = self.get_interned_string(*s);
                         new_state.stack.push(s.clone(), ());
                         params_list.push(s);
+                    }
+                    (token, pos) if token.is_standard_keyword() || token.is_reserved() => {
+                        return Err(PERR::Reserved(token.to_string()).into_err(pos))
                     }
                     (Token::LexError(err), pos) => return Err(err.into_err(pos)),
                     (.., pos) => {
