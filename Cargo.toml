@@ -18,23 +18,50 @@ keywords = ["scripting", "scripting-engine", "scripting-language", "embedded"]
 categories = ["no-std", "embedded", "wasm", "parser-implementations"]
 
 [dependencies]
-smallvec = { version = "1.7.0", default-features = false, features = ["union", "const_new", "const_generics"] }
+smallvec = { version = "1.7.0", default-features = false, features = [
+    "union",
+    "const_new",
+    "const_generics",
+] }
 thin-vec = { version = "0.2.13", default-features = false }
-ahash = { version = "0.8.4", default-features = false, features = ["compile-time-rng"] }
+ahash = { version = "0.8.4", default-features = false, features = [
+    "compile-time-rng",
+] }
 num-traits = { version = "0.2.14", default-features = false }
-once_cell = { version = "1.20.1", default-features = false, features = ["race", "portable-atomic", "alloc"] }
+once_cell = { version = "1.20.1", default-features = false, features = [
+    "race",
+    "portable-atomic",
+    "alloc",
+] }
 bitflags = { version = "2.3.3", default-features = false }
 smartstring = { version = "1.0.0", default-features = false }
 rhai_codegen = { version = "3.1.0", path = "codegen" }
 
-no-std-compat = { git = "https://gitlab.com/jD91mZM2/no-std-compat.git", version = "0.4.1", default-features = false, features = ["alloc"], optional = true }
+no-std-compat = { git = "https://gitlab.com/jD91mZM2/no-std-compat.git", version = "0.4.1", default-features = false, features = [
+    "alloc",
+], optional = true }
 libm = { version = "0.2.0", default-features = false, optional = true }
 hashbrown = { version = "0.16.0", optional = true }
-core-error = { version = "0.0.0", default-features = false, features = ["alloc"], optional = true }
-serde = { version = "1.0.136", default-features = false, features = ["derive", "alloc"], optional = true }
-serde_json = { version = "1.0.45", default-features = false, features = ["alloc"], optional = true }
+core-error = { version = "0.0.0", default-features = false, features = [
+    "alloc",
+], optional = true }
+serde = { version = "1.0.136", default-features = false, features = [
+    "derive",
+    "alloc",
+], optional = true }
+serde_json = { version = "1.0.45", default-features = false, features = [
+    "alloc",
+], optional = true }
+rkyv = { version = "0.7", default-features = false, features = [
+    "alloc",
+    "size_32",
+], optional = true }
+bytecheck = { version = "0.6", default-features = false, optional = true }
+rend = { version = "0.4", default-features = false, optional = true }
 unicode-xid = { version = "0.2.0", default-features = false, optional = true }
-rust_decimal = { version = "1.24.0", default-features = false, features = ["maths"], optional = true }
+rust_decimal = { version = "1.24.0", default-features = false, features = [
+    "maths",
+], optional = true }
 getrandom = { version = "0.2.7", optional = true }
 rustyline = { version = "15.0.0", optional = true }
 document-features = { version = "0.2.0", optional = true }
@@ -42,12 +69,17 @@ arbitrary = { version = "1.3.2", optional = true, features = ["derive"] }
 
 [dev-dependencies]
 rmp-serde = "1.1.1"
-serde_json = { version = "1.0.45", default-features = false, features = ["alloc"] }
+serde_json = { version = "1.0.45", default-features = false, features = [
+    "alloc",
+] }
 
 [features]
 
 ## Default features: `std`, uses runtime random numbers for hashing.
-default = ["std", "ahash/runtime-rng"] # ahash/runtime-rng trumps ahash/compile-time-rng
+default = [
+    "std",
+    "ahash/runtime-rng",
+] # ahash/runtime-rng trumps ahash/compile-time-rng
 ## Standard features: uses compile-time random number for hashing.
 std = ["once_cell/std", "ahash/std", "num-traits/std", "smartstring/std"]
 
@@ -59,6 +91,8 @@ sync = ["no-std-compat?/compat_sync", "rhai_codegen/sync"]
 decimal = ["rust_decimal"]
 ## Enable serialization/deserialization of Rhai data types via [`serde`](https://crates.io/crates/serde).
 serde = ["dep:serde", "smartstring/serde", "smallvec/serde", "thin-vec/serde"]
+## Enable zero-copy serialization/deserialization via [`rkyv`](https://crates.io/crates/rkyv) (high-performance binary format).
+rkyv = ["dep:rkyv", "dep:rend"]
 ## Allow [Unicode Standard Annex #31](https://unicode.org/reports/tr31/) for identifiers.
 unicode-xid-ident = ["unicode-xid"]
 ## Enable functions metadata (including doc-comments); implies [`serde`](#feature-serde).
@@ -113,7 +147,14 @@ no_optimize = []
 #! ### Compiling for `no-std`
 
 ## Turn on `no-std` compilation (nightly only).
-no_std = ["no-std-compat", "num-traits/libm", "core-error", "libm", "hashbrown", "no_time"]
+no_std = [
+    "no-std-compat",
+    "num-traits/libm",
+    "core-error",
+    "libm",
+    "hashbrown",
+    "no_time",
+]
 
 #! ### JavaScript Interface for WASM
 
@@ -146,6 +187,10 @@ name = "serde"
 required-features = ["serde"]
 
 [[example]]
+name = "rkyv"
+required-features = ["rkyv"]
+
+[[example]]
 name = "definitions"
 required-features = ["metadata", "internals"]
 
@@ -155,11 +200,22 @@ codegen-units = 1
 #opt-level = "z"     # optimize for size
 #panic = 'abort'     # remove stack backtrace for no-std
 
+[[bench]]
+name = "rkyv"
+required-features = ["rkyv", "serde"]
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 instant = { version = "0.1.10" } # WASM implementation of std::time::Instant
 
 [package.metadata.docs.rs]
-features = ["document-features", "metadata", "serde", "internals", "decimal", "debugging"]
+features = [
+    "document-features",
+    "metadata",
+    "serde",
+    "internals",
+    "decimal",
+    "debugging",
+]
 
 [patch.crates-io]
 # Notice that a custom modified version of `rustyline` is used which supports bracketed paste on Windows.
