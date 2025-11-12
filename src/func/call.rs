@@ -3,6 +3,8 @@
 use super::{get_builtin_binary_op_fn, get_builtin_op_assignment_fn, RhaiFunc};
 use crate::api::default_limits::MAX_DYNAMIC_PARAMETERS;
 use crate::ast::{Expr, FnCallExpr, FnCallHashes};
+#[cfg(feature = "default-parameters")]
+use crate::ast::ScriptFuncDef;
 use crate::engine::{
     KEYWORD_DEBUG, KEYWORD_EVAL, KEYWORD_FN_PTR, KEYWORD_FN_PTR_CALL, KEYWORD_FN_PTR_CURRY,
     KEYWORD_IS_DEF_VAR, KEYWORD_PRINT, KEYWORD_TYPE_OF,
@@ -32,6 +34,112 @@ use num_traits::Float;
 
 /// Arguments to a function call, which is a list of [`&mut Dynamic`][Dynamic].
 pub type FnCallArgs<'a> = [&'a mut Dynamic];
+
+/// Build complete argument list from positional args, defaults, and named args.
+/// Returns a vector of Dynamic values that matches the function's parameter list.
+#[cfg(all(not(feature = "no_function"), feature = "default-parameters"))]
+fn build_complete_args(
+    fn_def: &ScriptFuncDef,
+    positional_args: &[Dynamic],
+    named_args: &[(ImmutableString, Dynamic)],
+    pos: Position,
+) -> RhaiResultOf<FnArgsVec<Dynamic>> {
+    let num_params = fn_def.params.len();
+    let num_positional = positional_args.len();
+
+    // Validate: can't have more positional args than parameters
+    if num_positional > num_params {
+        return Err(ERR::ErrorFunctionNotFound(
+            format!(
+                "{} (expected at most {} arguments, got {})",
+                fn_def.name, num_params, num_positional
+            ),
+            pos,
+        )
+        .into());
+    }
+
+    // Build a map of named arguments for quick lookup
+    let mut named_map = std::collections::HashMap::new();
+    for (param_name, value) in named_args {
+        // Check for duplicate named arguments
+        if named_map
+            .insert(param_name.clone(), value.clone())
+            .is_some()
+        {
+            return Err(ERR::ErrorFunctionNotFound(
+                format!(
+                    "{} (duplicate named argument '{}')",
+                    fn_def.name, param_name
+                ),
+                pos,
+            )
+            .into());
+        }
+    }
+
+    // Validate: check for arguments provided both positionally and by name
+    for (param_name, _) in named_args {
+        if let Some(pos_idx) = fn_def.params.iter().position(|p| p == param_name) {
+            if pos_idx < num_positional {
+                return Err(ERR::ErrorFunctionNotFound(
+                    format!(
+                        "{} (argument '{}' provided both positionally and by name)",
+                        fn_def.name, param_name
+                    ),
+                    pos,
+                )
+                .into());
+            }
+        }
+    }
+
+    // Build complete argument list
+    let mut complete_args = FnArgsVec::with_capacity(num_params);
+
+    // First, add positional arguments
+    complete_args.extend(positional_args.iter().cloned());
+
+    // Then, fill remaining positions with defaults or check for missing required args
+    for i in num_positional..num_params {
+        let param_name = &fn_def.params[i];
+
+        // Check if this parameter has a named argument
+        if let Some(value) = named_map.remove(param_name) {
+            complete_args.push(value);
+        } else if let Some(default) = &fn_def.defaults[i] {
+            // Use default value
+            complete_args.push(default.clone());
+        } else {
+            // Missing required argument
+            return Err(ERR::ErrorFunctionNotFound(
+                format!(
+                    "{} (missing required argument '{}', position {})",
+                    fn_def.name,
+                    param_name,
+                    i + 1
+                ),
+                pos,
+            )
+            .into());
+        }
+    }
+
+    // Check for named arguments that don't match any parameter
+    if !named_map.is_empty() {
+        let unknown_param = named_map.keys().next().unwrap();
+        return Err(ERR::ErrorFunctionNotFound(
+            format!(
+                "{} (unknown named argument '{}')",
+                fn_def.name, unknown_param
+            ),
+            pos,
+        )
+        .into());
+    }
+
+    Ok(complete_args)
+}
 
 /// A type that temporarily stores a mutable reference to a `Dynamic`,
 /// replacing it with a cloned copy.
@@ -169,6 +277,10 @@ impl Engine {
         hash_base: u64,
         args: Option<&mut FnCallArgs>,
         allow_dynamic: bool,
+        #[cfg(feature = "default-parameters")]
+        fn_name: Option<&str>,
+        #[cfg(not(feature = "default-parameters"))]
+        _fn_name: Option<&str>,
     ) -> Option<&'s FnResolutionCacheEntry> {
         let mut hash = args.as_deref().map_or(hash_base, |args| {
             calc_fn_hash_full(hash_base, args.iter().map(|a| a.type_id()))
@@ -261,6 +373,62 @@ impl Engine {
 
                     // Stop when all permutations are exhausted
                     if bitmask >= max_bitmask {
+                        // For functions with defaults, try higher argument counts
+                        // We registered multiple hashes (one per valid arg count), so try them
+                        #[cfg(feature = "default-parameters")]
+                        if let Some(name) = fn_name {
+                            let mut try_arg_count = num_args + 1;
+                            // Try up to num_args + 10 to find functions with defaults
+                            while try_arg_count <= num_args + 10 {
+                                let try_hash = crate::calc_fn_hash(None, name, try_arg_count);
+
+                                // Try to find function with this argument count
+                                #[cfg(not(feature = "no_function"))]
+                                let func = _global
+                                    .lib
+                                    .iter()
+                                    .rev()
+                                    .find_map(|m| m.get_fn(try_hash).map(|f| (f, m.id_raw())));
+                                #[cfg(feature = "no_function")]
+                                let func = None;
+
+                                let func = func.or_else(|| {
+                                    self.global_modules
+                                        .iter()
+                                        .find_map(|m| m.get_fn(try_hash).map(|f| (f, m.id_raw())))
+                                });
+
+                                #[cfg(not(feature = "no_module"))]
+                                let func = func
+                                    .or_else(|| _global.get_qualified_fn(try_hash, true))
+                                    .or_else(|| {
+                                        self.global_sub_modules
+                                            .values()
+                                            .filter(|m| m.contains_indexed_global_functions())
+                                            .find_map(|m| {
+                                                m.get_qualified_fn(try_hash)
+                                                    .map(|f| (f, m.id_raw()))
+                                            })
+                                    });
+
+                                if let Some((f, s)) = func {
+                                    // Found a function with more parameters - it might have defaults
+                                    let new_entry = FnResolutionCacheEntry {
+                                        func: f.clone(),
+                                        source: s.cloned(),
+                                    };
+                                    return if cache.bloom_filter.is_absent_and_set(try_hash) {
+                                        *local_entry = Some(new_entry);
+                                        local_entry.as_ref()
+                                    } else {
+                                        entry.insert(Some(new_entry)).as_ref()
+                                    };
+                                }
+
+                                try_arg_count += 1;
+                            }
+                        }
+
                         if num_args != 2 {
                             return None;
                         }
@@ -353,7 +521,7 @@ impl Engine {
         // Check if function access already in the cache
         let local_entry = &mut None;
         let a = Some(&mut *args);
-        let func = self.resolve_fn(global, caches, local_entry, op_token, hash, a, true);
+        let func = self.resolve_fn(global, caches, local_entry, op_token, hash, a, true, None);
 
         if let Some(FnResolutionCacheEntry { func, source }) = func {
             debug_assert!(func.is_native());
@@ -559,13 +727,221 @@ impl Engine {
         &self,
         global: &mut GlobalRuntimeState,
         caches: &mut Caches,
-        _scope: Option<&mut Scope>,
+        scope: Option<&mut Scope>,
         fn_name: &str,
         op_token: Option<&Token>,
         hashes: FnCallHashes,
         args: &mut FnCallArgs,
         is_ref_mut: bool,
-        _is_method_call: bool,
+        is_method_call: bool,
+        pos: Position,
+    ) -> RhaiResultOf<(Dynamic, bool)> {
+        #[cfg(all(not(feature = "no_function"), feature = "default-parameters"))]
+        {
+            self.exec_fn_call_with_named(
+                global,
+                caches,
+                scope,
+                fn_name,
+                op_token,
+                hashes,
+                args,
+                is_ref_mut,
+                is_method_call,
+                &[],
+                pos,
+            )
+        }
+        #[cfg(all(not(feature = "no_function"), not(feature = "default-parameters")))]
+        {
+            // When default-parameters is disabled, use the original behavior
+            self.exec_fn_call_original(
+                global,
+                caches,
+                scope,
+                fn_name,
+                op_token,
+                hashes,
+                args,
+                is_ref_mut,
+                is_method_call,
+                pos,
+            )
+        }
+        #[cfg(feature = "no_function")]
+        {
+            // When no_function is enabled, only native functions are available
+            self.exec_native_fn_call(
+                global,
+                caches,
+                fn_name,
+                op_token,
+                hashes.native(),
+                args,
+                is_ref_mut,
+                false,
+                pos,
+            )
+        }
+    }
+
+    /// Original exec_fn_call implementation without default parameters support.
+    #[cfg(all(not(feature = "no_function"), not(feature = "default-parameters")))]
+    fn exec_fn_call_original(
+        &self,
+        global: &mut GlobalRuntimeState,
+        caches: &mut Caches,
+        scope: Option<&mut Scope>,
+        fn_name: &str,
+        op_token: Option<&Token>,
+        hashes: FnCallHashes,
+        args: &mut FnCallArgs,
+        is_ref_mut: bool,
+        is_method_call: bool,
+        pos: Position,
+    ) -> RhaiResultOf<(Dynamic, bool)> {
+        // These may be redirected from method style calls.
+        if hashes.is_native_only()
+            && match fn_name {
+                // Handle type_of()
+                KEYWORD_TYPE_OF if args.len() == 1 => {
+                    let typ = self.get_interned_string(self.map_type_name(args[0].type_name()));
+                    return Ok((typ.into(), false));
+                }
+
+                #[cfg(not(feature = "no_closure"))]
+                crate::engine::KEYWORD_IS_SHARED if args.len() == 1 => {
+                    return Ok((args[0].is_shared().into(), false))
+                }
+                #[cfg(not(feature = "no_closure"))]
+                crate::engine::KEYWORD_IS_SHARED => true,
+
+                #[cfg(not(feature = "no_function"))]
+                crate::engine::KEYWORD_IS_DEF_FN => true,
+
+                KEYWORD_TYPE_OF | KEYWORD_FN_PTR | KEYWORD_EVAL | KEYWORD_IS_DEF_VAR
+                | KEYWORD_FN_PTR_CALL | KEYWORD_FN_PTR_CURRY => true,
+
+                _ => false,
+            }
+        {
+            let sig = self.gen_fn_call_signature(fn_name, args);
+            return Err(ERR::ErrorFunctionNotFound(sig, pos).into());
+        }
+
+        // Check for data race.
+        #[cfg(not(feature = "no_closure"))]
+        ensure_no_data_race(fn_name, args, is_ref_mut)?;
+
+        defer! { let orig_level = global.level; global.level += 1 }
+
+        // Script-defined function call?
+        if !hashes.is_native_only() {
+            let hash = hashes.script();
+            let local_entry = &mut None;
+            let mut resolved = None;
+
+            #[cfg(not(feature = "no_object"))]
+            if is_method_call && !args.is_empty() {
+                let typed_hash =
+                    crate::calc_typed_method_hash(hash, self.map_type_name(args[0].type_name()));
+                resolved = self.resolve_fn(
+                    global,
+                    caches,
+                    local_entry,
+                    None,
+                    typed_hash,
+                    None,
+                    false,
+                    Some(fn_name),
+                );
+            }
+
+            if resolved.is_none() {
+                resolved = self.resolve_fn(
+                    global,
+                    caches,
+                    local_entry,
+                    None,
+                    hash,
+                    None,
+                    false,
+                    Some(fn_name),
+                );
+            }
+
+            if let Some(FnResolutionCacheEntry { func, source }) = resolved.cloned() {
+                let RhaiFunc::Script { fn_def, env } = func else {
+                    unreachable!("Script function expected");
+                };
+
+                let fn_def = &*fn_def;
+                let env = env.as_deref();
+
+                if fn_def.body.is_empty() {
+                    return Ok((Dynamic::UNIT, false));
+                }
+
+                let mut empty_scope;
+                let scope = if let Some(scope) = scope {
+                    scope
+                } else {
+                    empty_scope = Scope::new();
+                    &mut empty_scope
+                };
+
+                let orig_source = mem::replace(&mut global.source, source);
+                defer! { global => move |g| g.source = orig_source }
+
+                return if is_method_call {
+                    // Method call: first arg is the object (not in fn_def.params)
+                    let (first_arg, rest_args) = args.split_first_mut().unwrap();
+                    let this_ptr = Some(&mut **first_arg);
+
+                    self.call_script_fn(
+                        global, caches, scope, this_ptr, env, fn_def, rest_args, true, pos,
+                    )
+                } else {
+                    // Normal call of script function
+                    let backup = &mut ArgBackup::new();
+
+                    // The first argument is a reference?
+                    let swap = is_ref_mut && !args.is_empty();
+
+                    if swap {
+                        backup.change_first_arg_to_copy(args);
+                    }
+
+                    defer! { args = (args) if swap => move |a| backup.restore_first_arg(a) }
+
+                    self.call_script_fn(global, caches, scope, None, env, fn_def, args, true, pos)
+                }
+                .map(|r| (r, false));
+            }
+        }
+
+        // Native function call
+        let hash = hashes.native();
+
+        self.exec_native_fn_call(
+            global, caches, fn_name, op_token, hash, args, is_ref_mut, false, pos,
+        )
+    }
+
+    /// Internal function that handles named arguments and defaults.
+    #[cfg(all(not(feature = "no_function"), feature = "default-parameters"))]
+    fn exec_fn_call_with_named(
+        &self,
+        global: &mut GlobalRuntimeState,
+        caches: &mut Caches,
+        scope: Option<&mut Scope>,
+        fn_name: &str,
+        op_token: Option<&Token>,
+        hashes: FnCallHashes,
+        args: &mut FnCallArgs,
+        is_ref_mut: bool,
+        is_method_call: bool,
+        named_args: &[(ImmutableString, Dynamic)],
         pos: Position,
     ) -> RhaiResultOf<(Dynamic, bool)> {
         // These may be redirected from method style calls.
@@ -611,15 +987,32 @@ impl Engine {
             let mut resolved = None;
 
             #[cfg(not(feature = "no_object"))]
-            if _is_method_call && !args.is_empty() {
+            if is_method_call && !args.is_empty() {
                 let typed_hash =
                     crate::calc_typed_method_hash(hash, self.map_type_name(args[0].type_name()));
-                resolved =
-                    self.resolve_fn(global, caches, local_entry, None, typed_hash, None, false);
+                resolved = self.resolve_fn(
+                    global,
+                    caches,
+                    local_entry,
+                    None,
+                    typed_hash,
+                    None,
+                    false,
+                    Some(fn_name),
+                );
             }
 
             if resolved.is_none() {
-                resolved = self.resolve_fn(global, caches, local_entry, None, hash, None, false);
+                resolved = self.resolve_fn(
+                    global,
+                    caches,
+                    local_entry,
+                    None,
+                    hash,
+                    None,
+                    false,
+                    Some(fn_name),
+                );
             }
 
             if let Some(FnResolutionCacheEntry { func, source }) = resolved.cloned() {
@@ -635,7 +1028,7 @@ impl Engine {
                 }
 
                 let mut empty_scope;
-                let scope = if let Some(scope) = _scope {
+                let scope = if let Some(scope) = scope {
                     scope
                 } else {
                     empty_scope = Scope::new();
@@ -645,27 +1038,44 @@ impl Engine {
                 let orig_source = mem::replace(&mut global.source, source);
                 defer! { global => move |g| g.source = orig_source }
 
-                return if _is_method_call {
-                    // Method call of script function - map first argument to `this`
-                    let (first_arg, args) = args.split_first_mut().unwrap();
+                // Build complete argument list from positional args, defaults, and named args
+                return if is_method_call {
+                    // Method call: first arg is the object (not in fn_def.params)
+                    // So we need to handle it separately
+                    let (first_arg, rest_positional) = args.split_first_mut().unwrap();
                     let this_ptr = Some(&mut **first_arg);
+
+                    // For method calls, fn_def.params doesn't include 'this'
+                    // So we build args for the remaining parameters
+                    let positional_args: FnArgsVec<Dynamic> = rest_positional.iter().map(|a| (*a).clone()).collect();
+                    let complete_args = build_complete_args(fn_def, &positional_args, named_args, pos)?;
+                    let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
+                    let mut complete_args_refs: FnArgsVec<&mut Dynamic> = complete_args_mut.iter_mut().collect();
+                    let complete_args_slice: &mut [&mut Dynamic] = &mut complete_args_refs;
+
                     self.call_script_fn(
-                        global, caches, scope, this_ptr, env, fn_def, args, true, pos,
+                        global, caches, scope, this_ptr, env, fn_def, complete_args_slice, true, pos,
                     )
                 } else {
                     // Normal call of script function
+                    let positional_args: FnArgsVec<Dynamic> = args.iter().map(|a| (*a).clone()).collect();
+                    let complete_args = build_complete_args(fn_def, &positional_args, named_args, pos)?;
+                    let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
+                    let mut complete_args_refs: FnArgsVec<&mut Dynamic> = complete_args_mut.iter_mut().collect();
+                    let complete_args_slice: &mut [&mut Dynamic] = &mut complete_args_refs;
+
                     let backup = &mut ArgBackup::new();
 
                     // The first argument is a reference?
-                    let swap = is_ref_mut && !args.is_empty();
+                    let swap = is_ref_mut && !complete_args_slice.is_empty();
 
                     if swap {
-                        backup.change_first_arg_to_copy(args);
+                        backup.change_first_arg_to_copy(complete_args_slice);
                     }
 
-                    defer! { args = (args) if swap => move |a| backup.restore_first_arg(a) }
+                    defer! { complete_args_slice = (complete_args_slice) if swap => move |a| backup.restore_first_arg(a) }
 
-                    self.call_script_fn(global, caches, scope, None, env, fn_def, args, true, pos)
+                    self.call_script_fn(global, caches, scope, None, env, fn_def, complete_args_slice, true, pos)
                 }
                 .map(|r| (r, false));
             }
@@ -725,6 +1135,7 @@ impl Engine {
         call_args: &mut [Dynamic],
         first_arg_pos: Position,
         pos: Position,
+        named_args: &[(ImmutableString, Dynamic)],
     ) -> RhaiResultOf<(Dynamic, bool)> {
         let (result, updated) = match fn_name {
             // Handle fn_ptr.call(...)
@@ -773,18 +1184,30 @@ impl Engine {
                         #[cfg(not(feature = "no_function"))]
                         let _is_anon = fn_ptr.is_anonymous();
 
-                        // Recalculate hashes
+                        // Recalculate hashes - for anonymous functions, we need to try multiple argument counts
+                        // if the function has defaults
                         let new_hash = if !_is_anon && !is_valid_function_name(fn_name) {
                             FnCallHashes::from_native_only(calc_fn_hash(None, fn_name, args.len()))
                         } else {
+                            // For anonymous functions, try the exact arg count first, then allow resolution
+                            // to try other counts if the function has defaults
                             FnCallHashes::from_hash(calc_fn_hash(None, fn_name, args.len()))
                         };
 
                         // Map it to name(args) in function-call style
-                        self.exec_fn_call(
-                            global, caches, None, fn_name, None, new_hash, &mut args, false, false,
-                            pos,
-                        )
+                        #[cfg(feature = "default-parameters")]
+                        {
+                            self.exec_fn_call_with_named(
+                                global, caches, None, fn_name, None, new_hash, &mut args, false, false,
+                                named_args, pos,
+                            )
+                        }
+                        #[cfg(not(feature = "default-parameters"))]
+                        {
+                            self.exec_fn_call(
+                                global, caches, None, fn_name, None, new_hash, &mut args, false, false, pos,
+                            )
+                        }
                     }
                 }
             }
@@ -887,10 +1310,19 @@ impl Engine {
                         };
 
                         // Map it to name(args) in function-call style
-                        self.exec_fn_call(
-                            global, caches, None, &name, None, new_hash, args, is_ref_mut, true,
-                            pos,
-                        )
+                        #[cfg(feature = "default-parameters")]
+                        {
+                            self.exec_fn_call_with_named(
+                                global, caches, None, &name, None, new_hash, args, is_ref_mut, true,
+                                named_args, pos,
+                            )
+                        }
+                        #[cfg(not(feature = "default-parameters"))]
+                        {
+                            self.exec_fn_call(
+                                global, caches, None, &name, None, new_hash, args, is_ref_mut, true, pos,
+                            )
+                        }
                     }
                 }
             }
@@ -1005,14 +1437,38 @@ impl Engine {
                         let scope = &mut Scope::new();
                         let env = env.as_deref();
                         let this_ptr = Some(target.as_mut());
-                        let args = &mut call_args.iter_mut().collect::<FnArgsVec<_>>();
 
-                        defer! { let orig_level = global.level; global.level += 1 }
+                        #[cfg(feature = "default-parameters")]
+                        {
+                            // Build complete argument list from positional args, defaults, and named args
+                            let positional_args: FnArgsVec<Dynamic> =
+                                call_args.iter().map(|a| (*a).clone()).collect();
+                            let complete_args =
+                                build_complete_args(&fn_def, &positional_args, named_args, pos)?;
+                            let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
+                            let mut complete_args_refs: FnArgsVec<&mut Dynamic> =
+                                complete_args_mut.iter_mut().collect();
+                            let args = &mut complete_args_refs;
 
-                        self.call_script_fn(
-                            global, caches, scope, this_ptr, env, &fn_def, args, true, pos,
-                        )
-                        .map(|v| (v, false))
+                            defer! { let orig_level = global.level; global.level += 1 }
+
+                            self.call_script_fn(
+                                global, caches, scope, this_ptr, env, &fn_def, args, true, pos,
+                            )
+                            .map(|v| (v, false))
+                        }
+                        #[cfg(not(feature = "default-parameters"))]
+                        {
+                            // When feature is disabled, just use positional args directly
+                            let args = &mut call_args.iter_mut().collect::<FnArgsVec<_>>();
+
+                            defer! { let orig_level = global.level; global.level += 1 }
+
+                            self.call_script_fn(
+                                global, caches, scope, this_ptr, env, &fn_def, args, true, pos,
+                            )
+                            .map(|v| (v, false))
+                        }
                     }
                     // Native function - short-circuit
                     Some((None, Some(func), ..)) => {
@@ -1039,9 +1495,19 @@ impl Engine {
                             .chain(call_args.iter_mut())
                             .collect::<FnArgsVec<_>>();
 
-                        self.exec_fn_call(
-                            global, caches, None, fn_name, None, hash, args, is_ref_mut, true, pos,
-                        )
+                        #[cfg(feature = "default-parameters")]
+                        {
+                            self.exec_fn_call_with_named(
+                                global, caches, None, fn_name, None, hash, args, is_ref_mut, true,
+                                named_args, pos,
+                            )
+                        }
+                        #[cfg(not(feature = "default-parameters"))]
+                        {
+                            self.exec_fn_call(
+                                global, caches, None, fn_name, None, hash, args, is_ref_mut, true, pos,
+                            )
+                        }
                     }
                     _ => unreachable!(),
                 }
@@ -1067,6 +1533,10 @@ impl Engine {
         op_token: Option<&Token>,
         first_arg: Option<&Expr>,
         args_expr: &[Expr],
+        #[cfg(feature = "default-parameters")]
+        named_args: &[(ImmutableString, Expr)],
+        #[cfg(not(feature = "default-parameters"))]
+        _named_args: &[(ImmutableString, Expr)],
         hashes: FnCallHashes,
         capture_scope: bool,
         pos: Position,
@@ -1111,10 +1581,53 @@ impl Engine {
 
                 match typ {
                     // Linked to scripted function - short-circuit
-                    #[cfg(not(feature = "no_function"))]
-                    FnPtrType::Script(fn_def)
-                        if fn_def.params.len() == curry.len() + args_expr.len() =>
-                    {
+                    // For functions with defaults, allow fewer arguments than the full parameter count
+                    #[cfg(all(not(feature = "no_function"), feature = "default-parameters"))]
+                    FnPtrType::Script(fn_def) => {
+                        let num_provided = curry.len() + args_expr.len();
+                        let num_params = fn_def.params.len();
+                        let min_args = fn_def
+                            .defaults
+                            .iter()
+                            .position(|d| d.is_some())
+                            .unwrap_or(num_params);
+
+                        // Check if we have a valid number of arguments (between min_args and num_params)
+                        if num_provided >= min_args && num_provided <= num_params {
+                            // Evaluate arguments
+                            let mut arg_values =
+                                FnArgsVec::with_capacity(curry.len() + args_expr.len());
+                            arg_values.extend(curry);
+                            for expr in args_expr {
+                                let this_ptr = this_ptr.as_deref_mut();
+                                let (value, _) =
+                                    self.get_arg_value(global, caches, scope, this_ptr, expr)?;
+                                arg_values.push(value);
+                            }
+
+                            // Build complete argument list with defaults
+                            let positional_args: FnArgsVec<Dynamic> =
+                                arg_values.iter().map(|a| (*a).clone()).collect();
+                            let complete_args =
+                                build_complete_args(&fn_def, &positional_args, &[], pos)?;
+                            let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
+                            let mut complete_args_refs: FnArgsVec<&mut Dynamic> =
+                                complete_args_mut.iter_mut().collect();
+                            let args = &mut complete_args_refs;
+
+                            let scope = &mut Scope::new();
+                            let env = env.as_deref();
+
+                            defer! { let orig_level = global.level; global.level += 1 }
+
+                            return self.call_script_fn(
+                                global, caches, scope, None, env, &fn_def, args, true, pos,
+                            );
+                        }
+                    }
+                    #[cfg(all(not(feature = "no_function"), not(feature = "default-parameters")))]
+                    FnPtrType::Script(fn_def) if fn_def.params.len() == curry.len() + args_expr.len() => {
+                        // When feature is disabled, only allow exact argument count match
                         // Evaluate arguments
                         let mut arg_values =
                             FnArgsVec::with_capacity(curry.len() + args_expr.len());
@@ -1126,6 +1639,7 @@ impl Engine {
                             arg_values.push(value);
                         }
                         let args = &mut arg_values.iter_mut().collect::<FnArgsVec<_>>();
+
                         let scope = &mut Scope::new();
                         let env = env.as_deref();
 
@@ -1357,6 +1871,16 @@ impl Engine {
         let mut args = FnArgsVec::with_capacity(num_args + curry.len());
         let mut is_ref_mut = false;
 
+        // Evaluate named arguments
+        #[cfg(feature = "default-parameters")]
+        let mut named_arg_values = FnArgsVec::with_capacity(named_args.len());
+        #[cfg(feature = "default-parameters")]
+        for (param_name, expr) in named_args {
+            let (value, ..) =
+                self.get_arg_value(global, caches, scope, this_ptr.as_deref_mut(), expr)?;
+            named_arg_values.push((param_name.clone(), value.flatten()));
+        }
+
         // Capture parent scope?
         //
         // If so, do it separately because we cannot convert the first argument (if it is a simple
@@ -1373,12 +1897,71 @@ impl Engine {
             // Use parent scope
             let scope = Some(scope);
 
-            return self
-                .exec_fn_call(
-                    global, caches, scope, fn_name, op_token, hashes, &mut args, is_ref_mut, false,
-                    pos,
-                )
-                .map(|(v, ..)| v);
+            // Convert named_arg_values to the format expected by exec_fn_call_with_named
+            #[cfg(feature = "default-parameters")]
+            let named_args_dyn: FnArgsVec<_> = named_arg_values
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect();
+            #[cfg(feature = "default-parameters")]
+            let named_args_slice: &[(ImmutableString, Dynamic)] = &named_args_dyn;
+            #[cfg(not(feature = "default-parameters"))]
+            let named_args_slice: &[(ImmutableString, Dynamic)] = &[];
+
+            #[cfg(all(not(feature = "no_function"), feature = "default-parameters"))]
+            {
+                return self
+                    .exec_fn_call_with_named(
+                        global,
+                        caches,
+                        scope,
+                        fn_name,
+                        op_token,
+                        hashes,
+                        &mut args,
+                        is_ref_mut,
+                        false,
+                        named_args_slice,
+                        pos,
+                    )
+                    .map(|(v, ..)| v);
+            }
+            #[cfg(all(not(feature = "no_function"), not(feature = "default-parameters")))]
+            {
+                return self
+                    .exec_fn_call(
+                        global,
+                        caches,
+                        scope,
+                        fn_name,
+                        op_token,
+                        hashes,
+                        &mut args,
+                        is_ref_mut,
+                        false,
+                        pos,
+                    )
+                    .map(|(v, ..)| v);
+            }
+            #[cfg(feature = "no_function")]
+            {
+                // When no_function is enabled, named arguments are not supported
+                // Just call exec_fn_call which will handle native functions
+                return self
+                    .exec_fn_call(
+                        global,
+                        caches,
+                        scope,
+                        fn_name,
+                        op_token,
+                        hashes,
+                        &mut args,
+                        is_ref_mut,
+                        false,
+                        pos,
+                    )
+                    .map(|(v, ..)| v);
+            }
         }
 
         // Call with blank scope
@@ -1449,10 +2032,68 @@ impl Engine {
 
         args.extend(arg_values.iter_mut());
 
-        self.exec_fn_call(
-            global, caches, None, fn_name, op_token, hashes, &mut args, is_ref_mut, false, pos,
-        )
-        .map(|(v, ..)| v)
+        // Convert named_arg_values to the format expected by exec_fn_call_with_named
+        #[cfg(feature = "default-parameters")]
+        let named_args_dyn: FnArgsVec<_> = named_arg_values
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        #[cfg(feature = "default-parameters")]
+        let named_args_slice: &[(ImmutableString, Dynamic)] = &named_args_dyn;
+        #[cfg(not(feature = "default-parameters"))]
+        let named_args_slice: &[(ImmutableString, Dynamic)] = &[];
+
+        #[cfg(all(not(feature = "no_function"), feature = "default-parameters"))]
+        {
+            self.exec_fn_call_with_named(
+                global,
+                caches,
+                None,
+                fn_name,
+                op_token,
+                hashes,
+                &mut args,
+                is_ref_mut,
+                false,
+                named_args_slice,
+                pos,
+            )
+            .map(|(v, ..)| v)
+        }
+        #[cfg(all(not(feature = "no_function"), not(feature = "default-parameters")))]
+        {
+            self.exec_fn_call(
+                global,
+                caches,
+                None,
+                fn_name,
+                op_token,
+                hashes,
+                &mut args,
+                is_ref_mut,
+                false,
+                pos,
+            )
+            .map(|(v, ..)| v)
+        }
+        #[cfg(feature = "no_function")]
+        {
+            // When no_function is enabled, named arguments are not supported
+            // Just call exec_fn_call which will handle native functions
+            self.exec_fn_call(
+                global,
+                caches,
+                None,
+                fn_name,
+                op_token,
+                hashes,
+                &mut args,
+                is_ref_mut,
+                false,
+                pos,
+            )
+            .map(|(v, ..)| v)
+        }
     }
 
     /// Call a namespace-qualified function in normal function-call style.
@@ -1723,10 +2364,14 @@ impl Engine {
             name,
             hashes,
             args,
+            #[cfg(feature = "default-parameters")]
+            named_args,
             op_token,
             capture_parent_scope: capture,
             ..
         } = expr;
+        #[cfg(not(feature = "default-parameters"))]
+        let named_args = &[];
 
         let op_token = op_token.as_ref();
 
@@ -1796,14 +2441,139 @@ impl Engine {
         }
 
         // Normal function call
+        // First check if the function name is a variable containing a FnPtr
+        // This handles cases like: let f = |a, b = 2| { a + b }; f(1)
+        if op_token.is_none() {
+            // Clone the FnPtr value to avoid borrow checker issues
+            let fn_ptr_opt = scope
+                .get(name)
+                .and_then(|v| v.read_lock::<FnPtr>().map(|fp| fp.clone()));
+            if let Some(fn_ptr) = fn_ptr_opt {
+                // It's a FnPtr - extract it and handle as FnPtr call
+
+                // Evaluate arguments (now scope is not borrowed)
+                let mut arg_values = FnArgsVec::with_capacity(args.len());
+                for expr in args {
+                    let (value, ..) =
+                        self.get_arg_value(global, caches, scope, this_ptr.as_deref_mut(), expr)?;
+                    arg_values.push(value.flatten());
+                }
+
+                // Evaluate named arguments
+                #[cfg(feature = "default-parameters")]
+                let mut named_arg_values = FnArgsVec::new();
+                #[cfg(feature = "default-parameters")]
+                for (param_name, expr) in named_args {
+                    let (value, ..) =
+                        self.get_arg_value(global, caches, scope, this_ptr.as_deref_mut(), expr)?;
+                    named_arg_values.push((param_name.clone(), value.flatten()));
+                }
+                #[cfg(not(feature = "default-parameters"))]
+                let named_arg_values: FnArgsVec<(ImmutableString, Dynamic)> = FnArgsVec::new();
+
+                // Handle FnPtr call with defaults
+                let FnPtr {
+                    name: fn_ptr_name,
+                    curry: extra_curry,
+                    #[cfg(not(feature = "no_function"))]
+                    env,
+                    typ,
+                } = fn_ptr;
+
+                match typ {
+                    #[cfg(all(not(feature = "no_function"), feature = "default-parameters"))]
+                    FnPtrType::Script(fn_def) => {
+                        let num_provided = extra_curry.len() + arg_values.len();
+                        let num_params = fn_def.params.len();
+                        let min_args = fn_def
+                            .defaults
+                            .iter()
+                            .position(|d| d.is_some())
+                            .unwrap_or(num_params);
+
+                        if num_provided >= min_args && num_provided <= num_params {
+                            // Combine curried args with provided args
+                            let mut all_args =
+                                FnArgsVec::with_capacity(extra_curry.len() + arg_values.len());
+                            all_args.extend(extra_curry.iter().cloned());
+                            all_args.extend(arg_values);
+
+                            // Build complete argument list with defaults
+                            let complete_args =
+                                build_complete_args(&fn_def, &all_args, &named_arg_values, pos)?;
+                            let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
+                            let mut complete_args_refs: FnArgsVec<&mut Dynamic> =
+                                complete_args_mut.iter_mut().collect();
+                            let args = &mut complete_args_refs;
+
+                            let scope = &mut Scope::new();
+                            let env = env.as_deref();
+
+                            defer! { let orig_level = global.level; global.level += 1 }
+
+                            return self.call_script_fn(
+                                global, caches, scope, None, env, &fn_def, args, true, pos,
+                            );
+                        }
+                    }
+                    #[cfg(all(not(feature = "no_function"), not(feature = "default-parameters")))]
+                    FnPtrType::Script(fn_def) if fn_def.params.len() == extra_curry.len() + arg_values.len() => {
+                        // When feature is disabled, only allow exact argument count match
+                        // Combine curried args with provided args
+                        let mut all_args =
+                            FnArgsVec::with_capacity(extra_curry.len() + arg_values.len());
+                        all_args.extend(extra_curry.iter().cloned());
+                        all_args.extend(arg_values);
+                        let args = &mut all_args.iter_mut().collect::<FnArgsVec<_>>();
+
+                        let scope = &mut Scope::new();
+                        let env = env.as_deref();
+
+                        defer! { let orig_level = global.level; global.level += 1 }
+
+                        return self.call_script_fn(
+                            global, caches, scope, None, env, &fn_def, args, true, pos,
+                        );
+                    }
+                    _ => {
+                        // For other FnPtr types, fall through to normal handling
+                        // by redirecting to the FnPtr's function name
+                        let (first_arg, rest_args) = args.split_first().map_or_else(
+                            || (None, args.as_ref()),
+                            |(first, rest)| (Some(first), rest),
+                        );
+
+                        return self.make_function_call(
+                            global,
+                            caches,
+                            scope,
+                            this_ptr,
+                            &fn_ptr_name,
+                            op_token,
+                            first_arg,
+                            rest_args,
+                            named_args,
+                            FnCallHashes::from_hash(calc_fn_hash(
+                                None,
+                                &fn_ptr_name,
+                                extra_curry.len() + args.len(),
+                            )),
+                            *capture,
+                            pos,
+                        );
+                    }
+                }
+            }
+        }
+
         let (first_arg, rest_args) = args.split_first().map_or_else(
             || (None, args.as_ref()),
             |(first, rest)| (Some(first), rest),
         );
 
         self.make_function_call(
-            global, caches, scope, this_ptr, name, op_token, first_arg, rest_args, *hashes,
-            *capture, pos,
+            global, caches, scope, this_ptr, name, op_token, first_arg, rest_args, named_args,
+            *hashes, *capture, pos,
         )
     }
 }

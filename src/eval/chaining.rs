@@ -870,6 +870,9 @@ impl Engine {
                     }
                     // xxx.fn_name(arg_expr_list)
                     (Expr::MethodCall(x, pos), None, ..) => {
+                        #[cfg(not(feature = "default-parameters"))]
+use crate::ImmutableString;
+
                         #[cfg(not(feature = "no_module"))]
                         debug_assert!(
                             !x.is_qualified(),
@@ -882,8 +885,30 @@ impl Engine {
                         defer! { global if Some(reset) => move |g| g.debugger_mut().reset_status(reset) }
 
                         let crate::ast::FnCallExpr {
-                            name, hashes, args, ..
+                            name,
+                            hashes,
+                            args,
+                            #[cfg(feature = "default-parameters")]
+                            named_args: named_args_expr,
+                            ..
                         } = &**x;
+
+                        // Evaluate named arguments
+                        #[cfg(feature = "default-parameters")]
+                        let mut named_arg_values = FnArgsVec::new();
+                        #[cfg(feature = "default-parameters")]
+                        for (param_name, expr) in &*named_args_expr {
+                            let (value, ..) = self.get_arg_value(
+                                global,
+                                caches,
+                                x!(s, b),
+                                this_ptr.as_deref_mut(),
+                                expr,
+                            )?;
+                            named_arg_values.push((param_name.clone(), value.flatten()));
+                        }
+                        #[cfg(not(feature = "default-parameters"))]
+                        let named_arg_values: FnArgsVec<(ImmutableString, Dynamic)> = FnArgsVec::new();
 
                         // Truncate the index values upon exit
                         defer! { idx_values => truncate; let offset = idx_values.len() - args.len(); }
@@ -892,7 +917,15 @@ impl Engine {
                         let arg1_pos = args.first().map_or(Position::NONE, Expr::position);
 
                         self.make_method_call(
-                            global, caches, name, *hashes, target, call_args, arg1_pos, *pos,
+                            global,
+                            caches,
+                            name,
+                            *hashes,
+                            target,
+                            call_args,
+                            arg1_pos,
+                            *pos,
+                            &named_arg_values,
                         )
                     }
                     // {xxx:map}.id op= ???
@@ -1080,6 +1113,9 @@ impl Engine {
                             }
                             // {xxx:map}.fn_name(arg_expr_list)[expr] | {xxx:map}.fn_name(arg_expr_list).expr
                             Expr::MethodCall(ref x, pos) => {
+                                #[cfg(not(feature = "default-parameters"))]
+use crate::ImmutableString;
+
                                 #[cfg(not(feature = "no_module"))]
                                 debug_assert!(
                                     !x.is_qualified(),
@@ -1101,8 +1137,33 @@ impl Engine {
                                 let call_args = &mut idx_values[offset..];
                                 let arg1_pos = args.first().map_or(Position::NONE, Expr::position);
 
+                                // Evaluate named arguments if any
+                                #[cfg(feature = "default-parameters")]
+                                let mut named_arg_values = FnArgsVec::new();
+                                #[cfg(feature = "default-parameters")]
+                                for (param_name, expr) in &*x.named_args {
+                                    let (value, ..) = self.get_arg_value(
+                                        global,
+                                        caches,
+                                        x!(s, b),
+                                        this_ptr.as_deref_mut(),
+                                        expr,
+                                    )?;
+                                    named_arg_values.push((param_name.clone(), value.flatten()));
+                                }
+                                #[cfg(not(feature = "default-parameters"))]
+                                let named_arg_values: FnArgsVec<(ImmutableString, Dynamic)> = FnArgsVec::new();
+
                                 self.make_method_call(
-                                    global, caches, name, *hashes, target, call_args, arg1_pos, pos,
+                                    global,
+                                    caches,
+                                    name,
+                                    *hashes,
+                                    target,
+                                    call_args,
+                                    arg1_pos,
+                                    pos,
+                                    &named_arg_values,
                                 )?
                                 .0
                                 .into()
@@ -1208,6 +1269,9 @@ impl Engine {
                                 );
 
                                 let val = {
+                                    #[cfg(not(feature = "default-parameters"))]
+use crate::ImmutableString;
+
                                     #[cfg(feature = "debugging")]
                                     let reset =
                                         self.dbg_reset(global, caches, x!(s, b), _tp, _node)?;
@@ -1224,8 +1288,34 @@ impl Engine {
                                     let call_args = &mut idx_values[offset..];
                                     let pos1 = args.first().map_or(Position::NONE, Expr::position);
 
+                                    // Evaluate named arguments if any
+                                    #[cfg(feature = "default-parameters")]
+                                    let mut named_arg_values = FnArgsVec::new();
+                                    #[cfg(feature = "default-parameters")]
+                                    for (param_name, expr) in &*f.named_args {
+                                        let (value, ..) = self.get_arg_value(
+                                            global,
+                                            caches,
+                                            x!(s, b),
+                                            _this_ptr.as_deref_mut(),
+                                            expr,
+                                        )?;
+                                        named_arg_values
+                                            .push((param_name.clone(), value.flatten()));
+                                    }
+                                    #[cfg(not(feature = "default-parameters"))]
+                                    let named_arg_values: FnArgsVec<(ImmutableString, Dynamic)> = FnArgsVec::new();
+
                                     self.make_method_call(
-                                        global, caches, name, *hashes, target, call_args, pos1, pos,
+                                        global,
+                                        caches,
+                                        name,
+                                        *hashes,
+                                        target,
+                                        call_args,
+                                        pos1,
+                                        pos,
+                                        &named_arg_values,
                                     )?
                                     .0
                                 };
