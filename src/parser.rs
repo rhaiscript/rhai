@@ -669,6 +669,8 @@ impl Engine {
                     namespace,
                     hashes,
                     args,
+                    #[cfg(feature = "default-parameters")]
+                    named_args: FnArgsVec::new(),
                 }
                 .into_fn_call_expr(settings.pos));
             }
@@ -677,12 +679,103 @@ impl Engine {
         }
 
         let settings = settings.level_up()?;
+        #[cfg(feature = "default-parameters")]
+        let mut named_args = FnArgsVec::new();
+        #[cfg(feature = "default-parameters")]
+        let mut seen_named = false;
 
         loop {
             match state.input.peek().unwrap() {
                 // id(...args, ) - handle trailing comma
                 (Token::RightParen, ..) => (),
-                _ => args.push(self.parse_expr(state, settings)?),
+                _ => {
+                    #[cfg(feature = "default-parameters")]
+                    {
+                        // Check if this might be a named argument: identifier = expression
+                        // Strategy: parse a primary expression (which handles identifiers and chaining),
+                        // then check if it's a simple Variable followed by =
+                        let expr = self.parse_primary(state, settings, ChainingFlags::empty())?;
+
+                        // Check if this is a simple Variable (just an identifier, no chaining) followed by =
+                        let is_named_arg = matches!(&expr, Expr::Variable(..))
+                            && matches!(state.input.peek().unwrap(), (Token::Equals, ..));
+
+                        if is_named_arg {
+                        // Extract the parameter name from the Variable expression
+                        let param_name = match &expr {
+                            Expr::Variable(var, ..) => {
+                                // In both cases, the variable name is at index 1
+                                var.1.clone()
+                            }
+                            _ => unreachable!("Should be Variable"),
+                        };
+
+                        // Consume the = token
+                        eat_token(state.input, &Token::Equals);
+
+                        // Mark that we've seen named arguments
+                        if !seen_named && !args.is_empty() {
+                            seen_named = true;
+                        }
+
+                            // Parse the value expression
+                            let value_expr = self.parse_expr(state, settings)?;
+                            named_args.push((param_name, value_expr));
+
+                            // Handle comma after named argument (for multiple named args)
+                            // Check if there's a comma or closing paren
+                            match state.input.peek().unwrap() {
+                                (Token::Comma, ..) => {
+                                    eat_token(state.input, &Token::Comma);
+                                    // Continue to next iteration to parse next argument
+                                    continue;
+                                }
+                                (Token::RightParen, ..) => {
+                                    // End of arguments - will be handled by outer loop
+                                    // Don't break here, let the outer match handle it
+                                }
+                                _ => {
+                                    // Unexpected token
+                                    let (_, pos) = state.input.peek().unwrap();
+                                    return Err(PERR::MissingToken(
+                                        Token::Comma.into(),
+                                        "to separate the arguments to function call".into(),
+                                    )
+                                    .into_err(*pos));
+                                }
+                            }
+                        } else {
+                            // Not a named argument - it's a normal positional argument
+                            if seen_named {
+                                let (_, pos) = state.input.peek().unwrap();
+                                return Err(PERR::InvalidDefaultValue(
+                                    "positional arguments cannot follow named arguments".into(),
+                                )
+                                .into_err(*pos));
+                            }
+
+                            // parse_primary already handled chaining, so we have the full expression
+                            // Now we need to parse any binary operations that might follow
+                            // We can use parse_expr, but it will start from the current token
+                            // Since parse_primary already consumed tokens, we need to continue from here
+                            // Actually, parse_primary returns the full expression including chaining,
+                            // but not binary operations. So we need to parse those.
+                            // But parse_expr calls parse_unary which calls parse_primary, so we'd parse twice.
+                            // Let's just parse the binary operations from the expression we have.
+                            let precedence = Precedence::new(1);
+                            let full_expr = self.parse_binary_op(state, settings, precedence, expr)?;
+                            args.push(full_expr);
+                        }
+                    }
+                    #[cfg(not(feature = "default-parameters"))]
+                    {
+                        // When feature is disabled, parse as normal positional argument
+                        let expr = self.parse_primary(state, settings, ChainingFlags::empty())?;
+                        let precedence = Precedence::new(1);
+                        let full_expr = self.parse_binary_op(state, settings, precedence, expr)?;
+                        args.push(full_expr);
+                    }
+                }
             }
 
             match state.input.peek().unwrap() {
@@ -728,6 +821,8 @@ impl Engine {
                     };
 
                     args.shrink_to_fit();
+                    #[cfg(feature = "default-parameters")]
+                    named_args.shrink_to_fit();
 
                     return Ok(FnCallExpr {
                         name: self.get_interned_string(id),
@@ -737,6 +832,8 @@ impl Engine {
                         namespace,
                         hashes,
                         args,
+                        #[cfg(feature = "default-parameters")]
+                        named_args,
                     }
                     .into_fn_call_expr(settings.pos));
                 }
@@ -1895,12 +1992,14 @@ impl Engine {
                     Expr::FloatConstant(x, ..) => Ok(Expr::FloatConstant((-(*x)).into(), pos)),
 
                     // Call negative function
-                    expr => Ok(FnCallExpr {
+                    expr =>                     Ok(FnCallExpr {
                         #[cfg(not(feature = "no_module"))]
                         namespace: crate::ast::Namespace::NONE,
                         name: self.get_interned_string("-"),
                         hashes: FnCallHashes::from_native_only(calc_fn_hash(None, "-", 1)),
                         args: IntoIterator::into_iter([expr]).collect(),
+                        #[cfg(feature = "default-parameters")]
+                        named_args: FnArgsVec::new(),
                         op_token: Some(token),
                         capture_parent_scope: false,
                     }
@@ -1924,6 +2023,8 @@ impl Engine {
                         name: self.get_interned_string("+"),
                         hashes: FnCallHashes::from_native_only(calc_fn_hash(None, "+", 1)),
                         args: IntoIterator::into_iter([expr]).collect(),
+                        #[cfg(feature = "default-parameters")]
+                        named_args: FnArgsVec::new(),
                         op_token: Some(token),
                         capture_parent_scope: false,
                     }
@@ -1944,6 +2045,8 @@ impl Engine {
                         let expr = self.parse_unary(state, settings.level_up()?)?;
                         IntoIterator::into_iter([expr]).collect()
                     },
+                    #[cfg(feature = "default-parameters")]
+                    named_args: FnArgsVec::new(),
                     op_token: Some(token),
                     capture_parent_scope: false,
                 }
@@ -2330,6 +2433,8 @@ impl Engine {
                 name: self.get_interned_string(&op),
                 hashes: FnCallHashes::from_native_only(hash),
                 args: IntoIterator::into_iter([root, rhs]).collect(),
+                #[cfg(feature = "default-parameters")]
+                named_args: FnArgsVec::new(),
                 op_token: native_only.then(|| op_token.clone()),
                 capture_parent_scope: false,
             };
@@ -2412,6 +2517,8 @@ impl Engine {
                             name: self.get_interned_string(OP_NOT),
                             hashes: FnCallHashes::from_native_only(calc_fn_hash(None, OP_NOT, 1)),
                             args: IntoIterator::into_iter([fn_call]).collect(),
+                            #[cfg(feature = "default-parameters")]
+                            named_args: FnArgsVec::new(),
                             op_token: Some(Token::Bang),
                             capture_parent_scope: false,
                         };
@@ -3635,6 +3742,8 @@ impl Engine {
         };
 
         let mut params = StaticVec::<(ImmutableString, _)>::new_const();
+        #[cfg(feature = "default-parameters")]
+        let mut defaults = StaticVec::<Option<Dynamic>>::new_const();
 
         if !no_params {
             let sep_err = format!("to separate the parameters of function '{name}'");
@@ -3651,7 +3760,38 @@ impl Engine {
 
                         let s = self.get_interned_string(*s);
                         state.stack.push(s.clone(), ());
+
+                        #[cfg(feature = "default-parameters")]
+                        // Check for default value
+                        let default_value = match state.input.peek().unwrap() {
+                            (Token::Equals, ..) => {
+                                eat_token(state.input, &Token::Equals);
+                                // Parse the default value expression
+                                let default_expr = self.parse_expr(state, settings.level_up()?)?;
+                                // Validate it's a literal
+                                match default_expr.get_literal_value(None) {
+                                    Some(lit) => Some(lit),
+                                    None => {
+                                        return Err(PERR::InvalidDefaultValue(
+                                            "default parameter value must be a literal (not an expression)".into()
+                                        ).into_err(default_expr.start_position()))
+                                    }
+                                }
+                            }
+                            _ => None,
+                        };
+                        #[cfg(not(feature = "default-parameters"))]
+                        // When feature is disabled, reject = in parameter list
+                        if matches!(state.input.peek().unwrap(), (Token::Equals, ..)) {
+                            let (_, pos) = state.input.peek().unwrap();
+                            return Err(PERR::InvalidDefaultValue(
+                                "default parameters are not enabled (feature 'default-parameters' required)".into()
+                            ).into_err(*pos));
+                        }
+
                         params.push((s, pos));
+                        #[cfg(feature = "default-parameters")]
+                        defaults.push(default_value);
                     }
                     (Token::LexError(err), pos) => return Err(err.into_err(pos)),
                     (token, pos) if token.is_reserved() => {
@@ -3690,12 +3830,25 @@ impl Engine {
         let mut params: FnArgsVec<_> = params.into_iter().map(|(p, ..)| p).collect();
         params.shrink_to_fit();
 
+        #[cfg(feature = "default-parameters")]
+        let mut defaults: FnArgsVec<_> = defaults.into_iter().collect();
+        #[cfg(feature = "default-parameters")]
+        defaults.shrink_to_fit();
+
+        #[cfg(feature = "default-parameters")]
+        // Ensure defaults has the same length as params
+        while defaults.len() < params.len() {
+            defaults.push(None);
+        }
+
         Ok(ScriptFuncDef {
             name: self.get_interned_string(name),
             access,
             #[cfg(not(feature = "no_object"))]
             this_type,
             params,
+            #[cfg(feature = "default-parameters")]
+            defaults,
             body,
             #[cfg(feature = "metadata")]
             comments: comments.into_iter().collect(),
@@ -3750,6 +3903,8 @@ impl Engine {
                 num_externals + 1,
             )),
             args,
+            #[cfg(feature = "default-parameters")]
+            named_args: FnArgsVec::new(),
             op_token: None,
             capture_parent_scope: false,
         }
@@ -3801,6 +3956,8 @@ impl Engine {
         }
 
         let mut params_list = StaticVec::<ImmutableString>::new_const();
+        #[cfg(feature = "default-parameters")]
+        let mut defaults_list = StaticVec::<Option<Dynamic>>::new_const();
 
         // Parse parameters
         if !skip_parameters
@@ -3819,7 +3976,60 @@ impl Engine {
 
                         let s = self.get_interned_string(*s);
                         new_state.stack.push(s.clone(), ());
+
+                        #[cfg(feature = "default-parameters")]
+                        // Check for default value
+                        let default_value = match new_state.input.peek().unwrap() {
+                            (Token::Equals, ..) => {
+                                eat_token(new_state.input, &Token::Equals);
+                                // Parse the default value - parse directly from token to ensure it's a literal
+                                let lit_value = match new_state.input.next().unwrap() {
+                                    (Token::IntegerConstant(x), _pos) => Some(x.into()),
+                                    #[cfg(not(feature = "no_float"))]
+                                    (Token::FloatConstant(x), _pos) => Some((x.0).into()),
+                                    (Token::StringConstant(s), _pos) => {
+                                        Some(self.get_interned_string(s.as_ref()).into())
+                                    }
+                                    (Token::CharConstant(c), _pos) => Some((c).into()),
+                                    (Token::True, _pos) => Some(true.into()),
+                                    (Token::False, _pos) => Some(false.into()),
+                                    (Token::Unit, _pos) => Some(Dynamic::UNIT),
+                                    (token, pos) => {
+                                        // Not a literal token - put it back and try parsing as expression
+                                        // We can't easily "unconsume" a token, so we need a different approach
+                                        // Actually, we should just use parse_unary which will handle the token
+                                        // But we've already consumed it, so we need to handle this differently
+                                        // For now, return an error for non-literal tokens
+                                        return Err(PERR::InvalidDefaultValue(format!(
+                                            "default parameter value must be a literal, got: {}",
+                                            token
+                                        ))
+                                        .into_err(pos));
+                                    }
+                                };
+
+                                match lit_value {
+                                    Some(lit) => Some(lit),
+                                    None => {
+                                        // This shouldn't happen with the direct token matching above
+                                        unreachable!("Literal value should have been extracted")
+                                    }
+                                }
+                            }
+                            _ => None,
+                        };
+                        #[cfg(not(feature = "default-parameters"))]
+                        // When feature is disabled, reject = in parameter list
+                        if matches!(new_state.input.peek().unwrap(), (Token::Equals, ..)) {
+                            let (_, pos) = new_state.input.peek().unwrap();
+                            return Err(PERR::InvalidDefaultValue(
+                                "default parameters are not enabled (feature 'default-parameters' required)".into()
+                            ).into_err(*pos));
+                        }
+
                         params_list.push(s);
+                        #[cfg(feature = "default-parameters")]
+                        defaults_list.push(default_value);
                     }
                     (Token::LexError(err), pos) => return Err(err.into_err(pos)),
                     (token, pos) if token.is_reserved() => {
@@ -3897,6 +4107,28 @@ impl Engine {
 
         params.append(&mut params_list);
 
+        #[cfg(feature = "default-parameters")]
+        // Build defaults list - externals don't have defaults, then params_list defaults
+        let mut defaults = FnArgsVec::with_capacity(params.len());
+        #[cfg(feature = "default-parameters")]
+        #[cfg(not(feature = "no_closure"))]
+        {
+            // Externals don't have defaults
+            defaults.extend((0.._externals.len()).map(|_| None));
+        }
+        #[cfg(feature = "default-parameters")]
+        // Add defaults for params_list
+        let mut defaults_list_vec: FnArgsVec<_> = defaults_list.into_iter().collect();
+        #[cfg(feature = "default-parameters")]
+        defaults.append(&mut defaults_list_vec);
+        #[cfg(feature = "default-parameters")]
+        // Ensure defaults has the same length as params
+        while defaults.len() < params.len() {
+            defaults.push(None);
+        }
+        #[cfg(feature = "default-parameters")]
+        defaults.shrink_to_fit();
+
         // Create unique function name by hashing the script body plus the parameters.
         let hasher = &mut get_hasher();
         params.iter().for_each(|p| p.hash(hasher));
@@ -3911,6 +4143,8 @@ impl Engine {
             #[cfg(not(feature = "no_object"))]
             this_type: None,
             params,
+            #[cfg(feature = "default-parameters")]
+            defaults,
             body: body.into(),
             #[cfg(not(feature = "no_function"))]
             #[cfg(feature = "metadata")]
@@ -3949,8 +4183,28 @@ impl Engine {
             }
         }
 
-        let hash_script = calc_fn_hash(None, &fn_def.name, fn_def.params.len());
-        state.lib.insert(hash_script, fn_def);
+        #[cfg(feature = "default-parameters")]
+        // Register anonymous function with multiple signatures if it has defaults
+        {
+            let num_params = fn_def.params.len();
+            let min_args = fn_def
+                .defaults
+                .iter()
+                .position(|d| d.is_some())
+                .unwrap_or(num_params);
+
+            // Register for all valid argument counts from min_args to num_params
+            for arg_count in min_args..=num_params {
+                let hash_script = calc_fn_hash(None, &fn_def.name, arg_count);
+                state.lib.insert(hash_script, fn_def.clone());
+            }
+        }
+        #[cfg(not(feature = "default-parameters"))]
+        // Register anonymous function with single signature
+        {
+            let hash_script = calc_fn_hash(None, &fn_def.name, fn_def.params.len());
+            state.lib.insert(hash_script, fn_def.clone());
+        }
 
         #[cfg(not(feature = "no_closure"))]
         let expr = self.make_curry_from_externals(state, expr, _externals, settings.pos);

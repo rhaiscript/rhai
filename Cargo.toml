@@ -61,6 +61,8 @@ decimal = ["rust_decimal"]
 serde = ["dep:serde", "smartstring/serde", "smallvec/serde", "thin-vec/serde"]
 ## Allow [Unicode Standard Annex #31](https://unicode.org/reports/tr31/) for identifiers.
 unicode-xid-ident = ["unicode-xid"]
+## Enable default parameter values in function definitions.
+default-parameters = []
 ## Enable functions metadata (including doc-comments); implies [`serde`](#feature-serde).
 metadata = ["serde", "serde_json", "rhai_codegen/metadata", "smartstring/serde"]
 ## Expose internal data structures (e.g. `AST` nodes).
