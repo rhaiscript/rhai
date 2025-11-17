@@ -135,20 +135,26 @@ impl Engine {
             match scope.search(var_name) {
                 Some(index) => index,
                 None => {
-                    return self
-                        .global_modules
-                        .iter()
-                        .find_map(|m| m.get_var(var_name))
-                        .map_or_else(
-                            || {
-                                Err(ERR::ErrorVariableNotFound(
-                                    var_name.to_string(),
-                                    expr.position(),
-                                )
-                                .into())
-                            },
-                            |val| Ok(val.into()),
-                        )
+                    // Try global modules first
+                    if let Some(val) = self.global_modules.iter().find_map(|m| m.get_var(var_name)) {
+                        return Ok(val.into());
+                    }
+                    
+                    // Try global constants (for default parameter expressions)
+                    #[cfg(not(feature = "no_module"))]
+                    if let Some(ref constants) = global.constants {
+                        if let Some(guard) = crate::func::locked_read(constants) {
+                            if let Some(value) = guard.get(var_name) {
+                                return Ok(value.clone().into());
+                            }
+                        }
+                    }
+                    
+                    return Err(ERR::ErrorVariableNotFound(
+                        var_name.to_string(),
+                        expr.position(),
+                    )
+                    .into());
                 }
             }
         };

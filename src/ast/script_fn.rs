@@ -4,7 +4,7 @@
 use super::{FnAccess, StmtBlock};
 use crate::{FnArgsVec, ImmutableString};
 #[cfg(feature = "default-parameters")]
-use crate::Dynamic;
+use super::Expr;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{fmt, hash::Hash};
@@ -25,10 +25,10 @@ pub struct ScriptFuncDef {
     pub this_type: Option<ImmutableString>,
     /// Names of function parameters.
     pub params: FnArgsVec<ImmutableString>,
-    /// Default values for function parameters (parallel array to `params`).
-    /// `None` means no default value, `Some(Dynamic)` is the default value (must be a literal).
+    /// Default expressions for function parameters (parallel array to `params`).
+    /// `None` means no default value, `Some(Expr)` is the default expression to evaluate.
     #[cfg(feature = "default-parameters")]
-    pub defaults: FnArgsVec<Option<Dynamic>>,
+    pub defaults: FnArgsVec<Option<Box<Expr>>>,
     /// _(metadata)_ Function doc-comments (if any). Exported under the `metadata` feature only.
     ///
     /// Doc-comments are comment lines beginning with `///` or comment blocks beginning with `/**`,
@@ -84,8 +84,8 @@ impl fmt::Display for ScriptFuncDef {
             .iter()
             .zip(self.defaults.iter())
             .map(|(name, default)| {
-                if let Some(default) = default {
-                    format!("{} = {}", name, default)
+                if default.is_some() {
+                    format!("{} = <expr>", name)
                 } else {
                     name.to_string()
                 }

@@ -212,6 +212,8 @@ bitflags! {
         const DISALLOW_STATEMENTS_IN_BLOCKS = 0b0001_0000;
         /// Disallow unquoted map properties?
         const DISALLOW_UNQUOTED_MAP_PROPERTIES = 0b0010_0000;
+        /// Is the construct being parsed inside closure parameters (stop at | and ,)?
+        const IN_CLOSURE_PARAMS = 0b0100_0000;
     }
 }
 
@@ -754,14 +756,6 @@ impl Engine {
                                 .into_err(*pos));
                             }
 
-                            // parse_primary already handled chaining, so we have the full expression
-                            // Now we need to parse any binary operations that might follow
-                            // We can use parse_expr, but it will start from the current token
-                            // Since parse_primary already consumed tokens, we need to continue from here
-                            // Actually, parse_primary returns the full expression including chaining,
-                            // but not binary operations. So we need to parse those.
-                            // But parse_expr calls parse_unary which calls parse_primary, so we'd parse twice.
-                            // Let's just parse the binary operations from the expression we have.
                             let precedence = Precedence::new(1);
                             let full_expr = self.parse_binary_op(state, settings, precedence, expr)?;
                             args.push(full_expr);
@@ -2343,6 +2337,14 @@ impl Engine {
                 return Ok(root);
             }
 
+            // Stop at | and , when parsing closure parameters with defaults
+            #[cfg(feature = "default-parameters")]
+            if settings.has_flag(ParseSettingFlags::IN_CLOSURE_PARAMS) {
+                if matches!(current_op, Token::Pipe | Token::Comma) {
+                    return Ok(root);
+                }
+            }
+
             let precedence = match current_op {
                 #[cfg(not(feature = "no_custom_syntax"))]
                 Token::Custom(c) => self
@@ -3743,7 +3745,7 @@ impl Engine {
 
         let mut params = StaticVec::<(ImmutableString, _)>::new_const();
         #[cfg(feature = "default-parameters")]
-        let mut defaults = StaticVec::<Option<Dynamic>>::new_const();
+        let mut defaults = StaticVec::<Option<Box<Expr>>>::new_const();
 
         if !no_params {
             let sep_err = format!("to separate the parameters of function '{name}'");
@@ -3767,16 +3769,11 @@ impl Engine {
                             (Token::Equals, ..) => {
                                 eat_token(state.input, &Token::Equals);
                                 // Parse the default value expression
-                                let default_expr = self.parse_expr(state, settings.level_up()?)?;
-                                // Validate it's a literal
-                                match default_expr.get_literal_value(None) {
-                                    Some(lit) => Some(lit),
-                                    None => {
-                                        return Err(PERR::InvalidDefaultValue(
-                                            "default parameter value must be a literal (not an expression)".into()
-                                        ).into_err(default_expr.start_position()))
-                                    }
-                                }
+                                let mut default_expr = self.parse_expr(state, settings.level_up()?)?;
+                                // Selectively clear indices only for parameters (not outer scope vars)
+                                let param_names: Vec<ImmutableString> = params.iter().map(|(p, _)| p.clone()).collect();
+                                Self::clear_param_indices(&mut default_expr, &param_names);
+                                Some(Box::new(default_expr))
                             }
                             _ => None,
                         };
@@ -3957,7 +3954,7 @@ impl Engine {
 
         let mut params_list = StaticVec::<ImmutableString>::new_const();
         #[cfg(feature = "default-parameters")]
-        let mut defaults_list = StaticVec::<Option<Dynamic>>::new_const();
+        let mut defaults_list = StaticVec::<Option<Box<Expr>>>::new_const();
 
         // Parse parameters
         if !skip_parameters
@@ -3982,39 +3979,16 @@ impl Engine {
                         let default_value = match new_state.input.peek().unwrap() {
                             (Token::Equals, ..) => {
                                 eat_token(new_state.input, &Token::Equals);
-                                // Parse the default value - parse directly from token to ensure it's a literal
-                                let lit_value = match new_state.input.next().unwrap() {
-                                    (Token::IntegerConstant(x), _pos) => Some(x.into()),
-                                    #[cfg(not(feature = "no_float"))]
-                                    (Token::FloatConstant(x), _pos) => Some((x.0).into()),
-                                    (Token::StringConstant(s), _pos) => {
-                                        Some(self.get_interned_string(s.as_ref()).into())
-                                    }
-                                    (Token::CharConstant(c), _pos) => Some((c).into()),
-                                    (Token::True, _pos) => Some(true.into()),
-                                    (Token::False, _pos) => Some(false.into()),
-                                    (Token::Unit, _pos) => Some(Dynamic::UNIT),
-                                    (token, pos) => {
-                                        // Not a literal token - put it back and try parsing as expression
-                                        // We can't easily "unconsume" a token, so we need a different approach
-                                        // Actually, we should just use parse_unary which will handle the token
-                                        // But we've already consumed it, so we need to handle this differently
-                                        // For now, return an error for non-literal tokens
-                                        return Err(PERR::InvalidDefaultValue(format!(
-                                            "default parameter value must be a literal, got: {}",
-                                            token
-                                        ))
-                                        .into_err(pos));
-                                    }
-                                };
-
-                                match lit_value {
-                                    Some(lit) => Some(lit),
-                                    None => {
-                                        // This shouldn't happen with the direct token matching above
-                                        unreachable!("Literal value should have been extracted")
-                                    }
-                                }
+                                // Parse the default value expression with IN_CLOSURE_PARAMS flag
+                                // to stop at | and , tokens, and FN_SCOPE to allow 'this'
+                                let mut param_settings = settings.level_up()?;
+                                param_settings.flags |= ParseSettingFlags::IN_CLOSURE_PARAMS 
+                                    | ParseSettingFlags::FN_SCOPE 
+                                    | ParseSettingFlags::CLOSURE_SCOPE;
+                                let mut default_expr = self.parse_expr(new_state, param_settings)?;
+                                // Selectively clear indices only for parameters (not outer scope vars)
+                                Self::clear_param_indices(&mut default_expr, &params_list);
+                                Some(Box::new(default_expr))
                             }
                             _ => None,
                         };
@@ -4350,5 +4324,136 @@ impl Engine {
                 new_lib
             },
         ));
+    }
+
+    /// Selectively clear variable indices for parameters only.
+    /// This allows parameter-to-parameter references to work via name lookup,
+    /// while preserving indices for outer scope variables.
+    #[cfg(feature = "default-parameters")]
+    fn clear_param_indices(expr: &mut Expr, param_names: &[ImmutableString]) {
+        use crate::ast::Expr;
+        
+        match expr {
+            Expr::Variable(x, idx, _) => {
+                // Check if this variable matches a parameter name
+                let name = &x.1;
+                if param_names.iter().any(|p| p == name) {
+                    // Clear the index so the parameter is looked up by name
+                    x.0 = None;
+                    *idx = None;
+                }
+            }
+            Expr::FnCall(x, _) => {
+                // Recursively clear indices in function arguments
+                for arg in &mut x.args {
+                    Self::clear_param_indices(arg, param_names);
+                }
+                #[cfg(feature = "default-parameters")]
+                for (_, arg) in &mut x.named_args {
+                    Self::clear_param_indices(arg, param_names);
+                }
+            }
+            Expr::Array(x, _) => {
+                for item in x.iter_mut() {
+                    Self::clear_param_indices(item, param_names);
+                }
+            }
+            Expr::Map(x, _) => {
+                for (_, item) in &mut x.0 {
+                    Self::clear_param_indices(item, param_names);
+                }
+            }
+            Expr::Index(x, _, _) | Expr::Dot(x, _, _) => {
+                Self::clear_param_indices(&mut x.lhs, param_names);
+                Self::clear_param_indices(&mut x.rhs, param_names);
+            }
+            Expr::InterpolatedString(x, _) => {
+                for item in x.iter_mut() {
+                    Self::clear_param_indices(item, param_names);
+                }
+            }
+            Expr::Stmt(x) => {
+                // Clear indices in statement block expressions
+                for stmt in x.statements_mut() {
+                    Self::clear_param_indices_in_stmt(stmt, param_names);
+                }
+            }
+            Expr::And(x, _) | Expr::Or(x, _) | Expr::Coalesce(x, _) => {
+                for item in x.iter_mut() {
+                    Self::clear_param_indices(item, param_names);
+                }
+            }
+            #[cfg(not(feature = "no_custom_syntax"))]
+            Expr::Custom(x, _) => {
+                for input in &mut x.inputs {
+                    Self::clear_param_indices(input, param_names);
+                }
+            }
+            // Literals and constants don't have variables
+            _ => {}
+        }
+    }
+
+    /// Helper to clear parameter indices in statements
+    #[cfg(feature = "default-parameters")]
+    fn clear_param_indices_in_stmt(stmt: &mut Stmt, param_names: &[ImmutableString]) {
+        use crate::ast::Stmt;
+        
+        match stmt {
+            Stmt::Expr(expr) => {
+                Self::clear_param_indices(expr, param_names);
+            }
+            Stmt::Return(Some(expr), ..) => {
+                Self::clear_param_indices(expr, param_names);
+            }
+            Stmt::Var(x, ..) => {
+                Self::clear_param_indices(&mut x.1, param_names);
+            }
+            Stmt::Assignment(x) => {
+                Self::clear_param_indices(&mut x.1.lhs, param_names);
+                Self::clear_param_indices(&mut x.1.rhs, param_names);
+            }
+            Stmt::If(x, _) => {
+                Self::clear_param_indices(&mut x.expr, param_names);
+                for stmt in x.body.statements_mut() {
+                    Self::clear_param_indices_in_stmt(stmt, param_names);
+                }
+                for stmt in x.branch.statements_mut() {
+                    Self::clear_param_indices_in_stmt(stmt, param_names);
+                }
+            }
+            Stmt::Switch(x, _) => {
+                Self::clear_param_indices(&mut x.0, param_names);
+                // Skip clearing in switch cases for simplicity
+            }
+            Stmt::While(x, _) | Stmt::Do(x, _, _) => {
+                Self::clear_param_indices(&mut x.expr, param_names);
+                for stmt in x.body.statements_mut() {
+                    Self::clear_param_indices_in_stmt(stmt, param_names);
+                }
+            }
+            Stmt::For(x, _) => {
+                Self::clear_param_indices(&mut x.2.expr, param_names);
+                for stmt in x.2.body.statements_mut() {
+                    Self::clear_param_indices_in_stmt(stmt, param_names);
+                }
+            }
+            Stmt::Block(block) => {
+                for stmt in block.statements_mut() {
+                    Self::clear_param_indices_in_stmt(stmt, param_names);
+                }
+            }
+            Stmt::TryCatch(x, _) => {
+                Self::clear_param_indices(&mut x.expr, param_names);
+                for stmt in x.body.statements_mut() {
+                    Self::clear_param_indices_in_stmt(stmt, param_names);
+                }
+                for stmt in x.branch.statements_mut() {
+                    Self::clear_param_indices_in_stmt(stmt, param_names);
+                }
+            }
+            // Other statements don't contain expressions
+            _ => {}
+        }
     }
 }

@@ -159,13 +159,23 @@ fn test_default_params_error_positional_after_named() {
 }
 
 #[test]
-fn test_default_params_error_invalid_default_expr() {
+fn test_default_params_valid_expressions() {
     let engine = Engine::new();
 
-    // Invalid default value (expression, not literal)
-    assert!(engine.eval::<INT>("fn add(a, b = 1 + 1) { a + b } add(1)").is_err());
-    assert!(engine.eval::<INT>("fn add(a, b = x) { a + b } add(1)").is_err());
-    assert!(engine.eval::<INT>("fn add(a, b = f()) { a + b } add(1)").is_err());
+    // Expressions are now valid as default values
+    assert_eq!(engine.eval::<INT>("fn add(a, b = 1 + 1) { a + b } add(1)").unwrap(), 3);
+    
+    // Reference to earlier parameter
+    assert_eq!(engine.eval::<INT>("fn add(a, b = a * 2) { a + b } add(5)").unwrap(), 15);
+    
+    // Function call in default (with defined function)
+    assert_eq!(
+        engine.eval::<INT>("fn double(x) { x * 2 } fn add(a, b = double(a)) { a + b } add(3)").unwrap(),
+        9
+    );
+    
+    // Undefined variable should still error
+    assert!(engine.eval::<INT>("fn add(a, b = undefined_var) { a + b } add(1)").is_err());
 }
 
 #[test]

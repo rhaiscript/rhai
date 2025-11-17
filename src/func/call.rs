@@ -35,15 +35,32 @@ use num_traits::Float;
 /// Arguments to a function call, which is a list of [`&mut Dynamic`][Dynamic].
 pub type FnCallArgs<'a> = [&'a mut Dynamic];
 
-/// Build complete argument list from positional args, defaults, and named args.
-/// Returns a vector of Dynamic values that matches the function's parameter list.
+/// Describes how to provide a value for each parameter.
 #[cfg(all(not(feature = "no_function"), feature = "default-parameters"))]
-fn build_complete_args(
+#[derive(Debug)]
+pub(crate) enum ArgSource {
+    /// Use the provided value (already evaluated).
+    Provided(Dynamic),
+    /// Evaluate the default expression in the callee context.
+    DefaultExpr,
+}
+
+/// Plan for how to construct the complete argument list.
+#[cfg(all(not(feature = "no_function"), feature = "default-parameters"))]
+#[derive(Debug)]
+pub(crate) struct ArgPlan {
+    pub(crate) sources: FnArgsVec<ArgSource>,
+}
+
+/// Build an argument plan from positional args, defaults, and named args.
+/// Returns a plan describing how to construct the complete argument list.
+#[cfg(all(not(feature = "no_function"), feature = "default-parameters"))]
+fn build_arg_plan(
     fn_def: &ScriptFuncDef,
     positional_args: &[Dynamic],
     named_args: &[(ImmutableString, Dynamic)],
     pos: Position,
-) -> RhaiResultOf<FnArgsVec<Dynamic>> {
+) -> RhaiResultOf<ArgPlan> {
     let num_params = fn_def.params.len();
     let num_positional = positional_args.len();
 
@@ -94,22 +111,24 @@ fn build_complete_args(
         }
     }
 
-    // Build complete argument list
-    let mut complete_args = FnArgsVec::with_capacity(num_params);
+    // Build argument plan
+    let mut sources = FnArgsVec::with_capacity(num_params);
 
     // First, add positional arguments
-    complete_args.extend(positional_args.iter().cloned());
+    for arg in positional_args.iter() {
+        sources.push(ArgSource::Provided(arg.clone()));
+    }
 
-    // Then, fill remaining positions with defaults or check for missing required args
+    // Then, fill remaining positions with named args or defaults
     for i in num_positional..num_params {
         let param_name = &fn_def.params[i];
 
         // Check if this parameter has a named argument
         if let Some(value) = named_map.remove(param_name) {
-            complete_args.push(value);
-        } else if let Some(default) = &fn_def.defaults[i] {
-            // Use default value
-            complete_args.push(default.clone());
+            sources.push(ArgSource::Provided(value));
+        } else if fn_def.defaults[i].is_some() {
+            // Mark that we need to evaluate the default expression
+            sources.push(ArgSource::DefaultExpr);
         } else {
             // Missing required argument
             return Err(ERR::ErrorFunctionNotFound(
@@ -138,7 +157,7 @@ fn build_complete_args(
         .into());
     }
 
-    Ok(complete_args)
+    Ok(ArgPlan { sources })
 }
 
 /// A type that temporarily stores a mutable reference to a `Dynamic`,
@@ -1084,35 +1103,20 @@ impl Engine {
                                 let (first_arg, rest_positional) = args.split_first_mut().unwrap();
                                 let this_ptr = Some(&mut **first_arg);
                                 let positional_args: FnArgsVec<Dynamic> = rest_positional.iter().map(|a| (*a).clone()).collect();
-                                let complete_args = build_complete_args(fn_def, &positional_args, named_args, pos)?;
-                                let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
-                                let mut complete_args_refs: FnArgsVec<&mut Dynamic> = complete_args_mut.iter_mut().collect();
-                                let complete_args_slice: &mut [&mut Dynamic] = &mut complete_args_refs;
+                                let arg_plan = build_arg_plan(fn_def, &positional_args, named_args, pos)?;
 
-                                self.call_script_fn(
-                                    global, caches, scope, this_ptr, env, fn_def, complete_args_slice, true, pos,
+                                self.call_script_fn_with_plan(
+                                    global, caches, scope, this_ptr, env, fn_def, arg_plan, true, pos,
                                 )
                             } else {
                                 let positional_args: FnArgsVec<Dynamic> = args.iter().map(|a| (*a).clone()).collect();
-                                let complete_args = build_complete_args(fn_def, &positional_args, named_args, pos)?;
-                                let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
-                                let mut complete_args_refs: FnArgsVec<&mut Dynamic> = complete_args_mut.iter_mut().collect();
-                                let complete_args_slice: &mut [&mut Dynamic] = &mut complete_args_refs;
+                                let arg_plan = build_arg_plan(fn_def, &positional_args, named_args, pos)?;
 
-                                let backup = &mut ArgBackup::new();
-                                let swap = is_ref_mut && !complete_args_slice.is_empty();
-
-                                if swap {
-                                    backup.change_first_arg_to_copy(complete_args_slice);
-                                }
-
-                                defer! { complete_args_slice = (complete_args_slice) if swap => move |a| backup.restore_first_arg(a) }
-
-                                self.call_script_fn(global, caches, scope, None, env, fn_def, complete_args_slice, true, pos)
+                                self.call_script_fn_with_plan(global, caches, scope, None, env, fn_def, arg_plan, true, pos)
                             }
                             .map(|r| (r, false));
                         }
-                        // Otherwise fall through and let build_complete_args report the error
+                        // Otherwise fall through and let build_arg_plan report the error
                     }
                 }
 
@@ -1131,7 +1135,7 @@ impl Engine {
                 let orig_source = mem::replace(&mut global.source, source);
                 defer! { global => move |g| g.source = orig_source }
 
-                // Build complete argument list from positional args, defaults, and named args
+                // Build argument plan from positional args, defaults, and named args
                 return if is_method_call {
                     // Method call: first arg is the object (not in fn_def.params)
                     // So we need to handle it separately
@@ -1141,34 +1145,17 @@ impl Engine {
                     // For method calls, fn_def.params doesn't include 'this'
                     // So we build args for the remaining parameters
                     let positional_args: FnArgsVec<Dynamic> = rest_positional.iter().map(|a| (*a).clone()).collect();
-                    let complete_args = build_complete_args(fn_def, &positional_args, named_args, pos)?;
-                    let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
-                    let mut complete_args_refs: FnArgsVec<&mut Dynamic> = complete_args_mut.iter_mut().collect();
-                    let complete_args_slice: &mut [&mut Dynamic] = &mut complete_args_refs;
+                    let arg_plan = build_arg_plan(fn_def, &positional_args, named_args, pos)?;
 
-                    self.call_script_fn(
-                        global, caches, scope, this_ptr, env, fn_def, complete_args_slice, true, pos,
+                    self.call_script_fn_with_plan(
+                        global, caches, scope, this_ptr, env, fn_def, arg_plan, true, pos,
                     )
                 } else {
                     // Normal call of script function
                     let positional_args: FnArgsVec<Dynamic> = args.iter().map(|a| (*a).clone()).collect();
-                    let complete_args = build_complete_args(fn_def, &positional_args, named_args, pos)?;
-                    let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
-                    let mut complete_args_refs: FnArgsVec<&mut Dynamic> = complete_args_mut.iter_mut().collect();
-                    let complete_args_slice: &mut [&mut Dynamic] = &mut complete_args_refs;
+                    let arg_plan = build_arg_plan(fn_def, &positional_args, named_args, pos)?;
 
-                    let backup = &mut ArgBackup::new();
-
-                    // The first argument is a reference?
-                    let swap = is_ref_mut && !complete_args_slice.is_empty();
-
-                    if swap {
-                        backup.change_first_arg_to_copy(complete_args_slice);
-                    }
-
-                    defer! { complete_args_slice = (complete_args_slice) if swap => move |a| backup.restore_first_arg(a) }
-
-                    self.call_script_fn(global, caches, scope, None, env, fn_def, complete_args_slice, true, pos)
+                    self.call_script_fn_with_plan(global, caches, scope, None, env, fn_def, arg_plan, true, pos)
                 }
                 .map(|r| (r, false));
             }
@@ -1533,20 +1520,16 @@ impl Engine {
 
                         #[cfg(feature = "default-parameters")]
                         {
-                            // Build complete argument list from positional args, defaults, and named args
+                            // Build argument plan from positional args, defaults, and named args
                             let positional_args: FnArgsVec<Dynamic> =
                                 call_args.iter().map(|a| (*a).clone()).collect();
-                            let complete_args =
-                                build_complete_args(&fn_def, &positional_args, named_args, pos)?;
-                            let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
-                            let mut complete_args_refs: FnArgsVec<&mut Dynamic> =
-                                complete_args_mut.iter_mut().collect();
-                            let args = &mut complete_args_refs;
+                            let arg_plan =
+                                build_arg_plan(&fn_def, &positional_args, named_args, pos)?;
 
                             defer! { let orig_level = global.level; global.level += 1 }
 
-                            self.call_script_fn(
-                                global, caches, scope, this_ptr, env, &fn_def, args, true, pos,
+                            self.call_script_fn_with_plan(
+                                global, caches, scope, this_ptr, env, &fn_def, arg_plan, true, pos,
                             )
                             .map(|v| (v, false))
                         }
@@ -1698,23 +1681,19 @@ impl Engine {
                                 arg_values.push(value);
                             }
 
-                            // Build complete argument list with defaults
+                            // Build argument plan with defaults
                             let positional_args: FnArgsVec<Dynamic> =
                                 arg_values.iter().map(|a| (*a).clone()).collect();
-                            let complete_args =
-                                build_complete_args(&fn_def, &positional_args, &[], pos)?;
-                            let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
-                            let mut complete_args_refs: FnArgsVec<&mut Dynamic> =
-                                complete_args_mut.iter_mut().collect();
-                            let args = &mut complete_args_refs;
+                            let arg_plan =
+                                build_arg_plan(&fn_def, &positional_args, &[], pos)?;
 
                             let scope = &mut Scope::new();
                             let env = env.as_deref();
 
                             defer! { let orig_level = global.level; global.level += 1 }
 
-                            return self.call_script_fn(
-                                global, caches, scope, None, env, &fn_def, args, true, pos,
+                            return self.call_script_fn_with_plan(
+                                global, caches, scope, None, env, &fn_def, arg_plan, true, pos,
                             );
                         }
                     }
@@ -2591,21 +2570,17 @@ impl Engine {
                             all_args.extend(extra_curry.iter().cloned());
                             all_args.extend(arg_values);
 
-                            // Build complete argument list with defaults
-                            let complete_args =
-                                build_complete_args(&fn_def, &all_args, &named_arg_values, pos)?;
-                            let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
-                            let mut complete_args_refs: FnArgsVec<&mut Dynamic> =
-                                complete_args_mut.iter_mut().collect();
-                            let args = &mut complete_args_refs;
+                            // Build argument plan with defaults
+                            let arg_plan =
+                                build_arg_plan(&fn_def, &all_args, &named_arg_values, pos)?;
 
                             let scope = &mut Scope::new();
                             let env = env.as_deref();
 
                             defer! { let orig_level = global.level; global.level += 1 }
 
-                            return self.call_script_fn(
-                                global, caches, scope, None, env, &fn_def, args, true, pos,
+                            return self.call_script_fn_with_plan(
+                                global, caches, scope, None, env, &fn_def, arg_plan, true, pos,
                             );
                         }
                     }
