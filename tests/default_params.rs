@@ -588,3 +588,204 @@ fn test_default_params_only_named_after_positional() {
         16
     );
 }
+
+#[test]
+fn test_overload_precedence_default_first() {
+    let engine = Engine::new();
+
+    // When a function with defaults is declared first, followed by an overload,
+    // the overload should take precedence for exact arity matches
+    assert_eq!(
+        engine
+            .eval::<INT>(
+                "
+                fn foo(x, y, z = 1) { 100 }
+                fn foo(x, y) { 200 }
+                foo(1, 2)
+            "
+            )
+            .unwrap(),
+        200
+    );
+
+    // But calling with 3 args or named arg should use the default version
+    assert_eq!(
+        engine
+            .eval::<INT>(
+                "
+                fn foo(x, y, z = 1) { 100 }
+                fn foo(x, y) { 200 }
+                foo(1, 2, 3)
+            "
+            )
+            .unwrap(),
+        100
+    );
+
+    assert_eq!(
+        engine
+            .eval::<INT>(
+                "
+                fn foo(x, y, z = 1) { 100 }
+                fn foo(x, y) { 200 }
+                foo(1, 2, z = 3)
+            "
+            )
+            .unwrap(),
+        100
+    );
+}
+
+#[test]
+fn test_overload_precedence_overload_first() {
+    let engine = Engine::new();
+
+    // When an overload is declared first, followed by a function with defaults,
+    // the overload should still take precedence for exact arity matches
+    assert_eq!(
+        engine
+            .eval::<INT>(
+                "
+                fn foo(x, y) { 200 }
+                fn foo(x, y, z = 1) { 100 }
+                foo(1, 2)
+            "
+            )
+            .unwrap(),
+        200
+    );
+
+    // But calling with 3 args or named arg should use the default version
+    assert_eq!(
+        engine
+            .eval::<INT>(
+                "
+                fn foo(x, y) { 200 }
+                fn foo(x, y, z = 1) { 100 }
+                foo(1, 2, 3)
+            "
+            )
+            .unwrap(),
+        100
+    );
+
+    assert_eq!(
+        engine
+            .eval::<INT>(
+                "
+                fn foo(x, y) { 200 }
+                fn foo(x, y, z = 1) { 100 }
+                foo(1, 2, z = 3)
+            "
+            )
+            .unwrap(),
+        100
+    );
+}
+
+#[test]
+fn test_overload_precedence_string_return() {
+    let engine = Engine::new();
+
+    // Test with string returns to match the bug.rhai example
+    assert_eq!(
+        engine
+            .eval::<String>(
+                "
+                fn foo(x, y, z = 1) { \"first\" }
+                fn foo(x, y) { \"second\" }
+                foo(1, 2)
+            "
+            )
+            .unwrap(),
+        "second"
+    );
+
+    assert_eq!(
+        engine
+            .eval::<String>(
+                "
+                fn foo(x, y, z = 1) { \"first\" }
+                fn foo(x, y) { \"second\" }
+                foo(1, 2, 3)
+            "
+            )
+            .unwrap(),
+        "first"
+    );
+
+    assert_eq!(
+        engine
+            .eval::<String>(
+                "
+                fn foo(x, y, z = 1) { \"first\" }
+                fn foo(x, y) { \"second\" }
+                foo(1, 2, z = 3)
+            "
+            )
+            .unwrap(),
+        "first"
+    );
+}
+
+#[test]
+fn test_overload_precedence_multiple_overloads() {
+    let engine = Engine::new();
+
+    // Test with multiple overloads at different arities
+    assert_eq!(
+        engine
+            .eval::<INT>(
+                "
+                fn calc(x) { 1 }
+                fn calc(x, y) { 2 }
+                fn calc(x, y, z = 10, w = 20) { 3 }
+                calc(1)
+            "
+            )
+            .unwrap(),
+        1
+    );
+
+    assert_eq!(
+        engine
+            .eval::<INT>(
+                "
+                fn calc(x) { 1 }
+                fn calc(x, y) { 2 }
+                fn calc(x, y, z = 10, w = 20) { 3 }
+                calc(1, 2)
+            "
+            )
+            .unwrap(),
+        2
+    );
+
+    assert_eq!(
+        engine
+            .eval::<INT>(
+                "
+                fn calc(x) { 1 }
+                fn calc(x, y) { 2 }
+                fn calc(x, y, z = 10, w = 20) { 3 }
+                calc(1, 2, 3)
+            "
+            )
+            .unwrap(),
+        3
+    );
+
+    assert_eq!(
+        engine
+            .eval::<INT>(
+                "
+                fn calc(x) { 1 }
+                fn calc(x, y) { 2 }
+                fn calc(x, y, z = 10, w = 20) { 3 }
+                calc(1, 2, 3, 4)
+            "
+            )
+            .unwrap(),
+        3
+    );
+}

@@ -1315,6 +1315,13 @@ impl Module {
                 primary_hash = hash_script;
             }
 
+            // For fallback signatures (arg_count < num_params), only insert if not already present
+            // This ensures that explicit overloads take precedence over default-parameter fallbacks
+            #[cfg(feature = "default-parameters")]
+            if arg_count < num_params && functions.contains_key(&hash_script) {
+                continue;
+            }
+
             // Catch hash collisions in testing environment only.
             #[cfg(feature = "testing-environ")]
             if let Some(f) = functions.get(&hash_script) {
@@ -2560,6 +2567,13 @@ impl Module {
                                 fn_def.this_type.as_ref().map_or(hash_script, |this_type| {
                                     crate::calc_typed_method_hash(hash_script, this_type)
                                 });
+
+                            // For fallback signatures (arg_count < num_params), only insert if not already present
+                            // This ensures that explicit overloads take precedence over default-parameter fallbacks
+                            #[cfg(feature = "default-parameters")]
+                            if arg_count < num_params && functions.contains_key(&hash_script) {
+                                continue;
+                            }
 
                             // Catch hash collisions in testing environment only.
                             #[cfg(feature = "testing-environ")]

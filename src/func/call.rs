@@ -1023,6 +1023,99 @@ impl Engine {
                 let fn_def = &*fn_def;
                 let env = env.as_deref();
 
+                // If named arguments are present, check if this function can handle them
+                // If not, try to find a function with more parameters that can
+                #[cfg(feature = "default-parameters")]
+                if !named_args.is_empty() {
+                    // Check if all named arguments exist in this function's parameters
+                    let has_all_named_params = named_args.iter().all(|(name, _)| {
+                        fn_def.params.iter().any(|p| p == name)
+                    });
+
+                    if !has_all_named_params {
+                        // Try to find a function with more parameters that might have these named args
+                        let mut found_better = None;
+                        for try_arg_count in (args.len() + 1)..=(args.len() + 10) {
+                            let try_hash = crate::calc_fn_hash(None, fn_name, try_arg_count);
+                            let try_resolved = self.resolve_fn(
+                                global,
+                                caches,
+                                local_entry,
+                                None,
+                                try_hash,
+                                None,
+                                false,
+                                Some(fn_name),
+                            );
+
+                            if let Some(FnResolutionCacheEntry { func: try_func, source: try_source }) = try_resolved {
+                                if let RhaiFunc::Script { fn_def: try_fn_def, .. } = try_func {
+                                    // Check if this function has all the named parameters
+                                    let has_all = named_args.iter().all(|(name, _)| {
+                                        try_fn_def.params.iter().any(|p| p == name)
+                                    });
+                                    if has_all {
+                                        found_better = Some((try_func.clone(), try_source.clone()));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // If we found a better match, use it
+                        if let Some((better_func, better_source)) = found_better {
+                            let RhaiFunc::Script { fn_def: better_fn_def, env: better_env } = better_func else {
+                                unreachable!("Script function expected");
+                            };
+                            let fn_def = &*better_fn_def;
+                            let env = better_env.as_deref();
+                            let orig_source = mem::replace(&mut global.source, better_source);
+                            defer! { global => move |g| g.source = orig_source }
+
+                            let mut empty_scope;
+                            let scope = if let Some(scope) = scope {
+                                scope
+                            } else {
+                                empty_scope = Scope::new();
+                                &mut empty_scope
+                            };
+
+                            return if is_method_call {
+                                let (first_arg, rest_positional) = args.split_first_mut().unwrap();
+                                let this_ptr = Some(&mut **first_arg);
+                                let positional_args: FnArgsVec<Dynamic> = rest_positional.iter().map(|a| (*a).clone()).collect();
+                                let complete_args = build_complete_args(fn_def, &positional_args, named_args, pos)?;
+                                let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
+                                let mut complete_args_refs: FnArgsVec<&mut Dynamic> = complete_args_mut.iter_mut().collect();
+                                let complete_args_slice: &mut [&mut Dynamic] = &mut complete_args_refs;
+
+                                self.call_script_fn(
+                                    global, caches, scope, this_ptr, env, fn_def, complete_args_slice, true, pos,
+                                )
+                            } else {
+                                let positional_args: FnArgsVec<Dynamic> = args.iter().map(|a| (*a).clone()).collect();
+                                let complete_args = build_complete_args(fn_def, &positional_args, named_args, pos)?;
+                                let mut complete_args_mut: FnArgsVec<Dynamic> = complete_args;
+                                let mut complete_args_refs: FnArgsVec<&mut Dynamic> = complete_args_mut.iter_mut().collect();
+                                let complete_args_slice: &mut [&mut Dynamic] = &mut complete_args_refs;
+
+                                let backup = &mut ArgBackup::new();
+                                let swap = is_ref_mut && !complete_args_slice.is_empty();
+
+                                if swap {
+                                    backup.change_first_arg_to_copy(complete_args_slice);
+                                }
+
+                                defer! { complete_args_slice = (complete_args_slice) if swap => move |a| backup.restore_first_arg(a) }
+
+                                self.call_script_fn(global, caches, scope, None, env, fn_def, complete_args_slice, true, pos)
+                            }
+                            .map(|r| (r, false));
+                        }
+                        // Otherwise fall through and let build_complete_args report the error
+                    }
+                }
+
                 if fn_def.body.is_empty() {
                     return Ok((Dynamic::UNIT, false));
                 }
