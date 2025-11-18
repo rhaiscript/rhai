@@ -296,10 +296,6 @@ impl Engine {
         hash_base: u64,
         args: Option<&mut FnCallArgs>,
         allow_dynamic: bool,
-        #[cfg(feature = "default-parameters")]
-        fn_name: Option<&str>,
-        #[cfg(not(feature = "default-parameters"))]
-        _fn_name: Option<&str>,
     ) -> Option<&'s FnResolutionCacheEntry> {
         let mut hash = args.as_deref().map_or(hash_base, |args| {
             calc_fn_hash_full(hash_base, args.iter().map(|a| a.type_id()))
@@ -392,61 +388,16 @@ impl Engine {
 
                     // Stop when all permutations are exhausted
                     if bitmask >= max_bitmask {
-                        // For functions with defaults, try higher argument counts
-                        // We registered multiple hashes (one per valid arg count), so try them
-                        #[cfg(feature = "default-parameters")]
-                        if let Some(name) = fn_name {
-                            let mut try_arg_count = num_args + 1;
-                            // Try up to num_args + 10 to find functions with defaults
-                            while try_arg_count <= num_args + 10 {
-                                let try_hash = crate::calc_fn_hash(None, name, try_arg_count);
-
-                                // Try to find function with this argument count
-                                #[cfg(not(feature = "no_function"))]
-                                let func = _global
-                                    .lib
-                                    .iter()
-                                    .rev()
-                                    .find_map(|m| m.get_fn(try_hash).map(|f| (f, m.id_raw())));
-                                #[cfg(feature = "no_function")]
-                                let func = None;
-
-                                let func = func.or_else(|| {
-                                    self.global_modules
-                                        .iter()
-                                        .find_map(|m| m.get_fn(try_hash).map(|f| (f, m.id_raw())))
-                                });
-
-                                #[cfg(not(feature = "no_module"))]
-                                let func = func
-                                    .or_else(|| _global.get_qualified_fn(try_hash, true))
-                                    .or_else(|| {
-                                        self.global_sub_modules
-                                            .values()
-                                            .filter(|m| m.contains_indexed_global_functions())
-                                            .find_map(|m| {
-                                                m.get_qualified_fn(try_hash)
-                                                    .map(|f| (f, m.id_raw()))
-                                            })
-                                    });
-
-                                if let Some((f, s)) = func {
-                                    // Found a function with more parameters - it might have defaults
-                                    let new_entry = FnResolutionCacheEntry {
-                                        func: f.clone(),
-                                        source: s.cloned(),
-                                    };
-                                    return if cache.bloom_filter.is_absent_and_set(try_hash) {
-                                        *local_entry = Some(new_entry);
-                                        local_entry.as_ref()
-                                    } else {
-                                        entry.insert(Some(new_entry)).as_ref()
-                                    };
-                                }
-
-                                try_arg_count += 1;
-                            }
-                        }
+                        // With proper registration, functions with defaults are registered for all valid
+                        // argument counts (min_args to num_params). If we reach here, either:
+                        // 1. No function exists for this arg count (initial lookup failed)
+                        // 2. All Dynamic permutations failed (if allow_dynamic was true)
+                        //
+                        // For named arguments that skip parameters (e.g., `func(a, c=2)` needing a 3-param
+                        // function), the caller (exec_fn_call_with_named) handles searching for functions
+                        // with more parameters and validating they have the required named parameters.
+                        //
+                        // No need to guess upward here - either we found it or it doesn't exist.
 
                         if num_args != 2 {
                             return None;
@@ -540,7 +491,7 @@ impl Engine {
         // Check if function access already in the cache
         let local_entry = &mut None;
         let a = Some(&mut *args);
-        let func = self.resolve_fn(global, caches, local_entry, op_token, hash, a, true, None);
+        let func = self.resolve_fn(global, caches, local_entry, op_token, hash, a, true);
 
         if let Some(FnResolutionCacheEntry { func, source }) = func {
             debug_assert!(func.is_native());
@@ -872,7 +823,6 @@ impl Engine {
                     typed_hash,
                     None,
                     false,
-                    Some(fn_name),
                 );
             }
 
@@ -885,7 +835,6 @@ impl Engine {
                     hash,
                     None,
                     false,
-                    Some(fn_name),
                 );
             }
 
@@ -1017,7 +966,6 @@ impl Engine {
                     typed_hash,
                     None,
                     false,
-                    Some(fn_name),
                 );
             }
 
@@ -1030,7 +978,6 @@ impl Engine {
                     hash,
                     None,
                     false,
-                    Some(fn_name),
                 );
             }
 
@@ -1064,7 +1011,6 @@ impl Engine {
                                 try_hash,
                                 None,
                                 false,
-                                Some(fn_name),
                             );
 
                             if let Some(FnResolutionCacheEntry { func: try_func, source: try_source }) = try_resolved {
