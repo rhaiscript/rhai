@@ -2125,9 +2125,23 @@ impl Engine {
         namespace: &crate::ast::Namespace,
         fn_name: &str,
         args_expr: &[Expr],
+        #[cfg(feature = "default-parameters")]
+        named_args: &[(ImmutableString, Expr)],
+        #[cfg(not(feature = "default-parameters"))]
+        _named_args: &[(ImmutableString, Expr)],
         hash: u64,
         pos: Position,
     ) -> RhaiResult {
+        // Evaluate named arguments first
+        #[cfg(feature = "default-parameters")]
+        let mut named_arg_values = FnArgsVec::with_capacity(named_args.len());
+        #[cfg(feature = "default-parameters")]
+        for (param_name, expr) in named_args {
+            let (value, ..) =
+                self.get_arg_value(global, caches, scope, this_ptr.as_deref_mut(), expr)?;
+            named_arg_values.push((param_name.clone(), value.flatten()));
+        }
+
         let mut arg_values = FnArgsVec::with_capacity(args_expr.len());
         let args = &mut FnArgsVec::with_capacity(args_expr.len());
         let mut first_arg_value = None;
@@ -2271,15 +2285,48 @@ impl Engine {
                 let orig_source = mem::replace(&mut global.source, module.id_raw().cloned());
                 defer! { global => move |g| g.source = orig_source }
 
+                #[cfg(feature = "default-parameters")]
+                {
+                    // Check if we have named args or if the function has defaults
+                    let has_named_args = !named_arg_values.is_empty();
+                    let has_defaults = fn_def.defaults.iter().any(|d| d.is_some());
+                    
+                    if has_named_args || has_defaults {
+                        // Use arg plan for script functions with named args or defaults
+                        let positional_args: FnArgsVec<Dynamic> = args.iter().map(|a| (*a).clone()).collect();
+                        let named_args_dyn: &[(ImmutableString, Dynamic)] = &named_arg_values;
+                        let arg_plan = build_arg_plan(fn_def, &positional_args, named_args_dyn, pos)?;
+                        
+                        return self.call_script_fn_with_plan(
+                            global, caches, scope, None, env, fn_def, arg_plan, true, pos,
+                        );
+                    }
+                }
+                
+                // Fall back to regular call if no named args or defaults
                 self.call_script_fn(global, caches, scope, None, env, fn_def, args, true, pos)
             }
 
-            Some(f) if !f.is_pure() && args[0].is_read_only() => {
+            Some(f) if !f.is_pure() && !args.is_empty() && args[0].is_read_only() => {
                 // If function is not pure, there must be at least one argument
                 Err(ERR::ErrorNonPureMethodCallOnConstant(fn_name.to_string(), pos).into())
             }
 
             Some(RhaiFunc::Plugin { func }) => {
+                // Native plugin functions don't support named arguments
+                #[cfg(feature = "default-parameters")]
+                if !named_arg_values.is_empty() {
+                    return Err(ERR::ErrorFunctionNotFound(
+                        format!(
+                            "{namespace}{}{} (named arguments not supported for native functions)",
+                            crate::engine::NAMESPACE_SEPARATOR,
+                            fn_name
+                        ),
+                        pos,
+                    )
+                    .into());
+                }
+                
                 let context = func
                     .has_context()
                     .then(|| (self, fn_name, module.id(), &*global, pos).into());
@@ -2295,6 +2342,20 @@ impl Engine {
                     func, has_context, ..
                 },
             ) => {
+                // Native functions don't support named arguments
+                #[cfg(feature = "default-parameters")]
+                if !named_arg_values.is_empty() {
+                    return Err(ERR::ErrorFunctionNotFound(
+                        format!(
+                            "{namespace}{}{} (named arguments not supported for native functions)",
+                            crate::engine::NAMESPACE_SEPARATOR,
+                            fn_name
+                        ),
+                        pos,
+                    )
+                    .into());
+                }
+                
                 let context =
                     has_context.then(|| (self, fn_name, module.id(), &*global, pos).into());
                 func(context, args).and_then(|r| self.check_data_size(r, pos))
@@ -2316,7 +2377,7 @@ impl Engine {
                 },
                 pos,
             )
-            .into()),
+            .into())
         }
     }
 
@@ -2454,7 +2515,7 @@ impl Engine {
             let hash = hashes.native();
 
             return self.make_qualified_function_call(
-                global, caches, scope, this_ptr, namespace, name, args, hash, pos,
+                global, caches, scope, this_ptr, namespace, name, args, named_args, hash, pos,
             );
         }
 

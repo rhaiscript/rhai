@@ -799,3 +799,142 @@ fn test_overload_precedence_multiple_overloads() {
         3
     );
 }
+
+#[test]
+fn test_default_params_qualified_names() {
+    let engine = Engine::new();
+
+    // Test with qualified names (this test doesn't actually use qualified names, just named args)
+    assert_eq!(
+        engine.eval::<INT>("fn add(a, b = 2) { a + b } add(1, b = 5)").unwrap(),
+        6
+    );
+}
+
+#[cfg(not(feature = "no_module"))]
+#[test]
+fn test_default_params_module_qualified_name() {
+    use rhai::{Module, Scope};
+
+    let mut engine = Engine::new();
+
+    // Create a module with a function that has a default parameter
+    let ast = engine.compile("fn add(a, b = 10) { a + b }").unwrap();
+    let module = Module::eval_ast_as_new(Scope::new(), &ast, &engine).unwrap();
+    engine.register_static_module("mymod", module.into());
+
+    // Test calling function with qualified name lookup, with a default parameter
+    let result = engine.eval::<INT>("mymod::add(1)").unwrap();
+    assert_eq!(result, 11);
+
+    // Test with both parameters provided
+    let result2 = engine.eval::<INT>("mymod::add(1, 2)").unwrap();
+    assert_eq!(result2, 3);
+
+    // Test qualified call with named argument
+    let result3 = engine.eval::<INT>("mymod::add(1, b = 20)").unwrap();
+    assert_eq!(result3, 21);
+}
+
+#[cfg(not(feature = "no_module"))]
+#[test]
+fn test_default_params_qualified_multiple_defaults() {
+    use rhai::{Module, Scope};
+
+    let mut engine = Engine::new();
+
+    // Create a module with a function that has multiple defaults
+    let ast = engine.compile("fn add(a, b = 10, c = 20) { a + b + c }").unwrap();
+    let module = Module::eval_ast_as_new(Scope::new(), &ast, &engine).unwrap();
+    engine.register_static_module("mymod", module.into());
+
+    // Test qualified call with multiple defaults
+    let result = engine.eval::<INT>("mymod::add(1)").unwrap();
+    assert_eq!(result, 31);
+
+    // Test with one positional arg
+    let result2 = engine.eval::<INT>("mymod::add(1, 5)").unwrap();
+    assert_eq!(result2, 26);
+
+    // Test with all positional args
+    let result3 = engine.eval::<INT>("mymod::add(1, 5, 15)").unwrap();
+    assert_eq!(result3, 21);
+}
+
+#[cfg(not(feature = "no_module"))]
+#[test]
+fn test_default_params_qualified_named_args() {
+    use rhai::{Module, Scope};
+
+    let mut engine = Engine::new();
+
+    // Create a module with a function that has defaults
+    let ast = engine.compile("fn add(a, b = 10, c = 20) { a + b + c }").unwrap();
+    let module = Module::eval_ast_as_new(Scope::new(), &ast, &engine).unwrap();
+    engine.register_static_module("mymod", module.into());
+
+    // Test qualified call with single named argument
+    let result = engine.eval::<INT>("mymod::add(1, c = 30)").unwrap();
+    assert_eq!(result, 41);
+
+    // Test with multiple named arguments
+    let result2 = engine.eval::<INT>("mymod::add(1, b = 15, c = 25)").unwrap();
+    assert_eq!(result2, 41);
+
+    // Test with mixed positional and named arguments
+    let result3 = engine.eval::<INT>("mymod::add(1, 5, c = 25)").unwrap();
+    assert_eq!(result3, 31);
+}
+
+#[cfg(not(feature = "no_module"))]
+#[test]
+fn test_default_params_qualified_all_defaults() {
+    use rhai::{Module, Scope};
+
+    let mut engine = Engine::new();
+
+    // Create a module with a function that has all defaults
+    let ast = engine.compile("fn add(a = 1, b = 2, c = 3) { a + b + c }").unwrap();
+    let module = Module::eval_ast_as_new(Scope::new(), &ast, &engine).unwrap();
+    engine.register_static_module("mymod", module.into());
+
+    // Test qualified call with all defaults
+    let result = engine.eval::<INT>("mymod::add()").unwrap();
+    assert_eq!(result, 6);
+
+    // Test with named argument when all have defaults
+    let result2 = engine.eval::<INT>("mymod::add(c = 10)").unwrap();
+    assert_eq!(result2, 13);
+}
+
+#[cfg(not(feature = "no_module"))]
+#[test]
+fn test_default_params_qualified_errors() {
+    use rhai::{Module, Scope};
+
+    let mut engine = Engine::new();
+
+    // Create a module with a function
+    let ast = engine.compile("fn add(a, b = 10) { a + b }").unwrap();
+    let module = Module::eval_ast_as_new(Scope::new(), &ast, &engine).unwrap();
+    engine.register_static_module("mymod", module.into());
+
+    // Test error: unknown named argument
+    assert!(engine.eval::<INT>("mymod::add(1, c = 20)").is_err());
+
+    // Create another module with a function without defaults
+    let ast2 = engine.compile("fn add(a, b) { a + b }").unwrap();
+    let module2 = Module::eval_ast_as_new(Scope::new(), &ast2, &engine).unwrap();
+    engine.register_static_module("mymod2", module2.into());
+
+    // Test error: missing required argument
+    assert!(engine.eval::<INT>("mymod2::add(1)").is_err());
+
+    // Create another module for duplicate test
+    let ast3 = engine.compile("fn add(a, b = 10, c = 20) { a + b + c }").unwrap();
+    let module3 = Module::eval_ast_as_new(Scope::new(), &ast3, &engine).unwrap();
+    engine.register_static_module("mymod3", module3.into());
+
+    // Test error: duplicate named argument
+    assert!(engine.eval::<INT>("mymod3::add(1, b = 5, b = 10)").is_err());
+}
