@@ -311,6 +311,7 @@ impl Engine {
             Token::lookup_symbol_from_syntax(op).as_ref(),
             Some(&lhs),
             &[rhs],
+            &[],
             FnCallHashes::from_native_only(calc_fn_hash(None, op, 2)),
             false,
             Position::NONE,
