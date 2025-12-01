@@ -15,7 +15,7 @@ use crate::func::hashing::get_hasher;
 use crate::tokenizer::Token;
 use crate::{
     calc_fn_hash, calc_fn_hash_full, Dynamic, Engine, FnArgsVec, FnPtr, ImmutableString, Position,
-    Scope, AST,
+    Scope, StaticVec, AST,
 };
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -496,6 +496,37 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
                 statements => {
                     Stmt::Block(StmtBlock::new_with_span(statements, x.body.span()).into())
                 }
+            }
+        }
+        // if expr1 { if expr2 { ... } } -> if expr1 && expr2 { ... }
+        Stmt::If(x, pos)
+            if x.branch.is_empty()
+                && x.body.len() == 1
+                && matches!(&x.body.as_ref()[0], Stmt::If(x2, ..) if x2.branch.is_empty()) =>
+        {
+            let Stmt::If(mut x2, ..) = x.body.as_mut()[0].take() else {
+                unreachable!()
+            };
+
+            state.set_dirty();
+            let body = x2.body.take_statements();
+            *x.body.statements_mut() =
+                optimize_stmt_block(body, state, preserve_result, true, false);
+
+            let mut expr2 = x2.expr.take();
+            optimize_expr(&mut expr2, state, false);
+
+            if let Expr::And(ref mut v, ..) = x.expr {
+                v.push(expr2);
+            } else {
+                let mut expr1 = x.expr.take();
+                optimize_expr(&mut expr1, state, false);
+
+                let mut v = StaticVec::new_const();
+                v.push(expr1);
+                v.push(expr2);
+
+                x.expr = Expr::And(v.into(), *pos);
             }
         }
         // if expr { if_block } else { else_block }

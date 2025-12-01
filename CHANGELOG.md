@@ -9,13 +9,19 @@ Breaking Changes
 
 * `stdweb` support is removed. The feature flag `stdweb` is also removed. Use `wasm-bindgen` instead.
 
+Bug fixes
+---------
+
+* (Fuzzing) Fixed panic when using `sort` on an array with a comparer function that does not implement a [total order](https://en.wikipedia.org/wiki/Total_order).
 
 Enhancements
 ------------
 
 * The optimizer now optimizes constant object map property accesses (thanks [`@phsym`](https://github.com/phsym) [#1050](https://github.com/rhaiscript/rhai/pull/1050)).
+* Optimization is added to turn `if cond1 { if cond2 { ... } }` into `if cond1 && cond2 { ... }`.
 * The method `sort` for arrays is also aliased to `sort_by`.
 * The methods `sort_desc`, `order`, `order_by` and `order_desc` are added to arrays.
+* An exception is now thrown when attempting to use `sort` on an array containing unsupported element types.
 
 
 Version 1.23.6
