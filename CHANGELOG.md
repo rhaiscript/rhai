@@ -12,7 +12,7 @@ Breaking Changes
 Bug fixes
 ---------
 
-* (Fuzzing) Fixed panic when using `sort` on an array with a comparer function that does not implement a [total order](https://en.wikipedia.org/wiki/Total_order).
+* (Fuzzing) Fixed panic when using `sort` on an array with a comparer function that does not implement a [total order](https://en.wikipedia.org/wiki/Total_order) [#1058](https://github.com/rhaiscript/rhai/pull/1058).
 
 Enhancements
 ------------

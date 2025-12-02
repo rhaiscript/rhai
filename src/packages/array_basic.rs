@@ -1557,9 +1557,7 @@ pub mod array_functions {
             return Ok(());
         }
 
-        // `slice::sort_by` may panic if the comparer function does not implement a total order.
-        // Catch this instead.
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let closure = || {
             array.sort_by(|x, y| {
                 comparer
                     .call_raw(&ctx, None, [x.clone(), y.clone()])
@@ -1579,10 +1577,21 @@ pub mod array_functions {
                         },
                     )
             });
-        }))
-        .map_err(|_| {
+        };
+
+        // `slice::sort_by` may panic if the comparer function does not implement a total order.
+        // Catch this instead.
+        #[cfg(not(feature = "no_std"))]
+        return std::panic::catch_unwind(std::panic::AssertUnwindSafe(closure)).map_err(|_| {
             ERR::ErrorRuntime("error in comparer for sorting".into(), Position::NONE).into()
-        })
+        });
+
+        #[cfg(feature = "no_std")]
+        {
+            let mut closure = closure;
+            closure();
+            Ok(())
+        }
     }
     /// Sort the array.
     ///
