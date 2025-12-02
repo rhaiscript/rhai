@@ -193,6 +193,9 @@ pub struct FnCallExpr {
     pub hashes: FnCallHashes,
     /// List of function call argument expressions.
     pub args: FnArgsVec<Expr>,
+    /// Named arguments: (parameter_name, expression).
+    #[cfg(feature = "default-parameters")]
+    pub named_args: FnArgsVec<(ImmutableString, Expr)>,
     /// Does this function call capture the parent scope?
     pub capture_parent_scope: bool,
     /// Is this function call a native operator?
@@ -603,6 +606,8 @@ impl Expr {
                     name: KEYWORD_FN_PTR.into(),
                     hashes: FnCallHashes::from_hash(calc_fn_hash(None, f.fn_name(), 1)),
                     args: once(Self::StringConstant(f.fn_name().into(), pos)).collect(),
+                    #[cfg(feature = "default-parameters")]
+                    named_args: FnArgsVec::new(),
                     capture_parent_scope: false,
                     op_token: None,
                 }
