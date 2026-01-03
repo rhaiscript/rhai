@@ -2329,7 +2329,7 @@ impl Engine {
                 namespace: crate::ast::Namespace::NONE,
                 name: self.get_interned_string(&op),
                 hashes: FnCallHashes::from_native_only(hash),
-                args: IntoIterator::into_iter([root, rhs]).collect(),
+                args: IntoIterator::into_iter([root.clone(), rhs.clone()]).collect(),
                 op_token: native_only.then(|| op_token.clone()),
                 capture_parent_scope: false,
             };
@@ -2430,6 +2430,129 @@ impl Engine {
                     op_base.into_fn_call_expr(pos)
                 }
 
+                Token::PipeArrow => {
+                    // Pipeline: lhs |> fn(args...)  =>  fn(lhs, args...)
+                    match rhs {
+                        Expr::FnCall(f, func_pos) => {
+                            // take inner FnCallExpr
+                            let mut f = *f;
+
+                            let args_len = f.args.len() + 1;
+                            f.args.insert(0, root);
+
+                            // Recalculate hash for the new argument count, preserving namespace if any
+                            #[cfg(not(feature = "no_module"))]
+                            {
+                                let hash = if f.namespace.is_empty() {
+                                    calc_fn_hash(None, &f.name, args_len)
+                                } else {
+                                    calc_fn_hash(
+                                        f.namespace.path.iter().map(Ident::as_str),
+                                        &f.name,
+                                        args_len,
+                                    )
+                                };
+                                f.hashes = if is_valid_function_name(&f.name) {
+                                    FnCallHashes::from_hash(hash)
+                                } else {
+                                    FnCallHashes::from_native_only(hash)
+                                };
+                            }
+                            #[cfg(feature = "no_module")]
+                            {
+                                f.hashes = if is_valid_function_name(&f.name) {
+                                    FnCallHashes::from_hash(calc_fn_hash(None, &f.name, args_len))
+                                } else {
+                                    FnCallHashes::from_native_only(calc_fn_hash(
+                                        None, &f.name, args_len,
+                                    ))
+                                };
+                            }
+
+                            Expr::FnCall(f.into(), func_pos)
+                        }
+                        Expr::MethodCall(f, func_pos) => {
+                            let mut f = *f;
+
+                            let args_len = f.args.len() + 1;
+                            f.args.insert(0, root);
+
+                            // Recalculate hash for the new argument count
+                            f.hashes = if is_valid_function_name(&f.name) {
+                                #[cfg(not(feature = "no_function"))]
+                                {
+                                    FnCallHashes::from_hash(calc_fn_hash(None, &f.name, args_len))
+                                }
+                                #[cfg(feature = "no_function")]
+                                {
+                                    FnCallHashes::from_native_only(calc_fn_hash(
+                                        None, &f.name, args_len,
+                                    ))
+                                }
+                            } else {
+                                FnCallHashes::from_native_only(calc_fn_hash(
+                                    None, &f.name, args_len,
+                                ))
+                            };
+
+                            Expr::FnCall(f.into(), func_pos)
+                        }
+                        Expr::Variable(x, ..) => {
+                            // Pipeline into a bare function name: lhs |> func  => func(lhs)
+                            let x = *x; // move out
+
+                            #[cfg(not(feature = "no_module"))]
+                            let (_index, name, namespace, _hash) = x;
+                            #[cfg(feature = "no_module")]
+                            let (index, name) = x;
+
+                            let args_len = 1usize;
+
+                            #[cfg(not(feature = "no_module"))]
+                            let hashes = if is_valid_function_name(&name) {
+                                FnCallHashes::from_hash(calc_fn_hash(
+                                    namespace.path.iter().map(Ident::as_str),
+                                    &name,
+                                    args_len,
+                                ))
+                            } else {
+                                FnCallHashes::from_native_only(calc_fn_hash(
+                                    namespace.path.iter().map(Ident::as_str),
+                                    &name,
+                                    args_len,
+                                ))
+                            };
+
+                            #[cfg(feature = "no_module")]
+                            let hashes = if is_valid_function_name(&name) {
+                                FnCallHashes::from_hash(calc_fn_hash(None, &name, args_len))
+                            } else {
+                                FnCallHashes::from_native_only(calc_fn_hash(None, &name, args_len))
+                            };
+
+                            let fn_call = FnCallExpr {
+                                #[cfg(not(feature = "no_module"))]
+                                namespace: {
+                                    #[cfg(not(feature = "no_module"))]
+                                    {
+                                        let mut ns = crate::ast::Namespace::NONE;
+                                        ns.path = namespace.path;
+                                        ns.index = namespace.index;
+                                        ns
+                                    }
+                                },
+                                name: name.clone(),
+                                hashes,
+                                args: IntoIterator::into_iter([root]).collect(),
+                                capture_parent_scope: false,
+                                op_token: None,
+                            };
+
+                            Expr::FnCall(fn_call.into(), pos)
+                        }
+                        _ => op_base.into_fn_call_expr(pos),
+                    }
+                }
                 _ => op_base.into_fn_call_expr(pos),
             };
         }

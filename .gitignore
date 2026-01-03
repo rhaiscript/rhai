@@ -13,3 +13,4 @@ doc/rhai.json
 .idea
 .idea/*
 src/eval/chaining.rs
+*.core

@@ -199,6 +199,8 @@ pub enum Token {
     Bang,
     /// `|`
     Pipe,
+    /// `|>`
+    PipeArrow,
     /// `||`
     Or,
     /// `^`
@@ -786,6 +788,7 @@ impl Token {
             EqualsTo => "==",
             NotEqualsTo => "!=",
             Pipe => "|",
+            PipeArrow => "|>",
             Or => "||",
             Ampersand => "&",
             And => "&&",
@@ -1034,7 +1037,7 @@ impl Token {
         use Token::*;
 
         Precedence::new(match self {
-            Or | XOr | Pipe => 30,
+            Or | XOr | Pipe | PipeArrow => 30,
 
             And | Ampersand => 60,
 
@@ -2350,7 +2353,7 @@ fn get_next_token_inner(
             }
             ('|', '>') => {
                 stream.eat_next_and_advance(pos);
-                return (Token::Reserved(Box::new("|>".into())), start_pos);
+                return (Token::PipeArrow, start_pos);
             }
             ('|', ..) => return (Token::Pipe, start_pos),
 
