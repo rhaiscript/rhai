@@ -31,7 +31,7 @@ pub mod array_functions {
     /// Number of elements in the array.
     #[rhai_fn(name = "len", get = "len", pure)]
     pub fn len(array: &mut Array) -> INT {
-        array.len() as INT
+        INT::try_from(array.len()).unwrap_or(INT::MAX)
     }
     /// Return true if the array is empty.
     #[rhai_fn(name = "is_empty", get = "is_empty", pure)]
@@ -647,7 +647,7 @@ pub mod array_functions {
         }
 
         for (i, item) in array.iter_mut().enumerate() {
-            let ex = [(i as INT).into()];
+            let ex = [INT::try_from(i).unwrap_or(INT::MAX).into()];
 
             let _ = map.call_raw_with_extra_args("for_each", &ctx, Some(item), [], ex, None)?;
         }
@@ -691,7 +691,7 @@ pub mod array_functions {
         let mut ar = Array::with_capacity(array.len());
 
         for (i, item) in array.iter_mut().enumerate() {
-            let ex = [(i as INT).into()];
+            let ex = [INT::try_from(i).unwrap_or(INT::MAX).into()];
             ar.push(map.call_raw_with_extra_args("map", &ctx, Some(item), [], ex, Some(0))?);
         }
 
@@ -734,7 +734,7 @@ pub mod array_functions {
         let mut ar = Array::new();
 
         for (i, item) in array.iter_mut().enumerate() {
-            let ex = [(i as INT).into()];
+            let ex = [INT::try_from(i).unwrap_or(INT::MAX).into()];
 
             if filter
                 .call_raw_with_extra_args("filter", &ctx, Some(item), [], ex, Some(0))?
@@ -883,7 +883,7 @@ pub mod array_functions {
                 .as_bool()
                 .unwrap_or(false)
             {
-                return Ok(i as INT);
+                return Ok(INT::try_from(i).unwrap_or(INT::MAX));
             }
         }
 
@@ -977,14 +977,14 @@ pub mod array_functions {
         let (start, ..) = calc_offset_len(array.len(), start, 0);
 
         for (i, item) in array.iter_mut().enumerate().skip(start) {
-            let ex = [(i as INT).into()];
+            let ex = [INT::try_from(i).unwrap_or(INT::MAX).into()];
 
             if filter
                 .call_raw_with_extra_args("index_of", &ctx, Some(item), [], ex, Some(0))?
                 .as_bool()
                 .unwrap_or(false)
             {
-                return Ok(i as INT);
+                return Ok(INT::try_from(i).unwrap_or(INT::MAX));
             }
         }
 
@@ -1150,7 +1150,7 @@ pub mod array_functions {
         let (start, ..) = calc_offset_len(array.len(), start, 0);
 
         for (i, item) in array.iter_mut().enumerate().skip(start) {
-            let ex = [(i as INT).into()];
+            let ex = [INT::try_from(i).unwrap_or(INT::MAX).into()];
 
             let value =
                 filter.call_raw_with_extra_args("find_map", &ctx, Some(item), [], ex, Some(0))?;
@@ -1193,7 +1193,7 @@ pub mod array_functions {
         }
 
         for (i, item) in array.iter_mut().enumerate() {
-            let ex = [(i as INT).into()];
+            let ex = [INT::try_from(i).unwrap_or(INT::MAX).into()];
 
             if filter
                 .call_raw_with_extra_args("some", &ctx, Some(item), [], ex, Some(0))?
@@ -1237,7 +1237,7 @@ pub mod array_functions {
         }
 
         for (i, item) in array.iter_mut().enumerate() {
-            let ex = [(i as INT).into()];
+            let ex = [INT::try_from(i).unwrap_or(INT::MAX).into()];
 
             if !filter
                 .call_raw_with_extra_args("all", &ctx, Some(item), [], ex, Some(0))?
@@ -1376,7 +1376,7 @@ pub mod array_functions {
             .iter_mut()
             .enumerate()
             .try_fold(initial, |result, (i, item)| {
-                let ex = [(i as INT).into()];
+                let ex = [INT::try_from(i).unwrap_or(INT::MAX).into()];
                 reducer.call_raw_with_extra_args("reduce", &ctx, Some(item), [result], ex, Some(1))
             })
     }
@@ -1450,7 +1450,7 @@ pub mod array_functions {
             .rev()
             .enumerate()
             .try_fold(initial, |result, (i, item)| {
-                let ex = [((len - 1 - i) as INT).into()];
+                let ex = [INT::try_from(len - 1 - i).unwrap_or(INT::MAX).into()];
 
                 reducer.call_raw_with_extra_args(
                     "reduce_rev",
@@ -1506,7 +1506,7 @@ pub mod array_functions {
                     &ctx,
                     None,
                     [x.clone(), y],
-                    [(i as INT).into()],
+                    [INT::try_from(i).unwrap_or(INT::MAX).into()],
                     None,
                 )
             })
@@ -1687,7 +1687,7 @@ pub mod array_functions {
         }
 
         Err(ERR::ErrorFunctionNotFound(
-            format!("elements of {} cannot be sorted", array[0].type_name()).into(),
+            format!("elements of {} cannot be sorted", array[0].type_name()),
             Position::NONE,
         )
         .into())
@@ -1772,7 +1772,7 @@ pub mod array_functions {
             array.sort_by(|a, b| {
                 let a = &*a.as_immutable_string_ref().unwrap();
                 let b = &*b.as_immutable_string_ref().unwrap();
-                match a.cmp(&b) {
+                match a.cmp(b) {
                     Ordering::Less => Ordering::Greater,
                     Ordering::Equal => Ordering::Equal,
                     Ordering::Greater => Ordering::Less,
@@ -1810,7 +1810,7 @@ pub mod array_functions {
         }
 
         Err(ERR::ErrorFunctionNotFound(
-            format!("elements of {} cannot be sorted", array[0].type_name()).into(),
+            format!("elements of {} cannot be sorted", array[0].type_name()),
             Position::NONE,
         )
         .into())

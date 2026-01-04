@@ -118,7 +118,7 @@ no_std = ["no-std-compat", "num-traits/libm", "core-error", "libm", "hashbrown",
 #! ### JavaScript Interface for WASM
 
 ## Use [`wasm-bindgen`](https://crates.io/crates/wasm-bindgen) as JavaScript interface.
-wasm-bindgen = ["getrandom/wasm_js", "instant/wasm-bindgen"]
+wasm-bindgen = ["getrandom/wasm_js"]
 
 #! ### Features used in testing environments only
 
@@ -154,7 +154,7 @@ codegen-units = 1
 #panic = 'abort'     # remove stack backtrace for no-std
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-instant = { version = "0.1.10" } # WASM implementation of std::time::Instant
+web-time = { version = "1.1.0" } # WASM implementation of std::time::Instant
 
 [package.metadata.docs.rs]
 features = ["document-features", "metadata", "serde", "internals", "decimal", "debugging"]
@@ -163,6 +163,3 @@ features = ["document-features", "metadata", "serde", "internals", "decimal", "d
 # Notice that a custom modified version of `rustyline` is used which supports bracketed paste on Windows.
 # This can be moved to the official version when bracketed paste is added.
 rustyline = { git = "https://github.com/schungx/rustyline", branch = "v15_fake" }
-
-# Patch SmartString to resolve an UB issue.
-#smartstring = { git = "https://github.com/bodil/smartstring", ref = "refs/pull/34/head" }

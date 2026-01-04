@@ -22,7 +22,7 @@ pub struct CallFnOptions<'t> {
     pub eval_ast: bool,
     /// Rewind the [`Scope`] after the function call? Default `true`.
     pub rewind_scope: bool,
-    /// Call only scripted functions from the [`AST`] instead of functions in all namespaces.
+    /// Call functions in all namespaces instead of only scripted functions within the [`AST`].
     pub in_all_namespaces: bool,
 }
 
@@ -77,7 +77,7 @@ impl<'a> CallFnOptions<'a> {
     /// Call functions in all namespaces instead of only scripted functions within the [`AST`].
     #[inline(always)]
     #[must_use]
-    pub fn in_all_namespaces(mut self, value: bool) -> Self {
+    pub const fn in_all_namespaces(mut self, value: bool) -> Self {
         self.in_all_namespaces = value;
         self
     }
@@ -291,12 +291,10 @@ impl Engine {
             } else if !in_all_namespaces {
                 Err(ERR::ErrorFunctionNotFound(name.into(), Position::NONE).into())
             } else {
-                let has_this = if let Some(this_ptr) = this_ptr.as_deref_mut() {
+                let has_this = this_ptr.as_deref_mut().map_or(false, |this_ptr| {
                     args.insert(0, this_ptr);
                     true
-                } else {
-                    false
-                };
+                });
 
                 self.eval_fn_call_with_arguments::<Dynamic>(name, args, has_this, has_this)
             }

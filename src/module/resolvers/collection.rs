@@ -157,7 +157,7 @@ impl ModuleResolver for ModuleResolversCollection {
             match resolver.resolve(engine, source_path, path, pos) {
                 Ok(module) => return Ok(module),
                 Err(err) => match *err {
-                    ERR::ErrorModuleNotFound(..) => continue,
+                    ERR::ErrorModuleNotFound(..) => (),
                     ERR::ErrorInModule(..) => return Err(err),
                     _ => unreachable!("ModuleResolver::resolve returns error that is not ErrorModuleNotFound or ErrorInModule"),
                 },
@@ -179,7 +179,7 @@ impl ModuleResolver for ModuleResolversCollection {
             match resolver.resolve_raw(engine,global, scope, path, pos) {
                 Ok(module) => return Ok(module),
                 Err(err) => match *err {
-                    ERR::ErrorModuleNotFound(..) => continue,
+                    ERR::ErrorModuleNotFound(..) => (),
                     ERR::ErrorInModule(..) => return Err(err),
                     _ => unreachable!("ModuleResolver::resolve returns error that is not ErrorModuleNotFound or ErrorInModule"),
                 },
@@ -198,9 +198,9 @@ impl ModuleResolver for ModuleResolversCollection {
     ) -> Option<RhaiResultOf<AST>> {
         for resolver in &self.0 {
             match resolver.resolve_ast(engine, source, path, pos) {
-                None => continue,
+                None => (),
                 Some(Err(err)) => match *err {
-                    ERR::ErrorModuleNotFound(..) => continue,
+                    ERR::ErrorModuleNotFound(..) => (),
                     _ => unreachable!("ModuleResolver::resolve_ast returns error that is not ErrorModuleNotFound or ErrorInModule"),
                 },
                 r => return r,

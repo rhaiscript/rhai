@@ -193,7 +193,7 @@ mod string_functions {
             return 0;
         }
 
-        string.chars().count() as INT
+        INT::try_from(string.chars().count()).unwrap_or(INT::MAX)
     }
     /// Return true if the string is empty.
     #[rhai_fn(name = "is_empty", get = "is_empty")]
@@ -210,12 +210,12 @@ mod string_functions {
     /// print(text.bytes);      // prints 51
     /// ```
     #[rhai_fn(name = "bytes", get = "bytes")]
-    pub const fn bytes(string: &str) -> INT {
+    pub fn bytes(string: &str) -> INT {
         if string.is_empty() {
             return 0;
         }
 
-        string.len() as INT
+        INT::try_from(string.len()).unwrap_or(INT::MAX)
     }
     /// Remove all occurrences of a sub-string from the string.
     ///
@@ -688,9 +688,9 @@ mod string_functions {
             return -1;
         }
 
-        string
-            .find(character)
-            .map_or(-1 as INT, |index| string[0..index].chars().count() as INT)
+        string.find(character).map_or(-1 as INT, |index| {
+            INT::try_from(string[0..index].chars().count()).unwrap_or(-1)
+        })
     }
     /// Find the specified sub-string in the string, starting from the specified `start` position,
     /// and return the first index where it is found.
@@ -768,9 +768,9 @@ mod string_functions {
             return -1;
         }
 
-        string
-            .find(find_string)
-            .map_or(-1 as INT, |index| string[0..index].chars().count() as INT)
+        string.find(find_string).map_or(-1 as INT, |index| {
+            INT::try_from(string[0..index].chars().count()).unwrap_or(-1)
+        })
     }
 
     /// Get the character at the `index` position in the string.
@@ -960,19 +960,16 @@ mod string_functions {
             chars.extend(string.chars());
         }
 
-        let len = if let Ok(len) = usize::try_from(len) {
-            if len
-                .checked_add(offset)
-                .map(|x| x > chars.len())
-                .unwrap_or(true)
-            {
-                chars.len() - offset
-            } else {
-                len
-            }
-        } else {
-            chars.len() - offset
-        };
+        let len = usize::try_from(len).map_or_else(
+            |_| chars.len() - offset,
+            |len| {
+                if len.checked_add(offset).map_or(true, |x| x > chars.len()) {
+                    chars.len() - offset
+                } else {
+                    len
+                }
+            },
+        );
 
         chars
             .iter()
@@ -1008,7 +1005,7 @@ mod string_functions {
             return ctx.engine().const_empty_string();
         }
 
-        let len = string.len() as INT;
+        let len = INT::try_from(string.len()).unwrap_or(INT::MAX);
         sub_string(ctx, string, start, len)
     }
 
@@ -1116,19 +1113,16 @@ mod string_functions {
             chars.extend(string.chars());
         }
 
-        let len = if let Ok(len) = usize::try_from(len) {
-            if len
-                .checked_add(offset)
-                .map(|x| x > chars.len())
-                .unwrap_or(true)
-            {
-                chars.len() - offset
-            } else {
-                len
-            }
-        } else {
-            chars.len() - offset
-        };
+        let len = usize::try_from(len).map_or_else(
+            |_| chars.len() - offset,
+            |len| {
+                if len.checked_add(offset).map_or(true, |x| x > chars.len()) {
+                    chars.len() - offset
+                } else {
+                    len
+                }
+            },
+        );
 
         let copy = string.make_mut();
         copy.clear();
@@ -1159,7 +1153,8 @@ mod string_functions {
         string: &mut ImmutableString,
         start: INT,
     ) {
-        crop(ctx, string, start, string.len() as INT);
+        let len = INT::try_from(string.len()).unwrap_or(INT::MAX);
+        crop(ctx, string, start, len);
     }
 
     /// Replace all occurrences of the specified sub-string in the string with another string.

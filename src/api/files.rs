@@ -41,7 +41,7 @@ impl Engine {
                 }
                 None => contents.clear(),
             }
-        };
+        }
 
         Ok(contents)
     }

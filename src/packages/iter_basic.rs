@@ -143,7 +143,7 @@ impl BitRange {
         let len = if len < 0 {
             0
         } else if let Ok(len) = usize::try_from(len) {
-            if len.checked_add(from).map(|x| x > INT_BITS).unwrap_or(true) {
+            if len.checked_add(from).map_or(true, |x| x > INT_BITS) {
                 INT_BITS - from
             } else {
                 len

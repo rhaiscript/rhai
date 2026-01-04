@@ -20,7 +20,7 @@ pub use std::time::Instant;
 
 #[cfg(not(feature = "no_time"))]
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-pub use instant::Instant;
+pub use web_time::Instant;
 
 #[cfg(not(feature = "no_index"))]
 use crate::{Array, Blob};
@@ -123,7 +123,7 @@ enum DynamicReadLockInner<'d, T: Clone> {
     Guard(crate::func::native::LockGuard<'d, Dynamic>),
 }
 
-impl<'d, T: Any + Clone> Deref for DynamicReadLock<'d, T> {
+impl<T: Any + Clone> Deref for DynamicReadLock<'_, T> {
     type Target = T;
 
     #[inline]
@@ -157,7 +157,7 @@ enum DynamicWriteLockInner<'d, T: Clone> {
     Guard(crate::func::native::LockGuardMut<'d, Dynamic>),
 }
 
-impl<'d, T: Any + Clone> Deref for DynamicWriteLock<'d, T> {
+impl<T: Any + Clone> Deref for DynamicWriteLock<'_, T> {
     type Target = T;
 
     #[inline]
@@ -170,7 +170,7 @@ impl<'d, T: Any + Clone> Deref for DynamicWriteLock<'d, T> {
     }
 }
 
-impl<'d, T: Any + Clone> DerefMut for DynamicWriteLock<'d, T> {
+impl<T: Any + Clone> DerefMut for DynamicWriteLock<'_, T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self.0 {

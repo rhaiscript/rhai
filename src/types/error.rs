@@ -463,7 +463,7 @@ impl EvalAltResult {
                         .into(),
                 );
             }
-        };
+        }
     }
     /// Unwrap this error and get the very base error.
     #[cold]

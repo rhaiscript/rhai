@@ -104,8 +104,22 @@ impl AST {
         ast.set_source(source);
         ast
     }
-    /// Create an empty [`AST`].
+    /// Create a new [`AST`] from a shared [`Module`][crate::Module].
+    #[cfg(not(feature = "no_function"))]
     #[inline]
+    #[must_use]
+    pub fn new_from_module(module: impl Into<crate::SharedModule>) -> Self {
+        let module = module.into();
+
+        if let Some(source) = module.id() {
+            let source: crate::SmartString = source.into();
+            Self::new_with_source(std::iter::empty(), module, source)
+        } else {
+            Self::new(std::iter::empty(), module)
+        }
+    }
+    /// Create an empty [`AST`].
+    #[inline(always)]
     #[must_use]
     pub fn empty() -> Self {
         Self {

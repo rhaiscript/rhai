@@ -253,12 +253,10 @@ impl<'a, 's, 'ps, 'g, 'c, 't> EvalContext<'a, 's, 'ps, 'g, 'c, 't> {
 
         let args = &mut arg_values.iter_mut().collect::<FnArgsVec<_>>();
 
-        let is_ref_mut = if let Some(this_ptr) = self.this_ptr.as_deref_mut() {
+        let is_ref_mut = self.this_ptr.as_deref_mut().map_or(false, |this_ptr| {
             args.insert(0, this_ptr);
             true
-        } else {
-            false
-        };
+        });
 
         _call_fn_raw(
             engine,

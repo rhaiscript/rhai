@@ -5,6 +5,7 @@ use crate::plugin::*;
 use crate::{
     def_package, Dynamic, FnPtr, ImmutableString, Map, NativeCallContext, RhaiResultOf, INT,
 };
+use std::convert::TryFrom;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -25,7 +26,7 @@ mod map_functions {
     /// Return the number of properties in the object map.
     #[rhai_fn(pure)]
     pub fn len(map: &mut Map) -> INT {
-        map.len() as INT
+        INT::try_from(map.len()).unwrap_or(INT::MAX)
     }
     /// Return true if the map is empty.
     #[rhai_fn(pure)]
@@ -418,7 +419,7 @@ mod map_functions {
         let mut retained = Map::new();
         let mut error = None;
 
-        for (key, mut value) in mem::take(map).into_iter() {
+        for (key, mut value) in mem::take(map) {
             if error.is_some() {
                 retained.insert(key, value);
                 continue;
@@ -445,11 +446,7 @@ mod map_functions {
 
         *map = retained;
 
-        if let Some(err) = error {
-            Err(err)
-        } else {
-            Ok(drained)
-        }
+        error.map_or_else(|| Ok(drained), Err)
     }
     /// Remove all elements in the object map that do not return `true` when applied the `filter` function and
     /// return them as a new object map.
@@ -486,7 +483,7 @@ mod map_functions {
         let mut retained = Map::new();
         let mut error = None;
 
-        for (key, mut value) in mem::take(map).into_iter() {
+        for (key, mut value) in mem::take(map) {
             if error.is_some() {
                 retained.insert(key, value);
                 continue;
@@ -513,11 +510,7 @@ mod map_functions {
 
         *map = retained;
 
-        if let Some(err) = error {
-            Err(err)
-        } else {
-            Ok(drained)
-        }
+        error.map_or_else(|| Ok(drained), Err)
     }
 
     /// Return the JSON representation of the object map.

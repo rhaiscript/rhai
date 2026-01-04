@@ -234,7 +234,7 @@ impl FnCallExpr {
     /// Is this function call an operator expression?
     #[inline(always)]
     #[must_use]
-    pub fn is_operator_call(&self) -> bool {
+    pub const fn is_operator_call(&self) -> bool {
         self.op_token.is_some()
     }
     /// Convert this into an [`Expr::FnCall`].
@@ -276,12 +276,12 @@ pub enum Expr {
     /// [String][ImmutableString] constant.
     StringConstant(ImmutableString, Position),
     /// An interpolated [string][ImmutableString].
-    InterpolatedString(ThinVec<Expr>, Position),
+    InterpolatedString(ThinVec<Self>, Position),
     /// [ expr, ... ]
-    Array(ThinVec<Expr>, Position),
+    Array(ThinVec<Self>, Position),
     /// #{ name:expr, ... }
     Map(
-        Box<(StaticVec<(Ident, Expr)>, BTreeMap<Identifier, Dynamic>)>,
+        Box<(StaticVec<(Ident, Self)>, BTreeMap<Identifier, Dynamic>)>,
         Position,
     ),
     /// ()
@@ -330,11 +330,11 @@ pub enum Expr {
     /// * [`BREAK`][ASTFlags::BREAK] = terminate the chain (recurse into the chain if unset)
     Index(Box<BinaryExpr>, ASTFlags, Position),
     /// lhs `&&` rhs
-    And(Box<StaticVec<Expr>>, Position),
+    And(Box<StaticVec<Self>>, Position),
     /// lhs `||` rhs
-    Or(Box<StaticVec<Expr>>, Position),
+    Or(Box<StaticVec<Self>>, Position),
     /// lhs `??` rhs
-    Coalesce(Box<StaticVec<Expr>>, Position),
+    Coalesce(Box<StaticVec<Self>>, Position),
     /// Custom syntax
     #[cfg(not(feature = "no_custom_syntax"))]
     Custom(Box<CustomExpr>, Position),
@@ -764,7 +764,7 @@ impl Expr {
             Self::Map(x, ..) => x.0.iter().map(|(.., v)| v).all(Self::is_pure),
 
             Self::And(x, ..) | Self::Or(x, ..) | Self::Coalesce(x, ..) => {
-                x.iter().all(Expr::is_pure)
+                x.iter().all(Self::is_pure)
             }
 
             Self::Stmt(x) => x.iter().all(Stmt::is_pure),

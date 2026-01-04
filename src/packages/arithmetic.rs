@@ -1,5 +1,6 @@
 use crate::plugin::*;
 use crate::{def_package, Position, RhaiError, RhaiResultOf, ERR, INT};
+use std::convert::TryFrom;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -74,10 +75,10 @@ macro_rules! gen_arithmetic_functions {
                         } else if y < 0 {
                             Err(make_err(format!("Integer raised to a negative power: {x} ** {y}")))
                         } else {
-                            x.checked_pow(y as u32).ok_or_else(|| make_err(format!("Exponential overflow: {x} ** {y}")))
+                            x.checked_pow(u32::try_from(y).unwrap()).ok_or_else(|| make_err(format!("Exponential overflow: {x} ** {y}")))
                         }
                     } else {
-                        Ok(x.pow(y as u32))
+                        Ok(x.pow(u32::try_from(y).unwrap()))
                     }
                 }
 
@@ -89,7 +90,7 @@ macro_rules! gen_arithmetic_functions {
                         } else if y < 0 {
                             shift_right(x, y.checked_abs().unwrap_or(INT::MAX))
                         } else {
-                            x.checked_shl(y as u32).unwrap_or_else(|| 0)
+                            x.checked_shl(u32::try_from(y).unwrap()).unwrap_or_else(|| 0)
                         }
                     } else if y < 0 {
                         x >> -y
@@ -105,7 +106,7 @@ macro_rules! gen_arithmetic_functions {
                         } else if y < 0 {
                             shift_left(x, y.checked_abs().unwrap_or(INT::MAX))
                         } else {
-                            x.checked_shr(y as u32).unwrap_or_else(|| x.wrapping_shr(u32::MAX))
+                            x.checked_shr(u32::try_from(y).unwrap()).unwrap_or_else(|| x.wrapping_shr(u32::MAX))
                         }
                     } else if y < 0 {
                         x << -y

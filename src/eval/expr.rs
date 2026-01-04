@@ -78,12 +78,13 @@ impl Engine {
                     .next()
                 {
                     // Embedded environment for scripted function
-                    let env = if let Some(env) = func.get_shared_encapsulated_environ() {
-                        env.clone()
-                    } else {
-                        // Create a new environment with the current module
-                        crate::Shared::new((&*global).into())
-                    };
+                    let env = func
+                        .get_shared_encapsulated_environ()
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            // Create a new environment with the current module
+                            crate::Shared::new((&*global).into())
+                        });
 
                     let val: Dynamic = crate::FnPtr {
                         name: v.1.clone(),

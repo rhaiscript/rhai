@@ -971,7 +971,7 @@ impl Engine {
                     )
                     .into_err(*pos))
                 }
-            };
+            }
         }
 
         array.shrink_to_fit();
@@ -1055,7 +1055,7 @@ impl Engine {
                     )
                     .into_err(pos))
                 }
-            };
+            }
 
             #[cfg(not(feature = "unchecked"))]
             if self.max_map_size() > 0 && map.len() >= self.max_map_size() {
@@ -1200,7 +1200,7 @@ impl Engine {
                     )
                     .into_err(pos))
                 }
-            };
+            }
 
             let (action_expr, need_comma) =
                 if settings.has_flag(ParseSettingFlags::DISALLOW_STATEMENTS_IN_BLOCKS) {
@@ -1884,6 +1884,7 @@ impl Engine {
                         .map(|i| Expr::IntegerConstant(i, pos))
                         .or_else(|| {
                             #[cfg(not(feature = "no_float"))]
+                            #[allow(clippy::cast_precision_loss)]
                             return Some(Expr::FloatConstant((-(num as crate::FLOAT)).into(), pos));
                             #[cfg(feature = "no_float")]
                             return None;
@@ -3434,7 +3435,7 @@ impl Engine {
                         if state.input.peek().unwrap().1 == current_pos {
                             Ok(Stmt::BreakLoop(None, ASTFlags::BREAK, pos))
                         } else {
-                            return Err(err);
+                            Err(err)
                         }
                     }
                 }

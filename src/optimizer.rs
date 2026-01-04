@@ -926,14 +926,10 @@ fn move_constant_arg(arg_expr: &mut Expr) -> bool {
         #[cfg(not(feature = "no_float"))]
         Expr::FloatConstant(..) => false,
 
-        _ => {
-            if let Some(value) = arg_expr.get_literal_value(None) {
-                *arg_expr = Expr::DynamicConstant(value.into(), arg_expr.start_position());
-                true
-            } else {
-                false
-            }
-        }
+        _ => arg_expr.get_literal_value(None).map_or(false, |value| {
+            *arg_expr = Expr::DynamicConstant(value.into(), arg_expr.start_position());
+            true
+        }),
     }
 }
 

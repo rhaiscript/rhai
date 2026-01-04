@@ -8,6 +8,7 @@ Breaking Changes
 ----------------
 
 * `stdweb` support is removed. The feature flag `stdweb` is also removed. Use `wasm-bindgen` instead.
+* [`web-time`](https://crates.io/crates/web-time) is used for WASM targets instead of [`instant`](https://crates.io/crates/instant), which is no longer maintained.
 
 Bug fixes
 ---------
@@ -22,6 +23,11 @@ Enhancements
 * The method `sort` for arrays is also aliased to `sort_by`.
 * The methods `sort_desc`, `order`, `order_by` and `order_desc` are added to arrays.
 * An exception is now thrown when attempting to use `sort` on an array containing unsupported element types.
+
+New features
+------------
+
+* `AST::new_from_module` is added to create an `AST` from a shared `Module`.
 
 
 Version 1.23.6

@@ -335,7 +335,7 @@ impl Engine {
     pub fn eval_fn_call<T: Variant + Clone>(
         &self,
         fn_name: impl AsRef<str>,
-        mut this_ptr: Option<&mut Dynamic>,
+        this_ptr: Option<&mut Dynamic>,
         args: impl FuncArgs,
     ) -> RhaiResultOf<T> {
         let mut has_this = false;
@@ -343,7 +343,7 @@ impl Engine {
         args.parse(arg_values);
         let args = &mut arg_values.iter_mut().collect::<FnArgsVec<_>>();
 
-        if let Some(this_ptr) = this_ptr.as_deref_mut() {
+        if let Some(this_ptr) = this_ptr {
             args.insert(0, this_ptr);
             has_this = true;
         }

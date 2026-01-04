@@ -137,7 +137,7 @@ pub mod blob_functions {
     /// ```
     #[rhai_fn(name = "len", get = "len", pure)]
     pub fn len(blob: &mut Blob) -> INT {
-        blob.len() as INT
+        INT::try_from(blob.len()).unwrap_or(INT::MAX)
     }
     /// Return true if the BLOB is empty.
     #[rhai_fn(name = "is_empty", get = "is_empty", pure)]

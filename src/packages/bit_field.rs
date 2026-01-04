@@ -137,22 +137,24 @@ mod bit_field_functions {
             ERR::ErrorBitFieldBounds(INT_BITS, start, Position::NONE).into()
         })?;
 
-        let bits = if let Ok(bits) = usize::try_from(bits) {
-            if bits.checked_add(bit).map(|x| x > INT_BITS).unwrap_or(true) {
-                INT_BITS - bit
-            } else {
-                bits
-            }
-        } else {
-            INT_BITS - bit
-        };
+        let bits = usize::try_from(bits).map_or_else(
+            |_| INT_BITS - bit,
+            |bits| {
+                if bits.checked_add(bit).map_or(true, |x| x > INT_BITS) {
+                    INT_BITS - bit
+                } else {
+                    bits
+                }
+            },
+        );
 
         if bit == 0 && bits == INT_BITS {
             return Ok(value);
         }
 
         // 2^bits - 1
-        let mask = ((2 as UNSIGNED_INT).pow(u32::try_from(bits).unwrap()) - 1) as INT;
+        let mask =
+            INT::try_from((2 as UNSIGNED_INT).pow(u32::try_from(bits).unwrap()) - 1).unwrap();
 
         Ok(((value & (mask << bit)) >> bit) & mask)
     }
@@ -232,15 +234,16 @@ mod bit_field_functions {
             ERR::ErrorBitFieldBounds(INT_BITS, bit, Position::NONE).into()
         })?;
 
-        let bits = if let Ok(bits) = usize::try_from(bits) {
-            if bits.checked_add(bit).map(|x| x > INT_BITS).unwrap_or(true) {
-                INT_BITS - bit
-            } else {
-                bits
-            }
-        } else {
-            INT_BITS - bit
-        };
+        let bits = usize::try_from(bits).map_or_else(
+            |_| INT_BITS - bit,
+            |bits| {
+                if bits.checked_add(bit).map_or(true, |x| x > INT_BITS) {
+                    INT_BITS - bit
+                } else {
+                    bits
+                }
+            },
+        );
 
         if bit == 0 && bits == INT_BITS {
             *value = new_value;
@@ -248,7 +251,8 @@ mod bit_field_functions {
         }
 
         // 2^bits - 1
-        let mask = ((2 as UNSIGNED_INT).pow(u32::try_from(bits).unwrap()) - 1) as INT;
+        let mask =
+            INT::try_from((2 as UNSIGNED_INT).pow(u32::try_from(bits).unwrap()) - 1).unwrap();
 
         *value &= !(mask << bit);
         *value |= (new_value & mask) << bit;

@@ -12,7 +12,7 @@ use crate::FLOAT;
 use std::time::{Duration, Instant};
 
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-use instant::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 def_package! {
     /// Package of basic timing utilities.
@@ -124,6 +124,7 @@ mod time_functions {
                 return subtract_impl(timestamp, -seconds);
             }
             if cfg!(not(feature = "unchecked")) {
+                #[allow(clippy::cast_precision_loss)]
                 if seconds > (INT::MAX as FLOAT).min(u64::MAX as FLOAT) {
                     return Err(make_arithmetic_err(format!(
                         "Integer overflow for timestamp add: {seconds}"
@@ -147,6 +148,7 @@ mod time_functions {
                 return add_impl(timestamp, -seconds);
             }
             if cfg!(not(feature = "unchecked")) {
+                #[allow(clippy::cast_precision_loss)]
                 if seconds > (INT::MAX as FLOAT).min(u64::MAX as FLOAT) {
                     return Err(make_arithmetic_err(format!(
                         "Integer overflow for timestamp subtract: {seconds}"

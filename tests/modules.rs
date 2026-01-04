@@ -1,7 +1,7 @@
 #![cfg(not(feature = "no_module"))]
 use rhai::{
     module_resolvers::{DummyModuleResolver, StaticModuleResolver},
-    Dynamic, Engine, EvalAltResult, FuncRegistration, ImmutableString, Module, ParseError, ParseErrorType, Scope, INT,
+    Dynamic, Engine, EvalAltResult, FuncRegistration, ImmutableString, Module, ParseError, ParseErrorType, Position, Scope, AST, INT,
 };
 //
 #[cfg(all(not(feature = "no_function"), feature = "internals"))]
@@ -110,10 +110,10 @@ fn test_module_resolver() {
         engine
             .eval::<INT>(
                 r#"
-                import "hello" as h1;
-                import "hello" as h2;
-                h1::sum(h2::answer, -10, 3, 7)
-            "#
+                    import "hello" as h1;
+                    import "hello" as h2;
+                    h1::sum(h2::answer, -10, 3, 7)
+                "#
             )
             .unwrap(),
         42
@@ -132,11 +132,11 @@ fn test_module_resolver() {
         engine
             .eval::<INT>(
                 r#"
-                import "hello" as h1;
-                import "hello" as h2;
-                let x = 42;
-                h1::sum(x, -10, 3, 7)
-            "#
+                    import "hello" as h1;
+                    import "hello" as h2;
+                    let x = 42;
+                    h1::sum(x, -10, 3, 7)
+                "#
             )
             .unwrap(),
         42
@@ -146,12 +146,12 @@ fn test_module_resolver() {
         engine
             .eval::<INT>(
                 r#"
-                import "hello" as h1;
-                import "hello" as h2;
-                let x = 42;
-                h1::sum(x, 0, 0, 0);
-                x
-            "#
+                    import "hello" as h1;
+                    import "hello" as h2;
+                    let x = 42;
+                    h1::sum(x, 0, 0, 0);
+                    x
+                "#
             )
             .unwrap(),
         42
@@ -161,11 +161,11 @@ fn test_module_resolver() {
         engine
             .eval::<INT>(
                 r#"
-                import "hello" as h;
-                let x = 21;
-                h::double(x);
-                x
-            "#
+                    import "hello" as h;
+                    let x = 21;
+                    h::double(x);
+                    x
+                "#
             )
             .unwrap(),
         42
@@ -174,11 +174,11 @@ fn test_module_resolver() {
         engine
             .eval::<INT>(
                 r#"
-                import "hello" as h;
-                let x = 21;
-                double(x);
-                x
-            "#
+                    import "hello" as h;
+                    let x = 21;
+                    double(x);
+                    x
+                "#
             )
             .unwrap(),
         42
@@ -189,11 +189,11 @@ fn test_module_resolver() {
             engine
                 .eval::<INT>(
                     r#"
-                    import "hello" as h;
-                    let x = 21;
-                    h::sum_of_three_args(x, 14, 26, 2.0);
-                    x
-                "#
+                        import "hello" as h;
+                        let x = 21;
+                        h::sum_of_three_args(x, 14, 26, 2.0);
+                        x
+                    "#
                 )
                 .unwrap(),
             42
@@ -251,14 +251,14 @@ fn test_module_resolver() {
         engine
             .run(
                 r#"
-                fn foo() {
-                    import "hello" as h;
-                }
+                    fn foo() {
+                        import "hello" as h;
+                    }
 
-                for x in 0..10 {
-                    foo();
-                }
-            "#,
+                    for x in 0..10 {
+                        foo();
+                    }
+                "#,
             )
             .unwrap();
     }
@@ -318,37 +318,37 @@ fn test_module_from_ast() {
     let ast = engine
         .compile(
             r#"
-            // Functions become module functions
-            fn calc(x) {
-                x + 1
-            }
-            fn add_len(x, y) {
-                x + len(y)
-            }
-            fn cross_call(x) {
-                calc(x)
-            }
-            private fn hidden() {
-                throw "you shouldn't see me!";
-            }
+                // Functions become module functions
+                fn calc(x) {
+                    x + 1
+                }
+                fn add_len(x, y) {
+                    x + len(y)
+                }
+                fn cross_call(x) {
+                    calc(x)
+                }
+                private fn hidden() {
+                    throw "you shouldn't see me!";
+                }
 
-            // Imported modules become sub-modules
-            import "another module" as extra;
+                // Imported modules become sub-modules
+                import "another module" as extra;
 
-            // Variables defined at global level become module variables
-            export const x = 123;
-            let foo = 41;
-            let hello;
+                // Variables defined at global level become module variables
+                export const x = 123;
+                let foo = 41;
+                let hello;
 
-            // Final variable values become constant module variable values
-            foo = calc(foo);
-            hello = `hello, ${foo} worlds!`;
+                // Final variable values become constant module variable values
+                foo = calc(foo);
+                hello = `hello, ${foo} worlds!`;
 
-            export x as abc;
-            export x as xxx;
-            export foo;
-            export hello;
-        "#,
+                export x as abc;
+                export x as xxx;
+                export foo;
+                export hello;
+            "#,
         )
         .unwrap();
 
@@ -375,6 +375,11 @@ fn test_module_from_ast() {
             .unwrap_err(),
         EvalAltResult::ErrorFunctionNotFound(fn_name, ..) if fn_name == "ttt::hidden ()"
     ));
+
+    // Create AST from module
+    let module = engine.module_resolver().resolve(&engine, None, "testing", Position::NONE).unwrap();
+    let ast = AST::new_from_module(module);
+    assert_eq!(engine.call_fn::<INT>(&mut Scope::new(), &ast, "calc", (1 as INT,)).unwrap(), 2);
 }
 
 #[test]
@@ -527,13 +532,13 @@ fn test_module_environ() {
     let ast = engine
         .compile(
             r#"
-            const SECRET = 42;
+                const SECRET = 42;
 
-            fn foo(x) {
-                print(global::SECRET);
-                global::SECRET + x
-            }
-        "#,
+                fn foo(x) {
+                    print(global::SECRET);
+                    global::SECRET + x
+                }
+            "#,
         )
         .unwrap();
 
@@ -548,17 +553,17 @@ fn test_module_environ() {
         engine
             .eval::<String>(
                 r#"
-                const SECRET = "hello";
+                    const SECRET = "hello";
 
-                fn foo(x) {
-                    print(global::SECRET);
-                    global::SECRET + x
-                }
+                    fn foo(x) {
+                        print(global::SECRET);
+                        global::SECRET + x
+                    }
 
-                let t = test::foo(0);
+                    let t = test::foo(0);
 
-                foo(t)
-            "#
+                    foo(t)
+                "#
             )
             .unwrap(),
         "hello42"

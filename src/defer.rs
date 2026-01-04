@@ -82,14 +82,14 @@ impl<'a, T: ?Sized, R: FnOnce(&mut T)> Deferred<'a, T, R> {
     }
 }
 
-impl<'a, T: ?Sized, R: FnOnce(&mut T)> Drop for Deferred<'a, T, R> {
+impl<T: ?Sized, R: FnOnce(&mut T)> Drop for Deferred<'_, T, R> {
     #[inline(always)]
     fn drop(&mut self) {
         self.defer.take().unwrap()(self.lock);
     }
 }
 
-impl<'a, T: ?Sized, R: FnOnce(&mut T)> Deref for Deferred<'a, T, R> {
+impl<T: ?Sized, R: FnOnce(&mut T)> Deref for Deferred<'_, T, R> {
     type Target = T;
 
     #[inline(always)]
@@ -98,7 +98,7 @@ impl<'a, T: ?Sized, R: FnOnce(&mut T)> Deref for Deferred<'a, T, R> {
     }
 }
 
-impl<'a, T: ?Sized, R: FnOnce(&mut T)> DerefMut for Deferred<'a, T, R> {
+impl<T: ?Sized, R: FnOnce(&mut T)> DerefMut for Deferred<'_, T, R> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.lock

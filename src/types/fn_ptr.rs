@@ -331,7 +331,7 @@ impl FnPtr {
             args_data.extend(self.curry().iter().cloned());
             args_data.extend(arg_values.iter_mut().map(mem::take));
             arg_values = &mut *args_data;
-        };
+        }
 
         let args = &mut StaticVec::with_capacity(arg_values.len() + 1);
         args.extend(arg_values.iter_mut());
@@ -425,29 +425,31 @@ impl FnPtr {
                 if arity == N + self.curry().len() {
                     return self.call_raw(ctx, this_ptr, args);
                 }
-                if MOVE_PTR && this_ptr.is_some() {
-                    if arity == N + 1 + self.curry().len() {
-                        let mut args2 = FnArgsVec::with_capacity(args.len() + 1);
-                        if move_this_ptr_to_args == 0 {
-                            args2.push(this_ptr.as_mut().unwrap().clone());
-                            args2.extend(args);
-                        } else {
-                            args2.extend(args);
-                            args2.insert(move_this_ptr_to_args, this_ptr.as_mut().unwrap().clone());
+                if MOVE_PTR {
+                    if let Some(this_ptr) = this_ptr.as_deref() {
+                        if arity == N + 1 + self.curry().len() {
+                            let mut args2 = FnArgsVec::with_capacity(args.len() + 1);
+                            if move_this_ptr_to_args == 0 {
+                                args2.push(this_ptr.clone());
+                                args2.extend(args);
+                            } else {
+                                args2.extend(args);
+                                args2.insert(move_this_ptr_to_args, this_ptr.clone());
+                            }
+                            return self.call_raw(ctx, None, args2);
                         }
-                        return self.call_raw(ctx, None, args2);
-                    }
-                    if arity == N + E + 1 + self.curry().len() {
-                        let mut args2 = FnArgsVec::with_capacity(args.len() + extras.len() + 1);
-                        if move_this_ptr_to_args == 0 {
-                            args2.push(this_ptr.as_mut().unwrap().clone());
-                            args2.extend(args);
-                        } else {
-                            args2.extend(args);
-                            args2.insert(move_this_ptr_to_args, this_ptr.as_mut().unwrap().clone());
+                        if arity == N + E + 1 + self.curry().len() {
+                            let mut args2 = FnArgsVec::with_capacity(args.len() + extras.len() + 1);
+                            if move_this_ptr_to_args == 0 {
+                                args2.push(this_ptr.clone());
+                                args2.extend(args);
+                            } else {
+                                args2.extend(args);
+                                args2.insert(move_this_ptr_to_args, this_ptr.clone());
+                            }
+                            args2.extend(extras);
+                            return self.call_raw(ctx, None, args2);
                         }
-                        args2.extend(extras);
-                        return self.call_raw(ctx, None, args2);
                     }
                 }
                 if arity == N + E + self.curry().len() {
