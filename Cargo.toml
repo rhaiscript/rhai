@@ -3,7 +3,7 @@ members = [".", "codegen"]
 
 [package]
 name = "rhai"
-version = "1.23.6"
+version = "1.24.0"
 rust-version = "1.66.0"
 edition = "2018"
 resolver = "2"

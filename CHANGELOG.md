@@ -8,7 +8,7 @@ Breaking Changes
 ----------------
 
 * `stdweb` support is removed. The feature flag `stdweb` is also removed. Use `wasm-bindgen` instead.
-* [`web-time`](https://crates.io/crates/web-time) is used for WASM targets instead of [`instant`](https://crates.io/crates/instant), which is no longer maintained.
+* [`web-time`](https://crates.io/crates/web-time) is used for WASM targets instead of [`instant`](https://crates.io/crates/instant), which is no longer maintained [#1063](https://github.com/rhaiscript/rhai/pull/1063).
 
 Bug fixes
 ---------
