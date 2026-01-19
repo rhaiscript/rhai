@@ -40,7 +40,7 @@ where
 }
 
 // Range iterator with step
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct StepRange<T> {
     /// Start of the range.
     pub from: T,

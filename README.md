@@ -16,6 +16,7 @@ Rhai - Embedded Scripting for Rust
 
 [![Rhai logo](https://rhai.rs/book/images/logo/rhai-banner-transparent-colour.svg)](https://rhai.rs)
 
+
 Rhai is an embedded scripting language and evaluation engine for Rust that gives a safe and easy way
 to add scripting to any application.
 
