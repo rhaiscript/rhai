@@ -3,6 +3,8 @@
 
 use super::{FnAccess, StmtBlock};
 use crate::{FnArgsVec, ImmutableString};
+#[cfg(feature = "default-parameters")]
+use super::Expr;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{fmt, hash::Hash};
@@ -23,6 +25,10 @@ pub struct ScriptFuncDef {
     pub this_type: Option<ImmutableString>,
     /// Names of function parameters.
     pub params: FnArgsVec<ImmutableString>,
+    /// Default expressions for function parameters (parallel array to `params`).
+    /// `None` means no default value, `Some(Expr)` is the default expression to evaluate.
+    #[cfg(feature = "default-parameters")]
+    pub defaults: FnArgsVec<Option<Box<Expr>>>,
     /// _(metadata)_ Function doc-comments (if any). Exported under the `metadata` feature only.
     ///
     /// Doc-comments are comment lines beginning with `///` or comment blocks beginning with `/**`,
@@ -53,6 +59,8 @@ impl ScriptFuncDef {
             #[cfg(not(feature = "no_object"))]
             this_type: self.this_type.clone(),
             params: self.params.clone(),
+            #[cfg(feature = "default-parameters")]
+            defaults: self.defaults.clone(),
             #[cfg(feature = "metadata")]
             comments: <_>::default(),
         }
@@ -70,6 +78,27 @@ impl fmt::Display for ScriptFuncDef {
         #[cfg(feature = "no_object")]
         let this_type = "";
 
+        #[cfg(feature = "default-parameters")]
+        let params_str = self
+            .params
+            .iter()
+            .zip(self.defaults.iter())
+            .map(|(name, default)| {
+                if default.is_some() {
+                    format!("{} = <expr>", name)
+                } else {
+                    name.to_string()
+                }
+            })
+            .collect::<FnArgsVec<_>>()
+            .join(", ");
+        #[cfg(not(feature = "default-parameters"))]
+        let params_str = self
+            .params
+            .iter()
+            .map(ImmutableString::as_str)
+            .collect::<FnArgsVec<_>>()
+            .join(", ");
         write!(
             f,
             "{}{}{}({})",
@@ -79,11 +108,7 @@ impl fmt::Display for ScriptFuncDef {
             },
             this_type,
             self.name,
-            self.params
-                .iter()
-                .map(ImmutableString::as_str)
-                .collect::<FnArgsVec<_>>()
-                .join(", ")
+            params_str
         )
     }
 }

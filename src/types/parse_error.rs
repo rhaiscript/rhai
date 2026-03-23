@@ -158,6 +158,8 @@ pub enum ParseErrorType {
     FnDuplicatedParam(String, String),
     /// A function definition is missing the body. Wrapped value is the function name.
     FnMissingBody(String),
+    /// Invalid default parameter value. Wrapped value is the error message.
+    InvalidDefaultValue(String),
     /// Export statement not at global level.
     WrongExport,
     /// Assignment to an a constant variable. Wrapped value is the constant variable name.
@@ -214,6 +216,7 @@ impl fmt::Display for ParseErrorType {
 
             Self::FnMissingParams(s) => write!(f, "Expecting parameters for function {s}"),
             Self::FnDuplicatedParam(s, arg) => write!(f, "Duplicated parameter {arg} for function {s}"),
+            Self::InvalidDefaultValue(s) => write!(f, "Invalid default parameter value: {s}"),
 
             Self::DuplicatedProperty(s) => write!(f, "Duplicated property for object map literal: {s}"),
             Self::DuplicatedVariable(s) => write!(f, "Duplicated variable name: {s}"),

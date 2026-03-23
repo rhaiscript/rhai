@@ -1278,51 +1278,81 @@ impl Module {
         // None + function name + number of arguments.
         let namespace = FnNamespace::Internal;
         let num_params = fn_def.params.len();
-        let hash_script = crate::calc_fn_hash(None, &fn_def.name, num_params);
-        #[cfg(not(feature = "no_object"))]
-        let (hash_script, namespace) =
-            fn_def
-                .this_type
-                .as_ref()
-                .map_or((hash_script, namespace), |this_type| {
-                    (
-                        crate::calc_typed_method_hash(hash_script, this_type),
-                        FnNamespace::Global,
-                    )
-                });
 
-        // Catch hash collisions in testing environment only.
-        #[cfg(feature = "testing-environ")]
-        if let Some(f) = self.functions.as_ref().and_then(|f| f.get(&hash_script)) {
-            unreachable!(
-                "Hash {} already exists when registering function {:#?}:\n{:#?}",
-                hash_script, fn_def, f
-            );
+        // Calculate minimum number of required arguments (parameters without defaults)
+        #[cfg(feature = "default-parameters")]
+        let min_args = fn_def
+            .defaults
+            .iter()
+            .position(|d| d.is_some())
+            .unwrap_or(num_params);
+        #[cfg(not(feature = "default-parameters"))]
+        let min_args = num_params;
+
+        // Register the function for all valid argument counts from min_args to num_params
+        // This allows functions with defaults to be called with fewer arguments
+        let functions = self
+            .functions
+            .get_or_insert_with(|| new_hash_map(FN_MAP_SIZE));
+        let mut primary_hash = 0u64;
+
+        for arg_count in min_args..=num_params {
+            let hash_script = crate::calc_fn_hash(None, &fn_def.name, arg_count);
+            #[cfg(not(feature = "no_object"))]
+            let (hash_script, namespace) =
+                fn_def
+                    .this_type
+                    .as_ref()
+                    .map_or((hash_script, namespace), |this_type| {
+                        (
+                            crate::calc_typed_method_hash(hash_script, this_type),
+                            FnNamespace::Global,
+                        )
+                    });
+
+            // Store the primary hash (for the full parameter count)
+            if arg_count == num_params {
+                primary_hash = hash_script;
+            }
+
+            // For fallback signatures (arg_count < num_params), only insert if not already present
+            // This ensures that explicit overloads take precedence over default-parameter fallbacks
+            #[cfg(feature = "default-parameters")]
+            if arg_count < num_params && functions.contains_key(&hash_script) {
+                continue;
+            }
+
+            // Catch hash collisions in testing environment only.
+            #[cfg(feature = "testing-environ")]
+            if let Some(f) = functions.get(&hash_script) {
+                unreachable!(
+                    "Hash {} already exists when registering function {:#?}:\n{:#?}",
+                    hash_script, fn_def, f
+                );
+            }
+
+            let metadata = FuncMetadata {
+                hash: hash_script,
+                name: fn_def.name.as_str().into(),
+                namespace,
+                access: fn_def.access,
+                num_params,
+                param_types: FnArgsVec::new_const(),
+                #[cfg(feature = "metadata")]
+                params_info: fn_def.params.iter().map(Into::into).collect(),
+                #[cfg(feature = "metadata")]
+                return_type: <_>::default(),
+                #[cfg(feature = "metadata")]
+                comments: crate::StaticVec::new_const(),
+            };
+
+            functions.insert(hash_script, (fn_def.clone().into(), metadata.into()));
         }
-
-        let metadata = FuncMetadata {
-            hash: hash_script,
-            name: fn_def.name.as_str().into(),
-            namespace,
-            access: fn_def.access,
-            num_params,
-            param_types: FnArgsVec::new_const(),
-            #[cfg(feature = "metadata")]
-            params_info: fn_def.params.iter().map(Into::into).collect(),
-            #[cfg(feature = "metadata")]
-            return_type: <_>::default(),
-            #[cfg(feature = "metadata")]
-            comments: crate::StaticVec::new_const(),
-        };
-
-        self.functions
-            .get_or_insert_with(|| new_hash_map(FN_MAP_SIZE))
-            .insert(hash_script, (fn_def.into(), metadata.into()));
 
         self.flags
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
 
-        hash_script
+        primary_hash
     }
 
     /// Get a shared reference to the script-defined function in the [`Module`] based on name
@@ -2516,28 +2546,46 @@ impl Module {
                 if f.is_script() {
                     #[cfg(not(feature = "no_function"))]
                     {
-                        let hash_script =
-                            crate::calc_fn_hash(path.iter().copied(), &m.name, m.num_params);
-                        #[cfg(not(feature = "no_object"))]
-                        let hash_script = f
-                            .get_script_fn_def()
-                            .unwrap()
-                            .this_type
-                            .as_ref()
-                            .map_or(hash_script, |this_type| {
-                                crate::calc_typed_method_hash(hash_script, this_type)
-                            });
+                        // For functions with defaults, index all valid argument counts
+                        let fn_def = f.get_script_fn_def().unwrap();
+                        let num_params = fn_def.params.len();
+                        #[cfg(feature = "default-parameters")]
+                        let min_args = fn_def
+                            .defaults
+                            .iter()
+                            .position(|d| d.is_some())
+                            .unwrap_or(num_params);
+                        #[cfg(not(feature = "default-parameters"))]
+                        let min_args = num_params;
 
-                        // Catch hash collisions in testing environment only.
-                        #[cfg(feature = "testing-environ")]
-                        if let Some(fx) = functions.get(&hash_script) {
-                            unreachable!(
-                                "Hash {} already exists when indexing function {:#?}:\n{:#?}",
-                                hash_script, f, fx
-                            );
+                        // Index for all valid argument counts from min_args to num_params
+                        for arg_count in min_args..=num_params {
+                            let hash_script =
+                                crate::calc_fn_hash(path.iter().copied(), &m.name, arg_count);
+                            #[cfg(not(feature = "no_object"))]
+                            let hash_script =
+                                fn_def.this_type.as_ref().map_or(hash_script, |this_type| {
+                                    crate::calc_typed_method_hash(hash_script, this_type)
+                                });
+
+                            // For fallback signatures (arg_count < num_params), only insert if not already present
+                            // This ensures that explicit overloads take precedence over default-parameter fallbacks
+                            #[cfg(feature = "default-parameters")]
+                            if arg_count < num_params && functions.contains_key(&hash_script) {
+                                continue;
+                            }
+
+                            // Catch hash collisions in testing environment only.
+                            #[cfg(feature = "testing-environ")]
+                            if let Some(fx) = functions.get(&hash_script) {
+                                unreachable!(
+                                    "Hash {} already exists when indexing function {:#?}:\n{:#?}",
+                                    hash_script, f, fx
+                                );
+                            }
+
+                            functions.insert(hash_script, f.clone());
                         }
-
-                        functions.insert(hash_script, f.clone());
                     }
                 } else {
                     let hash_fn =
