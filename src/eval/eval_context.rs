@@ -364,6 +364,40 @@ impl<'a, 's, 'ps, 'g, 'c, 't> EvalContext<'a, 's, 'ps, 'g, 'c, 't> {
             false,
         )
     }
+
+    /// Push a fresh, empty function resolution cache onto the stack.
+    ///
+    /// This isolates subsequent function lookups from cached results obtained with a
+    /// different `global.lib` configuration (e.g. before an additional module was pushed).
+    /// Call [`rewind_fn_resolution_caches`][EvalContext::rewind_fn_resolution_caches] with the
+    /// value returned by [`fn_resolution_caches_len`][EvalContext::fn_resolution_caches_len]
+    /// to restore the previous cache state.
+    ///
+    /// Primarily useful inside `on_missing_function` callbacks that dynamically push modules
+    /// to `global.lib` and then call `call_fn_raw` — without this guard, the resolution cache
+    /// can return stale entries from before the lib change.
+    #[inline(always)]
+    pub fn push_fn_resolution_cache(&mut self) {
+        self.caches.push_fn_resolution_cache();
+    }
+
+    /// Return the current depth of the function resolution cache stack.
+    ///
+    /// Used together with [`rewind_fn_resolution_caches`][EvalContext::rewind_fn_resolution_caches]
+    /// to restore the cache stack after pushing a temporary frame.
+    #[inline(always)]
+    #[must_use]
+    pub fn fn_resolution_caches_len(&self) -> usize {
+        self.caches.fn_resolution_caches_len()
+    }
+
+    /// Rewind the function resolution cache stack to a previously saved depth.
+    ///
+    /// This pops all cache frames pushed since `len` was recorded.
+    #[inline(always)]
+    pub fn rewind_fn_resolution_caches(&mut self, len: usize) {
+        self.caches.rewind_fn_resolution_caches(len);
+    }
 }
 
 /// Call a function (native Rust or scripted) inside the [evaluation context][`EvalContext`].
