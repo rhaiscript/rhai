@@ -348,15 +348,9 @@ fn test_string_interpolated() {
         "hello 42 worlds!"
     );
 
-    assert_eq!(
-        engine.eval::<String>(r"`hello $${world}`").unwrap(),
-        "hello ${world}"
-    );
+    assert_eq!(engine.eval::<String>(r"`hello $${world}`").unwrap(), "hello ${world}");
 
-    assert_eq!(
-        engine.eval::<String>(r"`price: $$5`").unwrap(),
-        "price: $5"
-    );
+    assert_eq!(engine.eval::<String>(r"`price: $$5`").unwrap(), "price: $5");
 
     assert_eq!(
         engine
@@ -370,20 +364,10 @@ fn test_string_interpolated() {
         "literal ${a} value 7"
     );
 
-    assert_eq!(
-        engine.eval::<String>(r"`$$$x`").unwrap(),
-        "$$x"
-    );
-    assert_eq!(
-        engine.eval::<String>(r"`trailing$`").unwrap(),
-        "trailing$"
-    );
+    assert_eq!(engine.eval::<String>(r"`$$$x`").unwrap(), "$$x");
+    assert_eq!(engine.eval::<String>(r"`trailing$`").unwrap(), "trailing$");
 
-    assert_eq!(
-        engine.eval::<String>(r"`trailing$$`").unwrap(),
-        "trailing$"
-    );
-
+    assert_eq!(engine.eval::<String>(r"`trailing$$`").unwrap(), "trailing$");
 
     assert_eq!(engine.eval::<String>("`hello ${}world!`").unwrap(), "hello world!");
 
