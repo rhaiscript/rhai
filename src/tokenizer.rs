@@ -1431,8 +1431,20 @@ pub fn parse_string_literal(
             last.push(next_char);
         }
 
-        // String interpolation?
+        // `$$` escape sequence - emit a single `$`
+        // `$${` emit `${` without string interpolation
         if allow_interpolation
+            && next_char == '$'
+            && escape.is_empty()
+            && stream.peek_next() == Some('$')
+        {
+            stream.eat_next_and_advance(pos);
+            if let Some(ref mut last) = state.last_token {
+                last.push('$');
+            }
+        }
+        // String interpolation?
+        else if allow_interpolation
             && next_char == '$'
             && escape.is_empty()
             && stream.peek_next() == Some('{')

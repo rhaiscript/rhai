@@ -23,6 +23,7 @@ Enhancements
 * Procedural macros such as `#[export_module]` and `#[derive(CustomType)]` no longer require importing standard Rhai types (thanks [`@timokoesters`](https://github.com/timokoesters) [`#1071`](https://github.com/rhaiscript/rhai/pull/1071)).
 * `FnPtr::call_fn_as_method` and `FnPtr::call_as_method_within_context` are added (when not under `no_object`) to accept a `this` pointer for calling the function pointer as a method call (thanks [`@yunfengzh`](https://github.com/yunfengzh) for the request [`#1080`](https://github.com/rhaiscript/rhai/pull/1080)).
 * `NativeCallContext::call_method` and `NativeCallContext::call_native_method` are added (when not under `no_object`) to accept a `this` pointer for method calls (thanks [`@yunfengzh`](https://github.com/yunfengzh) for the idea [`#1080`](https://github.com/rhaiscript/rhai/pull/1080)).
+* `$$` is added as the escape sequence for backtick string interpolation which emits single `$` - so `$${` produces a single `${` without triggering string interpolation. 
 
 
 Version 1.24.0
