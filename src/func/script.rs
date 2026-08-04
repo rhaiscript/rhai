@@ -69,6 +69,18 @@ impl Engine {
             return Err(ERR::ErrorTooManyVariables(pos).into());
         }
 
+        // Nested script calls use a fresh scope, so make active global constants available to
+        // unqualified variable lookups before adding parameters and locals.
+        #[cfg(not(feature = "no_module"))]
+        if scope.is_empty() {
+            if let Some(ref constants) = global.constants {
+                let constants = crate::func::locked_write(constants).unwrap();
+                constants.iter().for_each(|(name, value)| {
+                    scope.push_constant_dynamic(name.clone(), value.clone());
+                });
+            }
+        }
+
         // Put arguments into scope as variables
         scope.extend(fn_def.params.iter().cloned().zip(args.iter_mut().map(|v| {
             // Actually consume the arguments instead of cloning them
@@ -94,7 +106,7 @@ impl Engine {
         let orig_fn_resolution_caches_len = caches.fn_resolution_caches_len();
 
         #[cfg(not(feature = "no_module"))]
-        let orig_constants = _env.map(
+        let orig_constants = _env.and_then(
             |EncapsulatedEnviron {
                  lib,
                  imports,
@@ -107,7 +119,29 @@ impl Engine {
 
                 global.lib.extend(lib.clone());
 
-                std::mem::replace(&mut global.constants, constants.clone())
+                constants.as_ref().map(|constants| {
+                    let orig_constants = global.constants.take();
+                    let mut merged_constants = std::collections::BTreeMap::new();
+
+                    if let Some(ref current) = orig_constants {
+                        merged_constants.extend(
+                            crate::func::locked_write(current)
+                                .unwrap()
+                                .iter()
+                                .map(|(name, value)| (name.clone(), value.clone())),
+                        );
+                    }
+                    merged_constants.extend(
+                        crate::func::locked_write(constants)
+                            .unwrap()
+                            .iter()
+                            .map(|(name, value)| (name.clone(), value.clone())),
+                    );
+
+                    global.constants =
+                        Some(crate::Shared::new(crate::Locked::new(merged_constants)));
+                    orig_constants
+                })
             },
         );
 

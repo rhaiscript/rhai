@@ -265,6 +265,20 @@ impl Engine {
             Ok(Dynamic::UNIT)
         };
 
+        #[cfg(not(feature = "no_module"))]
+        {
+            let constants = global.constants.get_or_insert_with(|| {
+                crate::Shared::new(crate::Locked::new(std::collections::BTreeMap::new()))
+            });
+            let mut constants = crate::func::locked_write(constants).unwrap();
+            scope
+                .iter_inner()
+                .filter(|(_, is_constant, _)| *is_constant)
+                .for_each(|(name, _, value)| {
+                    constants.insert(name.clone(), value.clone());
+                });
+        }
+
         let result = global_result.and_then(|_| {
             let args = &mut arg_values.iter_mut().collect::<FnArgsVec<_>>();
 

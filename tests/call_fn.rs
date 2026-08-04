@@ -66,6 +66,28 @@ fn test_call_fn() {
 }
 
 #[test]
+fn test_call_fn_global_constant_in_nested_function() {
+    let engine = Engine::new();
+    let ast = engine
+        .compile(
+            r#"
+                const VALUE = 42;
+
+                fn direct() { VALUE }
+                fn helper() { VALUE }
+                fn indirect() { helper() }
+            "#,
+        )
+        .unwrap();
+
+    let mut scope = Scope::new();
+    engine.run_ast_with_scope(&mut scope, &ast).unwrap();
+
+    assert_eq!(engine.call_fn::<INT>(&mut scope, &ast, "direct", ()).unwrap(), 42);
+    assert_eq!(engine.call_fn::<INT>(&mut scope, &ast, "indirect", ()).unwrap(), 42);
+}
+
+#[test]
 fn test_call_fn_scope() {
     let engine = Engine::new();
     let mut scope = Scope::new();
