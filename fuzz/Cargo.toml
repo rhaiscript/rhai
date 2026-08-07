@@ -11,7 +11,7 @@ cargo-fuzz = true
 anyhow = "1.0.78"
 arbitrary = { version = "1.3.2", features = ["derive"] }
 libfuzzer-sys = "0.4"
-rhai = { path = "..", features = ["fuzz", "decimal", "metadata", "debugging"] }
+rhai = { path = "..", features = ["fuzz", "decimal", "metadata", "debugging", "grain"] }
 serde = { version = "1.0.194", features = ["derive"] }
 
 # Prevent this from interfering with workspaces
@@ -19,7 +19,9 @@ serde = { version = "1.0.194", features = ["derive"] }
 members = ["."]
 
 [profile.release]
-debug = 1
+debug = true
+debug-assertions = true
+overflow-checks = true
 
 [[bin]]
 name = "scripting"
@@ -38,3 +40,24 @@ name = "fuzz_serde"
 path = "fuzz_targets/fuzz_serde.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "load"
+path = "fuzz_targets/load.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "roundtrip"
+path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "generated"
+path = "fuzz_targets/generated.rs"
+test = false
+doc = false
+bench = false

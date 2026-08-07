@@ -121,6 +121,8 @@ pub mod config;
 mod engine;
 mod eval;
 mod func;
+#[cfg(feature = "grain")]
+pub mod grain;
 mod module;
 mod optimizer;
 pub mod packages;

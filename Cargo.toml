@@ -5,7 +5,7 @@ members = [".", "codegen", "codegen/tests/custom_root"]
 name = "rhai"
 version = "1.25.1"
 rust-version = "1.66.0"
-edition = "2018"
+edition = "2021"
 resolver = "2"
 authors = ["Jonathan Turner", "Lukáš Hozda", "Stephen Chung", "jhwgh1968"]
 description = "Embedded scripting for Rust"
@@ -71,6 +71,8 @@ debugging = ["internals"]
 bin-features = ["decimal", "metadata", "serde", "debugging", "rustyline"]
 ## Enable fuzzing via the [`arbitrary`](https://crates.io/crates/arbitrary) crate.
 fuzz = ["arbitrary", "rust_decimal?/rust-fuzz", "serde"]
+## Enable the experimental `grain` bytecode VM
+grain = []
 
 #! ### System Configuration Features
 

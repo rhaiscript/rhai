@@ -108,7 +108,7 @@ impl Engine {
     /// Panics if the target object is shared.
     ///
     /// Shared objects should be handled (dereferenced) before calling this method.
-    fn get_indexed_mut<'t>(
+    pub(crate) fn get_indexed_mut<'t>(
         &self,
         global: &mut GlobalRuntimeState,
         caches: &mut Caches,
