@@ -99,6 +99,21 @@ impl FnPtr {
     pub fn new(name: impl Into<ImmutableString>) -> RhaiResultOf<Self> {
         name.into().try_into()
     }
+    /// _(internals)_ Create a new function pointer to a name, without
+    /// checking that the name is one a script could have written.
+    /// Exported under the `internals` feature only.
+    #[expose_under_internals]
+    #[inline(always)]
+    #[must_use]
+    fn new_unchecked(name: impl Into<ImmutableString>) -> Self {
+        Self {
+            name: name.into(),
+            curry: ThinVec::new(),
+            #[cfg(not(feature = "no_function"))]
+            env: None,
+            typ: FnPtrType::Normal,
+        }
+    }
     /// Create a new function pointer from a native Rust function.
     ///
     /// # Errors

@@ -6,8 +6,8 @@ use crate::ast::{ASTFlags, BinaryExpr, Expr, OpAssignment};
 use crate::engine::{FN_IDX_GET, FN_IDX_SET};
 use crate::types::dynamic::Union;
 use crate::{
-    calc_fn_hash, Dynamic, Engine, ExclusiveRange, FnArgsVec, InclusiveRange, OnceCell, Position,
-    RhaiResult, RhaiResultOf, Scope, ERR,
+    calc_fn_hash, expose_under_internals, Dynamic, Engine, ExclusiveRange, FnArgsVec,
+    InclusiveRange, OnceCell, Position, RhaiResult, RhaiResultOf, Scope, ERR,
 };
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -101,13 +101,16 @@ impl Engine {
         )
     }
 
-    /// Get the value at the indexed position of a base type.
+    /// _(internals)_ Get the value at the indexed position of a base type.
     ///
     /// # Panics
     ///
     /// Panics if the target object is shared.
     ///
     /// Shared objects should be handled (dereferenced) before calling this method.
+    ///
+    /// Exported under the `internals` feature only.
+    #[expose_under_internals]
     fn get_indexed_mut<'t>(
         &self,
         global: &mut GlobalRuntimeState,

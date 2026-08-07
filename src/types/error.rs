@@ -3,6 +3,8 @@
 use crate::{Dynamic, ParseErrorType, Position, INT};
 #[cfg(feature = "no_std")]
 use core_error::Error;
+#[cfg(not(feature = "no_object"))]
+use rhai_codegen::expose_under_internals;
 #[cfg(not(feature = "no_std"))]
 use std::error::Error;
 use std::fmt;
@@ -380,11 +382,13 @@ impl EvalAltResult {
                 | Self::ErrorTerminated(..)
         )
     }
-    /// Get the [position][Position] of this error.
+    /// _(internals)_ Get the [position][Position] of this error.
+    /// Exported under the `internals` feature only.
     #[cfg(not(feature = "no_object"))]
+    #[expose_under_internals]
     #[cold]
     #[inline(never)]
-    pub(crate) fn dump_fields(&self, map: &mut crate::Map) {
+    fn dump_fields(&self, map: &mut crate::Map) {
         map.insert(
             "error".into(),
             format!("{self:?}")

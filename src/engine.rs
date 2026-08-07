@@ -9,7 +9,7 @@ use crate::func::native::{
 use crate::packages::{Package, StandardPackage};
 use crate::tokenizer::Token;
 use crate::types::StringsInterner;
-use crate::{Dynamic, Identifier, ImmutableString, Locked, SharedModule};
+use crate::{expose_under_internals, Dynamic, Identifier, ImmutableString, Locked, SharedModule};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{collections::BTreeSet, fmt, num::NonZeroU8};
@@ -37,8 +37,10 @@ pub const KEYWORD_GLOBAL: &str = "global";
 pub const FN_GET: &str = "get$";
 #[cfg(not(feature = "no_object"))]
 pub const FN_SET: &str = "set$";
+/// The name a custom index getter is registered under.
 #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
 pub const FN_IDX_GET: &str = "index$get$";
+/// The name a custom index setter is registered under.
 #[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
 pub const FN_IDX_SET: &str = "index$set$";
 #[cfg(not(feature = "no_function"))]
@@ -406,5 +408,35 @@ impl Engine {
     #[must_use]
     pub(crate) const fn is_debugger_registered(&self) -> bool {
         self.debugger_interface.is_some()
+    }
+
+    /// _(internals)_ The variable resolver registered with [`Engine::on_var`],
+    /// if any.
+    /// Exported under the `internals` feature only.
+    #[expose_under_internals]
+    #[inline(always)]
+    #[must_use]
+    fn variable_resolver(&self) -> Option<&OnVarCallback> {
+        self.resolve_var.as_deref()
+    }
+
+    /// _(internals)_ The modules loaded into the global namespace.
+    /// Exported under the `internals` feature only.
+    #[expose_under_internals]
+    #[inline(always)]
+    #[must_use]
+    fn global_modules(&self) -> &[SharedModule] {
+        &self.global_modules
+    }
+
+    /// _(internals)_ The sub-modules registered with
+    /// [`Engine::register_static_module`], keyed by name.
+    /// Exported under the `internals` feature only.
+    #[cfg(not(feature = "no_module"))]
+    #[expose_under_internals]
+    #[inline(always)]
+    #[must_use]
+    fn global_sub_modules(&self) -> &std::collections::BTreeMap<Identifier, SharedModule> {
+        &self.global_sub_modules
     }
 }

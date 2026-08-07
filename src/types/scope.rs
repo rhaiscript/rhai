@@ -1,7 +1,7 @@
 //! Module that defines the [`Scope`] type representing a function call-stack scope.
 
 use super::dynamic::{AccessMode, Variant};
-use crate::{Dynamic, Identifier, ImmutableString, StaticVec, ThinVec};
+use crate::{expose_under_internals, Dynamic, Identifier, ImmutableString, StaticVec, ThinVec};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{
@@ -795,13 +795,17 @@ impl Scope<'_> {
                 AccessMode::ReadOnly => None,
             })
     }
-    /// Get a mutable reference to the value of an entry in the [`Scope`] based on the index.
+    /// _(internals)_ Get a mutable reference to the value of an entry in the
+    /// [`Scope`] based on the index.
     ///
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
+    ///
+    /// Exported under the `internals` feature only.
+    #[expose_under_internals]
     #[inline(always)]
-    pub(crate) fn get_mut_by_index(&mut self, index: usize) -> &mut Dynamic {
+    fn get_mut_by_index(&mut self, index: usize) -> &mut Dynamic {
         &mut self.values[index]
     }
     /// Add an alias to an entry in the [`Scope`].

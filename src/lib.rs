@@ -362,9 +362,49 @@ pub use ast::Namespace;
 #[cfg(feature = "internals")]
 pub use eval::{Caches, FnResolutionCache, FnResolutionCacheEntry, GlobalRuntimeState, Target};
 
+/// _(internals)_ Measure a value against the configured data-size limits.
+/// Exported under the `internals` feature only.
+#[cfg(feature = "internals")]
+#[cfg(not(feature = "unchecked"))]
+#[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
+pub use eval::calc_data_sizes;
+
 #[cfg(feature = "internals")]
 #[allow(deprecated)]
 pub use func::{locked_read, locked_write, NativeCallContextStore, RhaiFunc};
+
+/// _(internals)_ The built-in operator implementations the evaluator itself
+/// short-circuits to under fast-operators mode.
+/// Exported under the `internals` feature only.
+#[cfg(feature = "internals")]
+pub use func::{get_builtin_binary_op_fn, get_builtin_op_assignment_fn};
+
+/// _(internals)_ The hasher `switch` matches cases with.
+/// Exported under the `internals` feature only.
+#[cfg(feature = "internals")]
+pub use func::hashing::get_hasher;
+
+/// _(internals)_ Return type of the built-in operator lookups.
+/// Exported under the `internals` feature only.
+#[cfg(feature = "internals")]
+pub use func::native::FnBuiltin;
+
+/// _(internals)_ The function a registered type iterator is stored as.
+/// Exported under the `internals` feature only.
+#[cfg(feature = "internals")]
+pub use func::native::FnIterator;
+
+/// _(internals)_ Render a value the way `print`, `debug` and string
+/// interpolation do.
+/// Exported under the `internals` feature only.
+#[cfg(feature = "internals")]
+pub use packages::string_basic::print_with_func;
+
+/// _(internals)_ The names a custom indexer is registered under.
+/// Exported under the `internals` feature only.
+#[cfg(feature = "internals")]
+#[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
+pub use engine::{FN_IDX_GET, FN_IDX_SET};
 
 #[cfg(feature = "internals")]
 #[cfg(feature = "metadata")]

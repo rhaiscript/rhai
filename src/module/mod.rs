@@ -373,10 +373,10 @@ impl FuncRegistration {
     ///
     /// # Parameter Examples
     ///
-    /// `"foo: &str"`   <- parameter name = `foo`, type = `&str`  
-    /// `"bar"`         <- parameter name = `bar`, type unknown  
-    /// `"_: i64"`      <- parameter name unknown, type = `i64`  
-    /// `"MyType"`      <- parameter name unknown, type = `MyType`  
+    /// `"foo: &str"`   <- parameter name = `foo`, type = `&str`
+    /// `"bar"`         <- parameter name = `bar`, type unknown
+    /// `"_: i64"`      <- parameter name unknown, type = `i64`
+    /// `"MyType"`      <- parameter name unknown, type = `MyType`
     #[cfg(feature = "metadata")]
     #[must_use]
     pub fn with_params_info<S: AsRef<str>>(mut self, params: impl IntoIterator<Item = S>) -> Self {
@@ -2678,18 +2678,24 @@ impl Module {
         })
     }
 
-    /// Get the specified type iterator.
+    /// _(internals)_ Get the specified type iterator, including those of
+    /// sub-modules.
+    /// Exported under the `internals` feature only.
     #[cfg(not(feature = "no_module"))]
+    #[expose_under_internals]
     #[inline]
     #[must_use]
-    pub(crate) fn get_qualified_iter(&self, id: TypeId) -> Option<&FnIterator> {
+    fn get_qualified_iter(&self, id: TypeId) -> Option<&FnIterator> {
         self.all_type_iterators.get(&id).map(|f| &**f)
     }
 
-    /// Get the specified type iterator.
+    /// _(internals)_ Get the specified type iterator.
+    /// Exported under the `internals` feature only.
+    ///
+    #[expose_under_internals]
     #[inline]
     #[must_use]
-    pub(crate) fn get_iter(&self, id: TypeId) -> Option<&FnIterator> {
+    fn get_iter(&self, id: TypeId) -> Option<&FnIterator> {
         self.type_iterators.get(&id).map(|f| &**f)
     }
 }

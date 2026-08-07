@@ -3,7 +3,7 @@
 
 use super::GlobalRuntimeState;
 use crate::types::dynamic::Union;
-use crate::{Dynamic, Engine, Position, RhaiResultOf, ERR};
+use crate::{expose_under_internals, Dynamic, Engine, Position, RhaiResultOf, ERR};
 use std::borrow::Borrow;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -120,12 +120,15 @@ pub fn calc_data_sizes(value: &Dynamic, _top: bool) -> (usize, usize, usize) {
 }
 
 impl Engine {
-    /// Raise an error if any data size exceeds limit.
+    /// _(internals)_ Raise an error if any data size exceeds limit.
     ///
     /// [`Position`] in [`EvalAltResult`][crate::EvalAltResult] is always [`NONE`][Position::NONE]
     /// and should be set afterwards.
+    ///
+    /// Exported under the `internals` feature only.
     #[cfg(not(feature = "unchecked"))]
-    pub(crate) fn throw_on_size(&self, (_arr, _map, s): (usize, usize, usize)) -> RhaiResultOf<()> {
+    #[expose_under_internals]
+    fn throw_on_size(&self, (_arr, _map, s): (usize, usize, usize)) -> RhaiResultOf<()> {
         if self.limits.string_len.map_or(false, |max| s > max.get()) {
             return Err(
                 ERR::ErrorDataTooLarge("Length of string".to_string(), Position::NONE).into(),
@@ -179,13 +182,11 @@ impl Engine {
         self.check_data_size(value, Position::NONE).map(|_| ())
     }
 
-    /// Check if the number of operations stay within limit.
+    /// _(internals)_ Check if the number of operations stay within limit.
+    /// Exported under the `internals` feature only.
+    #[expose_under_internals]
     #[inline(always)]
-    pub(crate) fn track_operation(
-        &self,
-        global: &mut GlobalRuntimeState,
-        pos: Position,
-    ) -> RhaiResultOf<()> {
+    fn track_operation(&self, global: &mut GlobalRuntimeState, pos: Position) -> RhaiResultOf<()> {
         global.num_operations += 1;
 
         // Guard against too many operations

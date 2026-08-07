@@ -1,6 +1,6 @@
 //! Helper module which defines the [`Dynamic`] data type.
 
-use crate::{ExclusiveRange, FnPtr, ImmutableString, InclusiveRange, INT};
+use crate::{expose_under_internals, ExclusiveRange, FnPtr, ImmutableString, InclusiveRange, INT};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{
@@ -1185,7 +1185,7 @@ impl Dynamic {
             ReadOnly => true,
         }
     }
-    /// Can this [`Dynamic`] be hashed?
+    /// _(internals)_ Can this [`Dynamic`] be hashed?
     ///
     /// # Shared Value
     ///
@@ -1198,8 +1198,11 @@ impl Dynamic {
     /// Under these circumstances, `false` is returned.
     ///
     /// These normally shouldn't occur since most operations in Rhai are single-threaded.
+    ///
+    /// Exported under the `internals` feature only.
+    #[expose_under_internals]
     #[must_use]
-    pub(crate) fn is_hashable(&self) -> bool {
+    fn is_hashable(&self) -> bool {
         match self.0 {
             Union::Unit(..)
             | Union::Bool(..)
