@@ -105,7 +105,7 @@ impl FnPtr {
     #[expose_under_internals]
     #[inline(always)]
     #[must_use]
-    fn new_unchecked(name: impl Into<ImmutableString>) -> Self {
+    fn new_unvalidated(name: impl Into<ImmutableString>) -> Self {
         Self {
             name: name.into(),
             curry: ThinVec::new(),
