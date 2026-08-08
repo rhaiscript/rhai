@@ -2160,7 +2160,10 @@ fn flatten_chain(expr: &Expr) -> Option<(&Expr, Vec<ChainStep<'_>>)> {
 fn wrap_statements(statements: Vec<Stmt>) -> Expr {
     let span = statements.first().zip(statements.last()).map_or_else(
         || Span::new(Position::NONE, Position::NONE),
-        |(first, last)| crate::types::position::Span::new(first.position(), last.position()),
+        // `crate::types`, not `crate::types::position`: `no_position` swaps the
+        // module out for a zero-sized one and re-exports `Span` from whichever
+        // is in play.
+        |(first, last)| crate::types::Span::new(first.position(), last.position()),
     );
 
     Expr::Stmt(Box::new(StmtBlock::new_with_span(statements, span)))

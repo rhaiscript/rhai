@@ -3,6 +3,7 @@ use core::mem;
 use std::prelude::v1::*;
 
 use crate::engine::{FN_IDX_GET, FN_IDX_SET};
+#[cfg(not(feature = "unchecked"))]
 use crate::eval::calc_data_sizes;
 use crate::func::{get_builtin_binary_op_fn, get_builtin_op_assignment_fn};
 use crate::packages::string_basic::print_with_func;
@@ -1916,12 +1917,22 @@ impl<'e> Vm<'e> {
         // After every segment, against the running total — a script must not
         // be able to build a string past `max_string_size` and hand it over
         // whole.
-        self.engine.throw_on_size((0, 0, len)).map_err(|mut err| {
-            if err.position().is_none() {
-                err.set_position(pos);
-            }
-            err
-        })
+        #[cfg(not(feature = "unchecked"))]
+        {
+            self.engine.throw_on_size((0, 0, len)).map_err(|mut err| {
+                if err.position().is_none() {
+                    err.set_position(pos);
+                }
+                err
+            })
+        }
+        // `unchecked` removes the limits, and with them the only reason to have
+        // measured.
+        #[cfg(feature = "unchecked")]
+        {
+            let _ = (len, pos);
+            Ok(())
+        }
     }
 
     /// Start iterating a value, the way rhai's `for` does
@@ -2277,11 +2288,14 @@ impl<'e> Vm<'e> {
         first: usize,
         pos: Position,
     ) -> VmResult {
-        if self.global.level > self.engine.max_call_levels() {
-            return Err(Box::new(EvalAltResult::ErrorStackOverflow(pos)));
-        }
-        if params.len() > self.engine.max_variables() {
-            return Err(Box::new(EvalAltResult::ErrorTooManyVariables(pos)));
+        #[cfg(not(feature = "unchecked"))]
+        {
+            if self.global.level > self.engine.max_call_levels() {
+                return Err(Box::new(EvalAltResult::ErrorStackOverflow(pos)));
+            }
+            if params.len() > self.engine.max_variables() {
+                return Err(Box::new(EvalAltResult::ErrorTooManyVariables(pos)));
+            }
         }
 
         // A fresh scope: a function sees its parameters and nothing else.
@@ -2445,35 +2459,48 @@ impl<'e> Vm<'e> {
             self.sizes.push((0, 0, 0));
         }
 
-        // Rhai skips the whole measurement when no limit could reject it, and
-        // measuring is a walk of the value — so this is the difference between
-        // free and proportional to what the literal holds.
-        if self.engine.max_string_size() == 0
-            && self.engine.max_array_size() == 0
-            && self.engine.max_map_size() == 0
+        // `unchecked` removes every limit this could reject against, so the
+        // running total is never read and measuring it is pure cost. The push
+        // above still happens: the stack is frame-floored either way, and the
+        // instruction that drops it does not know which build it is in.
+        #[cfg(feature = "unchecked")]
         {
-            return Ok(());
+            let _ = (map, pos);
+            Ok(())
         }
 
-        let value = self
-            .stack
-            .last()
-            .ok_or_else(|| malformed("size check with no element".to_string()))?;
-        let delta = calc_data_sizes(value, true);
+        #[cfg(not(feature = "unchecked"))]
+        {
+            // Rhai skips the whole measurement when no limit could reject it,
+            // and measuring is a walk of the value — so this is the difference
+            // between free and proportional to what the literal holds.
+            if self.engine.max_string_size() == 0
+                && self.engine.max_array_size() == 0
+                && self.engine.max_map_size() == 0
+            {
+                return Ok(());
+            }
 
-        let total = self
-            .sizes
-            .last_mut()
-            .ok_or_else(|| malformed("size check outside a literal".to_string()))?;
-        *total = (
-            total.0 + delta.0 + usize::from(!map),
-            total.1 + delta.1 + usize::from(map),
-            total.2 + delta.2,
-        );
+            let value = self
+                .stack
+                .last()
+                .ok_or_else(|| malformed("size check with no element".to_string()))?;
+            let delta = calc_data_sizes(value, true);
 
-        self.engine
-            .throw_on_size(*total)
-            .map_err(|err| positioned(err, pos))
+            let total = self
+                .sizes
+                .last_mut()
+                .ok_or_else(|| malformed("size check outside a literal".to_string()))?;
+            *total = (
+                total.0 + delta.0 + usize::from(!map),
+                total.1 + delta.1 + usize::from(map),
+                total.2 + delta.2,
+            );
+
+            self.engine
+                .throw_on_size(*total)
+                .map_err(|err| positioned(err, pos))
+        }
     }
 
     /// Drop what an escaping error skipped the unwind for.
@@ -2567,6 +2594,7 @@ impl<'e> Vm<'e> {
             let name = program
                 .name(index)
                 .ok_or_else(|| malformed(format!("no name {index}")))?;
+            #[cfg(not(feature = "unchecked"))]
             if scope.len() >= self.engine.max_variables() {
                 return Err(Box::new(EvalAltResult::ErrorTooManyVariables(
                     program.position(target),

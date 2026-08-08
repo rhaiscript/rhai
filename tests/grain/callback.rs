@@ -117,6 +117,7 @@ fn stock_rhai_does_the_same_to_its_own_native_pointers() {
 }
 
 #[test]
+#[cfg(not(feature = "unchecked"))]
 fn a_callback_reaching_a_second_one_still_resolves() {
     // The limit is raised because reaching a chunk through rhai's dispatch
     // costs more call levels than reaching a script function does, and the
@@ -150,6 +151,7 @@ fn an_error_inside_a_callback_still_arrives() {
 /// are stricter, never laxer. A program that would have run out of budget on
 /// the walker must not somehow keep going here.
 #[test]
+#[cfg(not(feature = "unchecked"))]
 fn a_callback_costs_more_call_levels() {
     let deepest = |depth: usize, run: &dyn Fn(&Engine, &str) -> Result<String, String>| {
         // `depth` closures nested through `map`, each one a boundary, over an

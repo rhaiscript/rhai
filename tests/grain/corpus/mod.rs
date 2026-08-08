@@ -113,6 +113,13 @@ pub fn applies_to_this_build(name: &str) -> bool {
     if name.starts_with("import_") || name.starts_with("export_") {
         return false;
     }
+    // `unchecked` removes the arithmetic guards, so `1 / 0` panics inside
+    // rhai's own built-in rather than raising — there is no behaviour left for
+    // the two sides to agree on, and the case would take the process with it.
+    #[cfg(feature = "unchecked")]
+    if matches!(name, "error_divide_by_zero" | "error_temp_root_index_runs_first") {
+        return false;
+    }
     // No shared prefix to key on: a float literal is incidental to most of
     // these, which are about interpolation, ranges and operator errors.
     #[cfg(feature = "no_float")]

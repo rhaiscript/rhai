@@ -56,6 +56,7 @@ fn run_stock(engine: &Engine, source: &str) -> Outcome {
 fn writable(engine: &Engine) -> Vec<(&'static str, &'static str, Vec<u8>)> {
     corpus::CASES
         .iter()
+        .filter(|case| corpus::applies_to_this_build(case.name))
         .filter_map(|case| {
             let ast = engine.compile(case.source).ok()?;
             let bytes = Compiler::new().compile(&ast).write().ok()?;
@@ -109,10 +110,13 @@ fn the_round_trip_covers_something_worth_covering() {
         // removes from the language, so there is no branch left to cover.
         #[cfg(not(feature = "no_float"))]
         "float_arithmetic",
-        "shadowing_nested",       // DeclareLocal and UnwindTo
-        "while_loop",             // jumps, Tick, AssignLocal with an op
-        "loop_break_value",       // backpatched jumps
-        "error_divide_by_zero",   // a position that has to survive
+        "shadowing_nested", // DeclareLocal and UnwindTo
+        "while_loop",       // jumps, Tick, AssignLocal with an op
+        "loop_break_value", // backpatched jumps
+        // A position that has to survive. `unchecked` turns the failure it
+        // rests on into a panic in rhai, so the case is not run at all there.
+        #[cfg(not(feature = "unchecked"))]
+        "error_divide_by_zero",
         "switch_range",           // a switch table, and the hasher probe with it
         "switch_guard",           // and one whose arms are a chain rather than a target
         "string_slice_read",      // a range constant, which is a host type in `Dynamic`
@@ -334,7 +338,11 @@ fn refusing_to_write_names_the_construct_responsible() {
             panic!("{source:?} must refuse to write");
         };
         assert_eq!(construct, expected, "for {source:?}");
+        // Under `no_position` there is no "where" to say, and the naming half
+        // above is the part that still means something.
+        #[cfg(not(feature = "no_position"))]
         assert!(!pos.is_none(), "the refusal must say where: {err}");
+        let _ = pos;
         assert!(err.to_string().contains(expected), "{err}");
     }
 }
@@ -350,6 +358,9 @@ fn script_functions_survive_the_round_trip() {
         "fn fib(n) { if n < 2 { n } else { fib(n - 1) + fib(n - 2) } } fib(6)",
         "fn first() { 1 } fn second(x) { first() + x } second(4)",
         // Failing inside a function has to keep rhai's wrapping and position.
+        // `unchecked` turns this into a panic in rhai's own built-in rather
+        // than an error, so there is nothing left here to compare.
+        #[cfg(not(feature = "unchecked"))]
         "fn bad(x) { x / 0 } bad(1)",
     ] {
         let ast = engine.compile(source).expect("must compile");
@@ -524,6 +535,9 @@ fn trailing_bytes_are_refused() {
 /// reason the patch exposes `track_operation`. A host running untrusted
 /// bytecode must set `max_operations`, exactly as it must for untrusted source.
 #[test]
+// A corrupted chunk can loop, and `max_operations` is what stops it. Without
+// limits this hangs rather than fails, which is worse than not running.
+#[cfg(not(feature = "unchecked"))]
 fn no_single_bit_flip_can_panic_or_smuggle_a_bad_chunk() {
     let writer = Engine::new();
     let bytes = sample(&writer);
@@ -558,7 +572,11 @@ fn no_single_bit_flip_can_panic_or_smuggle_a_bad_chunk() {
 /// The device is sent a stripped artifact and knows nothing about the source.
 /// It fails, and all it can say is which instruction. The host kept the table,
 /// and turns that back into the position rhai itself would have reported.
+/// There is no table to strip under `no_position`, so nothing to resolve; and
+/// the failure it turns on is a division by zero, which `unchecked` makes a
+/// panic in rhai rather than an error.
 #[test]
+#[cfg(not(any(feature = "no_position", feature = "unchecked")))]
 fn a_stripped_program_reports_an_address_the_host_can_resolve() {
     let engine = corpus::engine();
     let source = "let a = 1;\nlet b = 0;\na / b";
@@ -595,6 +613,7 @@ fn a_stripped_program_reports_an_address_the_host_can_resolve() {
 /// Attaching another program's table would misreport every error rather than
 /// reporting none, which is strictly worse than having no table.
 #[test]
+#[cfg(not(feature = "no_position"))]
 fn a_table_from_a_different_program_is_refused() {
     let engine = corpus::engine();
 
@@ -611,6 +630,7 @@ fn a_table_from_a_different_program_is_refused() {
 /// A stripped artifact that arrives with a table still in it is a contradiction
 /// the reader should not paper over.
 #[test]
+#[cfg(not(feature = "no_position"))]
 fn an_artifact_carrying_a_mismatched_table_does_not_load() {
     let engine = corpus::engine();
     let bytes = sample(&engine);
