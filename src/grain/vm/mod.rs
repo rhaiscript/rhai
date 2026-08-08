@@ -1917,6 +1917,12 @@ impl<'e> Vm<'e> {
             ));
         }
 
+        // The register is not a scope entry, so it takes a path of its own
+        // rather than a third [`Site`].
+        if let Receiver::This = receiver {
+            return self.call_by_this(program, name_index, name, argc, pos);
+        }
+
         // A named receiver's value is already argument zero — [`Op::LoadNamed`]
         // put it there. A local's is not on the stack at all.
         let (at, on_stack) = match receiver {
@@ -1933,13 +1939,7 @@ impl<'e> Vm<'e> {
                     .ok_or_else(|| malformed(format!("no name {var}")))?;
                 (Site::Name(name), argc)
             }
-            // Encodable and verifiable ahead of the register that holds it, so
-            // an artifact carrying one is refused rather than misread.
-            Receiver::This => {
-                return Err(malformed(
-                    "a call through `this` needs a bound receiver".to_string(),
-                ))
-            }
+            Receiver::This => unreachable!("taken above"),
         };
         let first = self
             .stack
@@ -2001,6 +2001,76 @@ impl<'e> Vm<'e> {
             // this frame's — see [`Vm::call_stacked`], which has to build one
             // for the same reason and cannot borrow this one because the
             // receiver is holding it.
+            let mut detached = Scope::new();
+            let mut context = EvalContext::new(
+                self.engine,
+                &mut self.global,
+                &mut self.caches,
+                &mut detached,
+                None,
+            );
+            context
+                .call_fn_raw(name, true, false, &mut args)
+                .map_err(|err| dispatch_failure(err, pos))
+        };
+
+        self.stack.truncate(first);
+        value
+    }
+
+    /// The same again, with `this` as the first argument.
+    ///
+    /// [`Op::LoadThis`] has already pushed a flattened snapshot as argument
+    /// zero — *before* the other arguments, unlike either of the other two
+    /// receivers, because the path a shared or unbound receiver takes reads
+    /// `this` first (`func/call.rs:1462`) where the by-reference path takes a
+    /// pointer to it afterwards (`:1417`). Reading first is what makes an
+    /// unbound `f(this, nosuch)` report `ErrorUnboundThis` rather than the
+    /// argument's failure.
+    ///
+    /// The snapshot is what gets passed when the register cannot be lent out,
+    /// and dead weight when it can — the trade [`Receiver::Named`] makes too.
+    #[inline(never)]
+    fn call_by_this(
+        &mut self,
+        program: &Program,
+        name_index: u32,
+        name: &str,
+        argc: usize,
+        pos: Position,
+    ) -> VmResult {
+        let first = self
+            .stack
+            .len()
+            .checked_sub(argc)
+            .ok_or_else(|| malformed("call with too few arguments".to_string()))?;
+
+        // Rhai turns `f(this, ..)` into `this.f(..)` for a receiver that is not
+        // shared, and read-only is *not* part of that test — unlike the variable
+        // arm, which copies a constant before deciding (`func/call.rs:1449`).
+        // A function this compiler lowered copies its first argument whatever it
+        // is handed, exactly as rhai copies one before running a script function
+        // (`func/call.rs:661`), so a compiled callee rules a reference out too.
+        let by_reference = self.this.as_ref().map_or(false, |value| !is_shared!(value))
+            && program.function(name_index, argc).is_none();
+
+        if !by_reference {
+            let value = self.call_stacked(program, name_index, argc, first, pos);
+            self.stack.truncate(first);
+            return value;
+        }
+
+        let value = {
+            let entry = self
+                .this
+                .as_mut()
+                .ok_or_else(|| malformed("`this` stopped being bound".to_string()))?;
+            // Argument zero is the snapshot, dead now that there is a register
+            // to reach through.
+            let mut args: Vec<&mut Dynamic> = core::iter::once(entry)
+                .chain(self.stack[first + 1..].iter_mut())
+                .collect();
+            // A scope of the callee's own, for [`Vm::call_stacked`]'s reason.
             let mut detached = Scope::new();
             let mut context = EvalContext::new(
                 self.engine,
@@ -2855,13 +2925,17 @@ impl<'e> Vm<'e> {
                     self.stack.push(value);
                 }
 
-                code::tag::CALL_LOCAL_REF | code::tag::CALL_NAMED_REF => {
+                code::tag::CALL_LOCAL_REF
+                | code::tag::CALL_NAMED_REF
+                | code::tag::CALL_THIS_REF => {
                     let name_index = u32::from(small(1)?);
                     let argc = code[pc + 3] as usize;
-                    let receiver = if tag == code::tag::CALL_LOCAL_REF {
-                        Receiver::Local(small(4)?)
-                    } else {
-                        Receiver::Named(u32::from(small(4)?))
+                    // `this` is a register, so this one carries no operand for
+                    // the receiver and is two bytes shorter.
+                    let receiver = match tag {
+                        code::tag::CALL_LOCAL_REF => Receiver::Local(small(4)?),
+                        code::tag::CALL_NAMED_REF => Receiver::Named(u32::from(small(4)?)),
+                        _ => Receiver::This,
                     };
 
                     let value = self.call_by_reference(
@@ -3492,6 +3566,63 @@ mod tests {
         let array = this.into_array().expect("still an array");
         let items: Vec<INT> = array.iter().map(|v| v.as_int().unwrap()).collect();
         assert_eq!(items, vec![1, 2]);
+    }
+
+    /// `f(this, ..)` is rhai's method-call rewrite, so the receiver goes by
+    /// reference and a mutating native reaches the caller's value.
+    #[test]
+    fn this_as_a_first_argument_goes_by_reference() {
+        let program = one(
+            &[
+                Op::LoadThis,
+                Op::Const(0),
+                Op::CallRef {
+                    name: 2, // `push`
+                    argc: 2,
+                    receiver: Receiver::This,
+                },
+                Op::Return,
+            ],
+            vec![Dynamic::from(2 as INT)],
+        );
+
+        let mut this = Dynamic::from(vec![Dynamic::from(1 as INT)]);
+        if let Err(err) = call(&program, Some(&mut this)) {
+            panic!("expected the push to succeed, got {err:?}");
+        }
+
+        let items: Vec<INT> = this
+            .into_array()
+            .expect("still an array")
+            .iter()
+            .map(|v| v.as_int().unwrap())
+            .collect();
+        assert_eq!(items, vec![1, 2]);
+    }
+
+    /// The snapshot is pushed before the other arguments, so an unbound
+    /// receiver is what fails — not whatever the arguments would have done.
+    #[test]
+    fn an_unbound_this_beats_a_failing_argument() {
+        let program = one(
+            &[
+                Op::LoadThis,
+                Op::LoadNamed(3), // `len`, which is no variable
+                Op::CallRef {
+                    name: 2,
+                    argc: 2,
+                    receiver: Receiver::This,
+                },
+                Op::Return,
+            ],
+            Vec::new(),
+        );
+
+        let err = *call(&program, None).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("ErrorUnboundThis"),
+            "expected the receiver to fail first, got {err:?}"
+        );
     }
 
     #[test]
