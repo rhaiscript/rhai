@@ -778,7 +778,12 @@ impl<'e> Vm<'e> {
         // Not a constant, which could not have been changed anyway: the walk
         // was handed a read-only value, so anything that would have mutated it
         // refused rather than mutating the copy.
-        if chain.mutates() && !shared && result.is_ok() && !root.is_read_only() {
+        //
+        // Whether the walk *failed* is not part of it. Rhai reaches the entry
+        // through a live `&mut`, so a step that mutates and then raises has
+        // already written — `a.push_then_fail()` inside a `try` leaves the
+        // push. Gating this on success would discard exactly that.
+        if chain.mutates() && !shared && !root.is_read_only() {
             match at {
                 RootAt::Place(Site::Slot(index)) => *scope.get_mut_by_index(index) = root,
                 RootAt::Place(Site::Name(name)) => {

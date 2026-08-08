@@ -72,7 +72,15 @@ pub fn engine() -> rhai::Engine {
         .register_fn("bump", |w: &mut Widget| w.level += 1)
         // Reads only. Whether rhai still writes back after one of these is
         // exactly the question this corpus is here to settle.
-        .register_fn("doubled", |w: &mut Widget| w.level * 2);
+        .register_fn("doubled", |w: &mut Widget| w.level * 2)
+        // Mutates and *then* fails. Rhai reaches a chain root through a live
+        // reference, so the mutation has already landed by the time the error
+        // propagates; nothing else here can tell a write-back that happens from
+        // one that is skipped because the walk raised.
+        .register_fn("bump_then_fail", |w: &mut Widget| -> Result<(), Box<rhai::EvalAltResult>> {
+            w.level += 1;
+            Err("bump_then_fail".into())
+        });
 
     engine
         .register_type_with_name::<Holder>("Holder")
@@ -509,4 +517,10 @@ pub const CASES: &[Case] = &[
     // whether a setter runs at all.
     case("host_temp_pure", "let h = holder(3); h.inner.doubled()"),
     case("error_host_index_bounds", "let w = widget(1); w[99]"),
+    // A step that mutates and then raises. The error is caught, so what is
+    // being compared is whether the mutation reached the variable — rhai's does,
+    // because it never walked a copy.
+    case("host_mutation_before_a_failure_survives", "let w = widget(1); try { w.bump_then_fail(); } catch(e) {} w.level"),
+    case("host_mutation_before_a_failure_survives_in_a_map", "let m = #{ w: widget(1) }; try { m.w.bump_then_fail(); } catch(e) {} m.w.level"),
+    case("host_mutation_before_a_failure_survives_in_an_array", "let a = [widget(1)]; try { a[0].bump_then_fail(); } catch(e) {} a[0].level"),
 ];
