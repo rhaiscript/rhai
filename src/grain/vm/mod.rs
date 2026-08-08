@@ -482,12 +482,12 @@ impl<'e> Vm<'e> {
         // the main chunk that may precede it: the function being called can
         // reach whatever the compiler left rhai to interpret, and rhai looks for
         // it in `global.lib`.
-        let mut evaluated = Ok(Dynamic::UNIT);
+        let mut evaluated = Ok(());
         let result = self.with_environment(program, None, |vm| {
             if options.eval_ast {
                 // Run for the scope it leaves behind; the body's own value is
                 // not what the caller asked for.
-                evaluated = unwind_exit(vm.run_main(program, scope));
+                evaluated = unwind_exit(vm.run_main(program, scope)).map(|_| ());
                 if evaluated.is_err() {
                     return Ok(Dynamic::UNIT);
                 }
