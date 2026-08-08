@@ -552,4 +552,21 @@ pub const CASES: &[Case] = &[
     case("this_as_a_later_argument", "fn plus(n) { n + this } let v = 1; v.plus(2)"),
     // Arity excludes the receiver, so these are two different functions.
     case("this_method_arity", "fn f() { 1 } fn f(x) { this + x } let v = 10; [v.f(), v.f(5)]"),
+    // `obj.call(f)` binds `obj` as the closure's `this` by reference, so a
+    // write inside the closure reaches `obj`. The operand stack only ever holds
+    // a copy of it, which is why the instruction carries where it came from.
+    //
+    // The pointer is scoped to a block throughout, as the other closure cases
+    // are: a compiled closure's `FnPtr` carries a name where rhai's carries the
+    // body and its environment, so one left in the scope compares unequal for a
+    // reason that has nothing to do with the call.
+    case("closure_call_on_a_local_writes_back", "let v = 21; { let f = || { this *= 2; }; v.call(f); } v"),
+    case("closure_call_on_a_local_inline", "let v = 21; v.call(|| { this *= 2; }); v"),
+    case("closure_call_on_a_local_reads", "let v = 21; let r = 0; { let f = || this * 2; r = v.call(f); } r"),
+    case("closure_call_mutates_an_array", "let a = [1]; { let f = || { this.push(2); }; a.call(f); } a"),
+    // And the receiver can be the frame's own receiver.
+    case("closure_call_on_this", "fn twice() { let f = || { this *= 2; }; this.call(f); } let v = 21; v.twice(); v"),
+    // A temporary receiver has nowhere to write back to, and rhai mutates a
+    // copy of it too.
+    case("closure_call_on_a_temporary", "let r = 0; { let f = || { this *= 2; }; r = (20 + 1).call(f); } r"),
 ];

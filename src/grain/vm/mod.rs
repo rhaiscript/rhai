@@ -1711,11 +1711,15 @@ impl<'e> Vm<'e> {
     /// so the name is matched against it first and only the miss goes to
     /// `call_raw`.
     #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
     fn call_fn_ptr(
         &mut self,
         program: &Program,
         argc: usize,
         method: bool,
+        receiver: Option<Receiver>,
+        scope: &mut Scope,
+        frame_base: usize,
         pos: Position,
     ) -> VmResult {
         let base = self
@@ -1730,9 +1734,9 @@ impl<'e> Vm<'e> {
         // is how a closure is called against a `this`. Rhai reports the
         // mismatch against that argument, not against the target, which is why
         // the position moves with it.
-        let mut this = None;
+        let mut receiver_at = None;
         if method && !self.stack[at].is::<FnPtr>() {
-            this = Some(self.stack[at].clone());
+            receiver_at = Some(at);
             at += 1;
             if at >= self.stack.len() {
                 return Err(self.mismatch::<FnPtr>(self.stack[at - 1].type_name(), pos));
@@ -1746,37 +1750,120 @@ impl<'e> Vm<'e> {
 
         let taken = self.stack.len() - at - 1;
         let curried = pointer.curry().len();
-        let function = (this.is_none())
-            .then(|| program.function_named(pointer.fn_name(), curried + taken))
-            .flatten()
+        // A receiver does not change which function a pointer names, only what
+        // the callee's `this` is: rhai keys its own script pointers on the
+        // declared parameter count alone (`types/fn_ptr.rs:422`), and binds the
+        // receiver alongside them.
+        let function = program
+            .function_named(pointer.fn_name(), curried + taken)
             .map(|f| (f.params.clone(), f.chunk));
 
-        if let Some((params, chunk)) = function {
+        // Bound once, whichever path takes it. Curried values are spliced in
+        // above `at`, so the receiver's index is unaffected either way.
+        let (mut bound, write_back) = match receiver_at {
+            Some(index) => {
+                let (value, write_back) = bind_this(&mut self.stack[index]);
+                (Some(value), write_back)
+            }
+            None => (None, false),
+        };
+
+        let outcome = if let Some((params, chunk)) = function {
             // Curried arguments go in front of the call's own, which is what
             // currying means and where the callee's parameters expect them.
             let first = at + 1;
             self.stack
                 .splice(first..first, pointer.curry().iter().cloned());
-            let value =
-                self.call_compiled(program, pointer.fn_name(), &params, chunk, first, pos)?;
-            self.stack.truncate(base);
-            return Ok(value);
+
+            let (result, returned) = self.call_compiled_with_this(
+                program,
+                pointer.fn_name(),
+                &params,
+                chunk,
+                first,
+                pos,
+                bound.take(),
+            );
+            bound = returned;
+            result
+        } else {
+            // Anything else is rhai's: a native function, a name registered
+            // elsewhere, or a pointer it built itself.
+            let mut args: Vec<Dynamic> = self.stack.drain(at + 1..).collect();
+            let context = native_context(self.engine, pointer.fn_name(), None, &self.global, pos);
+            pointer
+                .call_raw(&context, bound.as_mut(), &mut args)
+                .map_err(|mut err| {
+                    if err.position().is_none() {
+                        err.set_position(pos);
+                    }
+                    err
+                })
+        };
+
+        // Before `?`, as everywhere else: rhai binds the receiver by reference,
+        // so a closure that writes and then raises has already written.
+        if let Some(index) = receiver_at {
+            unbind_this(&mut self.stack[index], bound, write_back);
+            if write_back {
+                let updated = self.stack[index].clone();
+                self.return_receiver(program, receiver, updated, scope, frame_base)?;
+            }
         }
 
-        // Anything else is rhai's: a native function, a name registered
-        // elsewhere, or a pointer it built itself.
-        let mut args: Vec<Dynamic> = self.stack.drain(at + 1..).collect();
-        let context = native_context(self.engine, pointer.fn_name(), None, &self.global, pos);
-        let value = pointer
-            .call_raw(&context, this.as_mut(), &mut args)
-            .map_err(|mut err| {
-                if err.position().is_none() {
-                    err.set_position(pos);
-                }
-                err
-            })?;
+        let value = outcome?;
         self.stack.truncate(base);
         Ok(value)
+    }
+
+    /// Carry a write through `obj.call(f)`'s `this` back to `obj` itself.
+    ///
+    /// Rhai binds the receiver by reference (`func/call.rs:862`), so the write
+    /// lands in the variable. The operand stack only ever held a copy of it,
+    /// and this is what puts the copy back where it came from.
+    ///
+    /// Nothing to do for a shared receiver: it arrived *as* the cell, so the
+    /// write already landed where every holder can see it — `run_chain`'s rule
+    /// for a chain root, and for the same reason.
+    fn return_receiver(
+        &mut self,
+        program: &Program,
+        receiver: Option<Receiver>,
+        value: Dynamic,
+        scope: &mut Scope,
+        frame_base: usize,
+    ) -> Result<(), Box<EvalAltResult>> {
+        if is_shared!(value) || value.is_read_only() {
+            return Ok(());
+        }
+
+        match receiver {
+            Some(Receiver::Local(slot)) => {
+                let index = frame_base + slot as usize;
+                if index >= scope.len() {
+                    return Err(malformed(format!("local slot {slot} is out of scope")));
+                }
+                *scope.get_mut_by_index(index) = value;
+            }
+            Some(Receiver::Named(var)) => {
+                let name = program
+                    .name(var)
+                    .ok_or_else(|| malformed(format!("no name {var}")))?;
+                // A resolver's answer or a module constant has no entry behind
+                // it, and rhai could not have written through one either.
+                if let Some(entry) = scope.get_mut(name) {
+                    *entry = value;
+                }
+            }
+            Some(Receiver::This) => {
+                if let Some(entry) = self.this.as_mut() {
+                    *entry = value;
+                }
+            }
+            // A temporary, which rhai mutates a copy of too.
+            None => {}
+        }
+        Ok(())
     }
 
     /// Concatenate the segments of an interpolated string, reproducing
@@ -3202,10 +3289,23 @@ impl<'e> Vm<'e> {
                     self.stack.push(pointer.into());
                 }
 
-                code::tag::CALL_FN_PTR | code::tag::CALL_FN_PTR_METHOD => {
+                code::tag::CALL_FN_PTR
+                | code::tag::CALL_FN_PTR_METHOD
+                | code::tag::CALL_FN_PTR_ON_LOCAL
+                | code::tag::CALL_FN_PTR_ON_NAMED
+                | code::tag::CALL_FN_PTR_ON_THIS => {
                     let argc = code[pc + 1] as usize;
-                    let method = tag == code::tag::CALL_FN_PTR_METHOD;
-                    let value = self.call_fn_ptr(program, argc, method, pos())?;
+                    let method = tag != code::tag::CALL_FN_PTR;
+                    let receiver = match tag {
+                        code::tag::CALL_FN_PTR_ON_LOCAL => Some(Receiver::Local(small(2)?)),
+                        code::tag::CALL_FN_PTR_ON_NAMED => {
+                            Some(Receiver::Named(u32::from(small(2)?)))
+                        }
+                        code::tag::CALL_FN_PTR_ON_THIS => Some(Receiver::This),
+                        _ => None,
+                    };
+                    let value =
+                        self.call_fn_ptr(program, argc, method, receiver, scope, base, pos())?;
                     self.stack.push(value);
                 }
 

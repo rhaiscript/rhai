@@ -161,6 +161,12 @@ pub mod tag {
     pub const ASSIGN_THIS_OP: u8 = 0x3d;
     /// [`Op::CallRef`](super::Op::CallRef) through [`Receiver::This`](super::Receiver::This).
     pub const CALL_THIS_REF: u8 = 0x3e;
+    /// [`Op::CallFnPtr`](super::Op::CallFnPtr) on a local, which is written back to.
+    pub const CALL_FN_PTR_ON_LOCAL: u8 = 0x3f;
+    /// [`Op::CallFnPtr`](super::Op::CallFnPtr) on a variable no slot names.
+    pub const CALL_FN_PTR_ON_NAMED: u8 = 0x40;
+    /// [`Op::CallFnPtr`](super::Op::CallFnPtr) on the frame's receiver.
+    pub const CALL_FN_PTR_ON_THIS: u8 = 0x41;
 }
 
 /// How wide each tag's instruction is, with 0 for the tags that are not one.
@@ -213,6 +219,12 @@ static WIDTHS: [u8; 256] = {
     widths[tag::ASSIGN_THIS as usize] = 1;
     widths[tag::ASSIGN_THIS_OP as usize] = 3;
     widths[tag::CALL_THIS_REF as usize] = 4;
+
+    // The receiver's value is on the stack for all of these; only where it came
+    // from differs, and only two of them need an operand to say it.
+    widths[tag::CALL_FN_PTR_ON_LOCAL as usize] = 4;
+    widths[tag::CALL_FN_PTR_ON_NAMED as usize] = 4;
+    widths[tag::CALL_FN_PTR_ON_THIS as usize] = 2;
     widths[tag::MAKE_CLOSURE as usize] = 3;
     widths[tag::PUSH_HANDLER as usize] = 5;
     widths[tag::PUSH_HANDLER_VAR as usize] = 7;
@@ -548,13 +560,29 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 code.push(tag::CURRY);
                 code.push(*argc);
             }
-            Op::CallFnPtr { argc, method } => {
-                code.push(if *method {
-                    tag::CALL_FN_PTR_METHOD
-                } else {
-                    tag::CALL_FN_PTR
-                });
+            Op::CallFnPtr {
+                argc,
+                method,
+                receiver,
+            } => {
+                // The receiver's value is on the stack whichever of these it
+                // is; the tag says where it came from, and two of them carry
+                // enough to reach it again.
+                let operand = match receiver {
+                    Some(Receiver::Local(slot)) => Some((tag::CALL_FN_PTR_ON_LOCAL, *slot)),
+                    Some(Receiver::Named(var)) => {
+                        Some((tag::CALL_FN_PTR_ON_NAMED, small(*var as usize, "names")?))
+                    }
+                    Some(Receiver::This) => Some((tag::CALL_FN_PTR_ON_THIS, 0)),
+                    None if *method => Some((tag::CALL_FN_PTR_METHOD, 0)),
+                    None => Some((tag::CALL_FN_PTR, 0)),
+                };
+                let (tag, operand) = operand.expect("every arm answers");
+                code.push(tag);
                 code.push(*argc);
+                if matches!(tag, tag::CALL_FN_PTR_ON_LOCAL | tag::CALL_FN_PTR_ON_NAMED) {
+                    code.extend_from_slice(&operand.to_le_bytes());
+                }
             }
 
             Op::InterpolateStart => code.push(tag::INTERPOLATE_START),
@@ -686,7 +714,11 @@ fn encoded_width(op: &Op) -> usize {
         | Op::RequireThis
         | Op::AssignThis { op: None }
         | Op::Return => 1,
-        Op::Curry(..) | Op::CallFnPtr { .. } | Op::Rotate(..) => 2,
+        Op::Curry(..) | Op::Rotate(..) => 2,
+        Op::CallFnPtr { receiver, .. } => match receiver {
+            Some(Receiver::Local(..) | Receiver::Named(..)) => 4,
+            Some(Receiver::This) | None => 2,
+        },
         Op::Const(..)
         | Op::LoadLocal(..)
         | Op::StoreLocal(..)
@@ -851,10 +883,27 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         tag::CALL_FN_PTR => Op::CallFnPtr {
             argc: code[at + 1],
             method: false,
+            receiver: None,
         },
         tag::CALL_FN_PTR_METHOD => Op::CallFnPtr {
             argc: code[at + 1],
             method: true,
+            receiver: None,
+        },
+        tag::CALL_FN_PTR_ON_LOCAL => Op::CallFnPtr {
+            argc: code[at + 1],
+            method: true,
+            receiver: Some(Receiver::Local(small(2)?)),
+        },
+        tag::CALL_FN_PTR_ON_NAMED => Op::CallFnPtr {
+            argc: code[at + 1],
+            method: true,
+            receiver: Some(Receiver::Named(u32::from(small(2)?))),
+        },
+        tag::CALL_FN_PTR_ON_THIS => Op::CallFnPtr {
+            argc: code[at + 1],
+            method: true,
+            receiver: Some(Receiver::This),
         },
         tag::INTERPOLATE_START => Op::InterpolateStart,
         tag::INTERPOLATE_APPEND => Op::InterpolateAppend,
@@ -978,6 +1027,31 @@ mod tests {
                 name: 1,
                 argc: 2,
                 receiver: Receiver::This,
+            },
+            Op::CallFnPtr {
+                argc: 1,
+                method: false,
+                receiver: None,
+            },
+            Op::CallFnPtr {
+                argc: 1,
+                method: true,
+                receiver: None,
+            },
+            Op::CallFnPtr {
+                argc: 1,
+                method: true,
+                receiver: Some(Receiver::Local(4)),
+            },
+            Op::CallFnPtr {
+                argc: 1,
+                method: true,
+                receiver: Some(Receiver::Named(5)),
+            },
+            Op::CallFnPtr {
+                argc: 1,
+                method: true,
+                receiver: Some(Receiver::This),
             },
             Op::LoadThis,
             Op::LoadThisShared,

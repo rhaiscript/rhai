@@ -384,6 +384,18 @@ pub enum Op {
         argc: u8,
         /// Whether the call is in method position (`f.call(x)`).
         method: bool,
+        /// Where the receiver came from, when there is anywhere to put it back.
+        ///
+        /// `obj.call(f)` binds `obj` as the closure's `this` **by reference**
+        /// (`func/call.rs:862`), so a closure that writes to `this` writes to
+        /// `obj`. The receiver's *value* is on the operand stack either way —
+        /// this only says where it came from, so the write can be carried back
+        /// there.
+        ///
+        /// `None` in call position, and for a receiver with nowhere to write
+        /// back to: `[1, 2].call(f)` mutates a temporary, as it does in rhai.
+        /// Only meaningful when `method` is set.
+        receiver: Option<Receiver>,
     },
 
     /// Push an empty buffer for an interpolated string to be built in.

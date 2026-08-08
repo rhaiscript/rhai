@@ -533,6 +533,10 @@ fn check_indices(at: usize, code: &[u8], pools: Pools) -> Result<(), VerifyError
         // omitting this would hand `program.assign_op` an unchecked index out
         // of a corrupt artifact.
         tag::ASSIGN_THIS_OP => bounded(index(1), "op-assignment", pools.assign_ops),
+        // The receiver's name, which the write-back resolves the scope entry
+        // by. A local's slot is not a pool index and is checked against the
+        // scope when it runs, as every other slot is.
+        tag::CALL_FN_PTR_ON_NAMED => bounded(index(2), "name", pools.names),
         tag::EVAL_AST | tag::EVAL_AST_KEEP => bounded(index(1), "fragment", pools.residuals),
         tag::CHAIN => {
             bounded(index(1), "chain", pools.chains.len())?;

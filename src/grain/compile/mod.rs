@@ -1420,7 +1420,21 @@ impl Lowering {
                 let Expr::MethodCall(method, ..) = &binary.rhs else {
                     unreachable!("checked by the guard");
                 };
-                self.expression(&binary.lhs);
+                // `obj.call(f)` binds `obj` as the closure's `this` by
+                // reference (`func/call.rs:862`), so a write inside the closure
+                // has to reach `obj`. The value goes on the stack as it always
+                // did; the receiver says where to carry a write back to.
+                //
+                // Unflattened, for the reason `unflattened` gives: a receiver
+                // that is a shared cell has to arrive *as* the cell, so a write
+                // lands where every holder can see it and no write-back is
+                // needed at all.
+                let receiver = self.fn_ptr_receiver(&binary.lhs);
+                if receiver.is_some() {
+                    self.unflattened(&binary.lhs);
+                } else {
+                    self.expression(&binary.lhs);
+                }
                 for arg in method.args.iter() {
                     self.expression(arg);
                 }
@@ -1438,7 +1452,14 @@ impl Lowering {
                 // see `fn_ptr_call`. The two disagreeing is deliberate.
                 let pos = binary.rhs.position();
                 if method.name == "call" {
-                    self.emit_at(Op::CallFnPtr { argc, method: true }, pos);
+                    self.emit_at(
+                        Op::CallFnPtr {
+                            argc,
+                            method: true,
+                            receiver,
+                        },
+                        pos,
+                    );
                 } else {
                     self.emit_at(Op::Curry(argc), pos);
                 }
@@ -1486,6 +1507,27 @@ impl Lowering {
             | Expr::FnCall(..)
             | Expr::Array(..)
             | Expr::Map(..) => self.residual_expr(expr),
+        }
+    }
+
+    /// Where `obj.call(f)`'s receiver came from, when a write through the
+    /// closure's `this` has somewhere to land.
+    ///
+    /// `None` for anything rhai would evaluate into a temporary — `[1, 2].call(f)`
+    /// mutates a copy in the walker too, so there is nothing to carry back.
+    fn fn_ptr_receiver(&mut self, receiver: &Expr) -> Option<Receiver> {
+        match receiver {
+            Expr::ThisPtr(..) => Some(Receiver::This),
+            Expr::Variable(payload, ..) if !has_namespace!(payload) => {
+                match self.slots.resolve(&payload.1) {
+                    Some(slot) => Some(Receiver::Local(slot)),
+                    None if self.is_variable_name(&payload.1, false) => {
+                        Some(Receiver::Named(self.push_name(payload.1.clone())))
+                    }
+                    None => None,
+                }
+            }
+            _ => None,
         }
     }
 
@@ -1694,6 +1736,8 @@ impl Lowering {
                     Op::CallFnPtr {
                         argc: (argc - 1) as u8,
                         method: false,
+                        // Call position binds no receiver at all.
+                        receiver: None,
                     },
                     pos,
                 );
