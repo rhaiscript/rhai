@@ -196,6 +196,10 @@ fn put_chain_spec(out: &mut Vec<u8>, chain: &Chain) {
             put_uvarint(out, u64::from(name));
             put_position(out, pos);
         }
+        Root::This { pos } => {
+            out.push(root_tag::THIS);
+            put_position(out, pos);
+        }
         Root::Temporary => out.push(root_tag::TEMPORARY),
     }
     put_uvarint(out, u64::from(chain.operands));

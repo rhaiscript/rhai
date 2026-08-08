@@ -165,9 +165,16 @@ enum Indexed {
 /// `None` for a temporary, which has no name to give — and neither error can
 /// reach one: nothing assigns through a temporary, and flattening it on the way
 /// in means there is no cell left to contend for.
+///
+/// `this` *can* reach both and has no name either, so it answers with the empty
+/// one rather than with nothing. That is rhai's own answer: `Expr::ThisPtr`
+/// carries no name, so assigning through a read-only receiver is
+/// `ErrorAssignmentToConstant("")` (`eval/stmt.rs:118-122`). Answering `None`
+/// here would report a malformed chunk instead.
 fn root_name<'p>(program: &'p Program, chain: &Chain) -> Option<&'p str> {
     match chain.root {
         Root::Local { name, .. } | Root::Named { name, .. } => program.name(name),
+        Root::This { .. } => Some(""),
         Root::Temporary => None,
     }
 }
@@ -845,6 +852,13 @@ impl<'e> Vm<'e> {
                     pos,
                 })
             }
+
+            // The frame's receiver. Encodable and verifiable ahead of the
+            // register that holds it, so an artifact carrying one is refused
+            // rather than misread.
+            Root::This { .. } => Err(malformed(
+                "a chain rooted at `this` needs a bound receiver".to_string(),
+            )),
 
             // A name has a position of its own, and it wins: the lookup below
             // can fail, and rhai blames the variable rather than the chain.
@@ -1813,6 +1827,13 @@ impl<'e> Vm<'e> {
                     .name(var)
                     .ok_or_else(|| malformed(format!("no name {var}")))?;
                 (Site::Name(name), argc)
+            }
+            // Encodable and verifiable ahead of the register that holds it, so
+            // an artifact carrying one is refused rather than misread.
+            Receiver::This => {
+                return Err(malformed(
+                    "a call through `this` needs a bound receiver".to_string(),
+                ))
             }
         };
         let first = self

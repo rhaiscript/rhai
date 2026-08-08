@@ -149,6 +149,18 @@ pub mod tag {
     pub const CALL_NAMED_REF: u8 = 0x37;
     /// [`Op::LoadSharedNamed`](super::Op::LoadSharedNamed).
     pub const LOAD_SHARED_NAMED: u8 = 0x38;
+    /// [`Op::LoadThis`](super::Op::LoadThis).
+    pub const LOAD_THIS: u8 = 0x39;
+    /// [`Op::LoadThisShared`](super::Op::LoadThisShared).
+    pub const LOAD_THIS_SHARED: u8 = 0x3a;
+    /// [`Op::RequireThis`](super::Op::RequireThis).
+    pub const REQUIRE_THIS: u8 = 0x3b;
+    /// [`Op::AssignThis`](super::Op::AssignThis) with a plain `=`.
+    pub const ASSIGN_THIS: u8 = 0x3c;
+    /// [`Op::AssignThis`](super::Op::AssignThis) through an operator.
+    pub const ASSIGN_THIS_OP: u8 = 0x3d;
+    /// [`Op::CallRef`](super::Op::CallRef) through [`Receiver::This`](super::Receiver::This).
+    pub const CALL_THIS_REF: u8 = 0x3e;
 }
 
 /// How wide each tag's instruction is, with 0 for the tags that are not one.
@@ -193,6 +205,14 @@ static WIDTHS: [u8; 256] = {
     widths[tag::SHARE_NAMED as usize] = 3;
     widths[tag::LOAD_SHARED as usize] = 3;
     widths[tag::LOAD_SHARED_NAMED as usize] = 3;
+
+    // `this` is a register, so none of these needs an operand to address it.
+    widths[tag::LOAD_THIS as usize] = 1;
+    widths[tag::LOAD_THIS_SHARED as usize] = 1;
+    widths[tag::REQUIRE_THIS as usize] = 1;
+    widths[tag::ASSIGN_THIS as usize] = 1;
+    widths[tag::ASSIGN_THIS_OP as usize] = 3;
+    widths[tag::CALL_THIS_REF as usize] = 4;
     widths[tag::MAKE_CLOSURE as usize] = 3;
     widths[tag::PUSH_HANDLER as usize] = 5;
     widths[tag::PUSH_HANDLER_VAR as usize] = 7;
@@ -373,6 +393,19 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 );
             }
 
+            Op::LoadThis => code.push(tag::LOAD_THIS),
+            Op::LoadThisShared => code.push(tag::LOAD_THIS_SHARED),
+            Op::RequireThis => code.push(tag::REQUIRE_THIS),
+            Op::AssignThis { op: None } => code.push(tag::ASSIGN_THIS),
+            Op::AssignThis {
+                op: Some(assign_op),
+            } => {
+                code.push(tag::ASSIGN_THIS_OP);
+                code.extend_from_slice(
+                    &small(*assign_op as usize, "op-assignments")?.to_le_bytes(),
+                );
+            }
+
             Op::LoadNamed(name) => {
                 code.push(tag::LOAD_NAMED);
                 code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
@@ -442,14 +475,21 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 argc,
                 receiver,
             } => {
-                let (tag, operand) = match receiver {
-                    Receiver::Local(slot) => (tag::CALL_LOCAL_REF, *slot),
-                    Receiver::Named(var) => (tag::CALL_NAMED_REF, small(*var as usize, "names")?),
+                // `this` is a register and needs no operand to address it, so
+                // its encoding is the other two minus the trailing `u16`.
+                let operand = match receiver {
+                    Receiver::Local(slot) => Some((tag::CALL_LOCAL_REF, *slot)),
+                    Receiver::Named(var) => {
+                        Some((tag::CALL_NAMED_REF, small(*var as usize, "names")?))
+                    }
+                    Receiver::This => None,
                 };
-                code.push(tag);
+                code.push(operand.map_or(tag::CALL_THIS_REF, |(tag, _)| tag));
                 code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
                 code.push(*argc);
-                code.extend_from_slice(&operand.to_le_bytes());
+                if let Some((_, operand)) = operand {
+                    code.extend_from_slice(&operand.to_le_bytes());
+                }
             }
 
             Op::Rotate(under) => {
@@ -641,6 +681,10 @@ fn encoded_width(op: &Op) -> usize {
         | Op::InterpolateEnd
         | Op::MakeFnPtr
         | Op::IsShared
+        | Op::LoadThis
+        | Op::LoadThisShared
+        | Op::RequireThis
+        | Op::AssignThis { op: None }
         | Op::Return => 1,
         Op::Curry(..) | Op::CallFnPtr { .. } | Op::Rotate(..) => 2,
         Op::Const(..)
@@ -661,8 +705,13 @@ fn encoded_width(op: &Op) -> usize {
         | Op::MakeClosure(..)
         | Op::MakeArray(..)
         | Op::MakeMap(..)
+        | Op::AssignThis { op: Some(..) }
         | Op::CheckSize { .. } => 3,
-        Op::Call { op: None, .. } => 4,
+        Op::Call { op: None, .. }
+        | Op::CallRef {
+            receiver: Receiver::This,
+            ..
+        } => 4,
         Op::AssignLocal { op: None, .. }
         | Op::AssignNamed { op: Some(..), .. }
         | Op::Jump(..)
@@ -676,7 +725,11 @@ fn encoded_width(op: &Op) -> usize {
             catch_var: Some(..),
             ..
         } => 7,
-        Op::Call { op: Some(..), .. } | Op::CallRef { .. } => 6,
+        Op::Call { op: Some(..), .. }
+        | Op::CallRef {
+            receiver: Receiver::Local(..) | Receiver::Named(..),
+            ..
+        } => 6,
         Op::AssignLocal { op: Some(..), .. } => 7,
     }
 }
@@ -720,6 +773,14 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
             op: Some(u32::from(small(3)?)),
         },
 
+        tag::LOAD_THIS => Op::LoadThis,
+        tag::LOAD_THIS_SHARED => Op::LoadThisShared,
+        tag::REQUIRE_THIS => Op::RequireThis,
+        tag::ASSIGN_THIS => Op::AssignThis { op: None },
+        tag::ASSIGN_THIS_OP => Op::AssignThis {
+            op: Some(u32::from(small(1)?)),
+        },
+
         tag::DECLARE_LOCAL => Op::DeclareLocal {
             name: u32::from(small(1)?),
             is_const: false,
@@ -754,6 +815,11 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
             name: u32::from(small(1)?),
             argc: code[at + 3],
             receiver: Receiver::Local(small(4)?),
+        },
+        tag::CALL_THIS_REF => Op::CallRef {
+            name: u32::from(small(1)?),
+            argc: code[at + 3],
+            receiver: Receiver::This,
         },
         tag::CALL_NAMED_REF => Op::CallRef {
             name: u32::from(small(1)?),
@@ -908,6 +974,16 @@ mod tests {
                 argc: 2,
                 receiver: Receiver::Named(5),
             },
+            Op::CallRef {
+                name: 1,
+                argc: 2,
+                receiver: Receiver::This,
+            },
+            Op::LoadThis,
+            Op::LoadThisShared,
+            Op::RequireThis,
+            Op::AssignThis { op: None },
+            Op::AssignThis { op: Some(6) },
             Op::Rotate(3),
             Op::UnwindTo(6),
             Op::Tick,

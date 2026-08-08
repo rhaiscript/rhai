@@ -406,7 +406,12 @@ fn effect(op: &Op, pools: Pools) -> (usize, usize) {
         | Op::LoadShared(..)
         | Op::LoadSharedNamed(..)
         | Op::MakeClosure(..)
+        | Op::LoadThis
+        | Op::LoadThisShared
         | Op::EvalAst { .. } => (0, 1),
+
+        // A boundness check, which either raises or does nothing.
+        Op::RequireThis => (0, 0),
 
         // Sharing is a change to the scope, not to the operand stack.
         Op::Share(..) | Op::ShareNamed(..) => (0, 0),
@@ -415,7 +420,7 @@ fn effect(op: &Op, pools: Pools) -> (usize, usize) {
 
         // Pops the value, leaves nothing: the statement's unit value is a
         // separate `Op::Unit`.
-        Op::AssignLocal { .. } | Op::AssignNamed { .. } => (1, 0),
+        Op::AssignLocal { .. } | Op::AssignNamed { .. } | Op::AssignThis { .. } => (1, 0),
 
         Op::JumpIfFalse { .. } | Op::JumpIfTrue { .. } | Op::Switch(..) => (1, 0),
 
@@ -429,12 +434,13 @@ fn effect(op: &Op, pools: Pools) -> (usize, usize) {
         // Arguments in, result out.
         Op::Call { argc, .. } => (*argc as usize, 1),
 
-        // A named receiver's value is argument zero like any other; a local's
-        // is not on the stack at all. An `argc` of zero names no receiver and
-        // is rejected when it runs.
+        // A named receiver's value is argument zero like any other, and so is
+        // `this` — which is pushed first rather than last, but the depth is the
+        // same either way. A local's is not on the stack at all. An `argc` of
+        // zero names no receiver and is rejected when it runs.
         Op::CallRef { argc, receiver, .. } => match receiver {
             Receiver::Local(..) => ((*argc as usize).saturating_sub(1), 1),
-            Receiver::Named(..) => (*argc as usize, 1),
+            Receiver::Named(..) | Receiver::This => (*argc as usize, 1),
         },
 
         // Reorders what is already there, so the depth is unchanged — but it
@@ -495,7 +501,9 @@ fn check_indices(at: usize, code: &[u8], pools: Pools) -> Result<(), VerifyError
     match code[at] {
         tag::CONST => bounded(index(1), "constant", pools.consts),
         tag::DECLARE_LOCAL | tag::DECLARE_CONST => bounded(index(1), "name", pools.names),
-        tag::CALL | tag::CALL_LOCAL_REF => bounded(index(1), "name", pools.names),
+        tag::CALL | tag::CALL_LOCAL_REF | tag::CALL_THIS_REF => {
+            bounded(index(1), "name", pools.names)
+        }
         // The function's, then the receiver variable's. The slot a local
         // receiver names is not a pool index and is checked against the scope
         // when it runs, as every other slot is.
@@ -521,6 +529,10 @@ fn check_indices(at: usize, code: &[u8], pools: Pools) -> Result<(), VerifyError
             bounded(index(3), "name", pools.names)?;
             bounded(index(5), "op-assignment", pools.assign_ops)
         }
+        // `this` needs no name, so the operator is the whole of it — and
+        // omitting this would hand `program.assign_op` an unchecked index out
+        // of a corrupt artifact.
+        tag::ASSIGN_THIS_OP => bounded(index(1), "op-assignment", pools.assign_ops),
         tag::EVAL_AST | tag::EVAL_AST_KEEP => bounded(index(1), "fragment", pools.residuals),
         tag::CHAIN => {
             bounded(index(1), "chain", pools.chains.len())?;
@@ -549,7 +561,9 @@ fn check_chain_indices(at: usize, chain: &Chain, pools: Pools) -> Result<(), Ver
         Root::Local { name, .. } | Root::Named { name, .. } => {
             bounded(name, "name", pools.names)?;
         }
-        Root::Temporary => {}
+        // Neither names anything in a pool: a temporary has no name at all, and
+        // `this` is a register rather than an entry.
+        Root::This { .. } | Root::Temporary => {}
     }
 
     for step in &chain.steps {
@@ -610,6 +624,49 @@ mod tests {
     #[test]
     fn accepts_a_well_formed_chunk() {
         assert_eq!(check(vec![Op::Unit, Op::Return]), Ok(vec![1]));
+    }
+
+    /// `this` is a register, so reading it costs a push and nothing else, and
+    /// assigning to it consumes one without leaving anything behind.
+    #[test]
+    fn the_this_register_is_reached_without_touching_the_scope() {
+        assert_eq!(check(vec![Op::LoadThis, Op::Return]), Ok(vec![1]));
+        assert_eq!(check(vec![Op::LoadThisShared, Op::Return]), Ok(vec![1]));
+        assert_eq!(
+            check(vec![Op::RequireThis, Op::Unit, Op::Return]),
+            Ok(vec![1])
+        );
+        assert_eq!(
+            check(vec![
+                Op::RequireThis,
+                Op::Unit,
+                Op::AssignThis { op: None },
+                Op::Unit,
+                Op::Return
+            ]),
+            Ok(vec![1])
+        );
+    }
+
+    /// The operator is the whole of `ASSIGN_THIS_OP`'s payload, so an artifact
+    /// naming one the pool does not have has to be refused here — nothing
+    /// downstream re-checks it.
+    #[test]
+    fn rejects_an_op_assignment_to_this_that_the_pool_does_not_have() {
+        let ops = vec![
+            Op::Unit,
+            Op::AssignThis { op: Some(0) },
+            Op::Unit,
+            Op::Return,
+        ];
+        assert_eq!(
+            check(ops),
+            Err(VerifyError::BadIndex {
+                at: 1,
+                what: "op-assignment",
+                index: 0,
+            })
+        );
     }
 
     /// A chain is one instruction over an unbounded record, so almost all of it

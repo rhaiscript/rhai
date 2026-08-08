@@ -140,6 +140,22 @@ pub enum Root {
         pos: rhai::Position,
     },
 
+    /// The frame's receiver.
+    ///
+    /// Grouped with the two above rather than with [`Root::Temporary`], and the
+    /// distinction is the whole reason this variant exists: `this.push(1)` has
+    /// to mutate the caller's value, and a temporary would walk a copy and drop
+    /// the mutation silently.
+    ///
+    /// Carries its own position because the chain instruction's table entry is
+    /// the `.` or the `[`, while `ErrorUnboundThis` is reported against the
+    /// `this` (`eval/chaining.rs:519-527`) — two positions one instruction
+    /// cannot give. [`Root::Named`] carries one for the same reason.
+    This {
+        /// Where the `this` is in the source.
+        pos: rhai::Position,
+    },
+
     /// A value the instruction takes off the operand stack, pushed above the
     /// step operands.
     ///
@@ -181,7 +197,7 @@ impl Chain {
     #[must_use]
     pub fn roots_on_stack(&self) -> bool {
         match self.root {
-            Root::Local { .. } | Root::Named { .. } => false,
+            Root::Local { .. } | Root::Named { .. } | Root::This { .. } => false,
             Root::Temporary => true,
         }
     }

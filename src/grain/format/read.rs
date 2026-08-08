@@ -268,6 +268,9 @@ fn get_chain(cursor: &mut Cursor) -> Result<Chain, ReadError> {
             name: cursor.index()?,
             pos: get_position(cursor)?,
         },
+        root_tag::THIS => Root::This {
+            pos: get_position(cursor)?,
+        },
         root_tag::TEMPORARY => Root::Temporary,
         tag => {
             return Err(ReadError::UnknownTag {

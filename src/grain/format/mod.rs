@@ -67,6 +67,7 @@ mod root_tag {
     pub const LOCAL: u8 = 0x01;
     pub const TEMPORARY: u8 = 0x02;
     pub const NAMED: u8 = 0x03;
+    pub const THIS: u8 = 0x04;
 }
 
 /// Chain-step tags. Append only.

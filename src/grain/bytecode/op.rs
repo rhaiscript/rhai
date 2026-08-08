@@ -46,6 +46,24 @@ pub enum Receiver {
     /// only if a profile of a host-heavy script says so; a local, which is the
     /// common receiver by far, never makes one.
     Named(u32),
+
+    /// The frame's receiver, for `f(this, ..)`.
+    ///
+    /// Rhai applies the same rewrite to `this` as to a variable, but only when
+    /// the receiver is neither shared nor curried (`func/call.rs:1409-1433`).
+    /// Shared-ness is a run-time property, so the value arrives on the stack as
+    /// argument zero and the call reaches for the register instead when it turns
+    /// out to be usable by reference — the deferral [`Receiver::Local`] already
+    /// makes for a read-only entry.
+    ///
+    /// Unlike either of the others, [`Op::LoadThis`] pushes it *before* the
+    /// remaining arguments. Rhai's two arms disagree about when `this` is read:
+    /// the by-reference one takes it after them (`func/call.rs:1417`), but the
+    /// fallback that a shared or unbound receiver lands in reads and flattens it
+    /// first (`:1462`). Reading first is what makes `f(this, { this = 9; 1 })`
+    /// pass the pre-mutation value, and an unbound `f(this, nosuch)` report
+    /// `ErrorUnboundThis` rather than `ErrorVariableNotFound`.
+    This,
 }
 
 /// One VM instruction, as the compiler emits it and a disassembly shows it.
@@ -272,6 +290,50 @@ pub enum Op {
     /// [`Op::LoadShared`] since closures were lowered at all; this is the half
     /// that was missing.
     LoadSharedNamed(u32),
+
+    /// Push the receiver bound to the running frame.
+    ///
+    /// `this` is not a scope entry and no slot addresses it: rhai threads it
+    /// through evaluation as a parameter (`func/script.rs:29`) and keeps it out
+    /// of the `Scope` altogether. So it gets a register of its own, and these
+    /// four instructions are the only things that reach it.
+    ///
+    /// Flattens, as [`Op::LoadLocal`] does. Rhai reads `this` *unflattened*
+    /// (`eval/expr.rs:272`) but flattens at almost every consumer — a `let`
+    /// (`eval/stmt.rs:436`), an assignment's right-hand side (`:321`), a call's
+    /// arguments (`func/call.rs:1428`) — so the flattening read is the common
+    /// one and [`Op::LoadThisShared`] is the exception, exactly as it is for a
+    /// local.
+    ///
+    /// `ErrorUnboundThis` when the frame has no receiver.
+    LoadThis,
+
+    /// The same without flattening.
+    ///
+    /// [`Op::LoadShared`]'s counterpart, for the three readers that have to see
+    /// the cell rather than what it holds: a `switch` subject, `is_shared`, and
+    /// a curried capture.
+    LoadThisShared,
+
+    /// Raise `ErrorUnboundThis` if the frame has no receiver. Pushes nothing.
+    ///
+    /// `this = v` checks *before* it evaluates `v` (`eval/stmt.rs:299-302`),
+    /// unlike the variable arm, which evaluates the value first (`:319-323`).
+    /// Without a check of its own, `this = nosuch` in an unbound frame would
+    /// report `ErrorVariableNotFound` where rhai reports `ErrorUnboundThis`.
+    RequireThis,
+
+    /// Pop a value and assign it to the frame's receiver, optionally through an
+    /// operator.
+    ///
+    /// [`Op::AssignLocal`] without the slot or the name, because `this` has
+    /// neither — and neither does rhai's own failure here: assigning to a
+    /// read-only receiver is `ErrorAssignmentToConstant("")`
+    /// (`eval/stmt.rs:118-122`), named for an expression that has no name.
+    AssignThis {
+        /// Index into the op-assignment pool; absent for a plain `=`.
+        op: Option<u32>,
+    },
 
     /// Pop a value and push whether it is a shared cell.
     ///
