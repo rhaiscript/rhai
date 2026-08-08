@@ -71,8 +71,13 @@ fn test_native_call_fn_raw_reaches_syntactic_functions() {
         context.call_fn_raw("type_of", false, false, &mut [&mut value])
     });
 
-    assert_eq!(engine.eval::<String>("let x = 1; ask_type(x)").unwrap(), "i64");
-    assert_eq!(engine.eval::<String>("let a = [1]; ask_type(a)").unwrap(), "array");
-    // And it still agrees with the script spelling.
-    assert_eq!(engine.eval::<String>("let a = [1]; ask_type(a)").unwrap(), engine.eval::<String>("let a = [1]; type_of(a)").unwrap(),);
+    // A string, because its type name is the same on every build — `only_i32`
+    // and `f32_float` rename the numeric ones, and `no_index` removes arrays.
+    assert_eq!(engine.eval::<String>(r#"let s = "a"; ask_type(s)"#).unwrap(), "string");
+
+    // And the answer is the script spelling's, whatever the numeric build is.
+    assert_eq!(
+        engine.eval::<String>("let x = 1; ask_type(x)").unwrap(),
+        engine.eval::<String>("let x = 1; type_of(x)").unwrap(),
+    );
 }

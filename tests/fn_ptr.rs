@@ -163,11 +163,12 @@ fn test_fn_ptr_call() {
 fn test_fn_ptr_from_bare_name_survives_a_scope_change() {
     let engine = Engine::new();
 
-    // The plain case, which always worked.
-    assert_eq!(engine.eval::<INT>("fn dbl(x) { x * 2 } let f = dbl; f.call(4)").unwrap(), 8);
+    // Called function-style, which `no_object` leaves in the language where it
+    // removes the `f.call(..)` spelling.
+    assert_eq!(engine.eval::<INT>("fn dbl(x) { x * 2 } let f = dbl; call(f, 4)").unwrap(), 8);
 
     // And the same once `eval` has changed the scope.
-    assert_eq!(engine.eval::<INT>(r#"fn dbl(x) { x * 2 } eval("let m = 2;"); let f = dbl; f.call(4)"#).unwrap(), 8,);
+    assert_eq!(engine.eval::<INT>(r#"fn dbl(x) { x * 2 } eval("let m = 2;"); let f = dbl; call(f, 4)"#).unwrap(), 8,);
 
     // A variable of the same name still wins, which is what the flag is for.
     assert_eq!(engine.eval::<INT>(r#"fn dbl(x) { x * 2 } eval("let m = 2;"); let dbl = 7; dbl"#).unwrap(), 7,);
