@@ -220,6 +220,18 @@ fn place<'a>(
         .ok_or_else(|| Box::new(EvalAltResult::ErrorDataRace(name.to_string(), pos)))
 }
 
+/// Turn the two control-flow errors back into the value they carry.
+///
+/// Rhai unwinds `return` and `exit` as errors rather than returning them;
+/// `eval_global_statements` is where they turn back into values, and anything
+/// entering a program from outside has to do the same.
+fn unwind_exit(result: VmResult) -> VmResult {
+    result.or_else(|err| match *err {
+        EvalAltResult::Return(out, ..) | EvalAltResult::Exit(out, ..) => Ok(out),
+        _ => Err(err),
+    })
+}
+
 fn missing(name: &str, pos: Position) -> Box<EvalAltResult> {
     Box::new(EvalAltResult::ErrorVariableNotFound(name.to_string(), pos))
 }
@@ -466,13 +478,23 @@ impl<'e> Vm<'e> {
             self.global.tag = tag;
         }
 
-        if options.eval_ast {
-            // Run for the scope it leaves behind; the body's own value is not
-            // what the caller asked for.
-            let _ = self.eval_with_scope(scope, program)?;
-        }
-
-        let result = self.call_function(program, name, arg_values, 0, Position::NONE);
+        // The program's environment stays installed for the *call*, not only for
+        // the main chunk that may precede it: the function being called can
+        // reach whatever the compiler left rhai to interpret, and rhai looks for
+        // it in `global.lib`.
+        let mut evaluated = Ok(Dynamic::UNIT);
+        let result = self.with_environment(program, None, |vm| {
+            if options.eval_ast {
+                // Run for the scope it leaves behind; the body's own value is
+                // not what the caller asked for.
+                evaluated = unwind_exit(vm.run_main(program, scope));
+                if evaluated.is_err() {
+                    return Ok(Dynamic::UNIT);
+                }
+            }
+            vm.call_function(program, name, arg_values, 0, Position::NONE)
+        });
+        evaluated?;
 
         if options.rewind_scope {
             scope.rewind(orig_scope_len);
@@ -571,6 +593,22 @@ impl<'e> Vm<'e> {
         scope: &mut Scope,
         wrappers: Option<SharedModule>,
     ) -> VmResult {
+        let result = self.with_environment(program, wrappers, |vm| vm.run_main(program, scope));
+        unwind_exit(result)
+    }
+
+    /// What a program contributes to `global`, in place for the duration of `f`.
+    ///
+    /// Everything entering a program from outside needs this, not only its main
+    /// chunk: a function reached through [`call_fn`](Self::call_fn) can call
+    /// whatever the compiler left rhai to interpret, and rhai looks for it in
+    /// `global.lib`.
+    fn with_environment<T>(
+        &mut self,
+        program: &Program,
+        wrappers: Option<SharedModule>,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         let orig_source = mem::replace(&mut self.global.source, program.source().cloned());
         let orig_lib_len = self.global.lib.len();
         if let Some(lib) = program.lib() {
@@ -587,6 +625,20 @@ impl<'e> Vm<'e> {
             program.resolver().cloned(),
         );
 
+        let result = f(self);
+
+        #[cfg(not(feature = "no_module"))]
+        {
+            self.global.embedded_module_resolver = orig_resolver;
+        }
+        self.global.lib.truncate(orig_lib_len);
+        self.global.source = orig_source;
+
+        result
+    }
+
+    /// The main chunk, against an environment the caller has already installed.
+    fn run_main(&mut self, program: &Program, scope: &mut Scope) -> VmResult {
         self.fault_pc = None;
         let mut pc = program.main().entry() as usize;
         // Slots are indices into the caller's scope, so a caller that arrives
@@ -596,21 +648,7 @@ impl<'e> Vm<'e> {
         if result.is_err() {
             self.fault_pc = Some(pc);
         }
-
-        #[cfg(not(feature = "no_module"))]
-        {
-            self.global.embedded_module_resolver = orig_resolver;
-        }
-        self.global.lib.truncate(orig_lib_len);
-        self.global.source = orig_source;
-
-        // Rhai unwinds `return` and `exit` as errors rather than returning
-        // them; `eval_global_statements` is where they turn back into values,
-        // and anything entering a program from outside has to do the same.
-        result.or_else(|err| match *err {
-            EvalAltResult::Return(out, ..) | EvalAltResult::Exit(out, ..) => Ok(out),
-            _ => Err(err),
-        })
+        result
     }
 
     fn pop(&mut self) -> Result<Dynamic, Box<EvalAltResult>> {

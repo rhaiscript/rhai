@@ -6,6 +6,7 @@ mod grain {
 
     // `allocation` is deliberately absent: it owns a counting global allocator
     // and is its own binary, declared in Cargo.toml.
+    mod call_fn;
     mod callback;
     mod differential;
     mod format;
