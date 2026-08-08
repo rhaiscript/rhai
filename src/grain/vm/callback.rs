@@ -34,8 +34,8 @@
 //! Neither touches a pointer called directly from compiled code, which is
 //! `Op::CallFnPtr` and never comes through here.
 
-use std::any::TypeId;
-use std::mem;
+use core::any::TypeId;
+use core::mem;
 
 use crate::{
     func::RhaiFunc, Dynamic, FuncRegistration, ImmutableString, Module, NativeCallContext, Shared,

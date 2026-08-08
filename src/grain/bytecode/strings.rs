@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use alloc::borrow::Cow;
 
 /// Every name a program mentions, as one blob and a list of spans.
 ///
