@@ -661,7 +661,7 @@ mod tests {
             let chunk = Chunk::new(0, code.len() as u32, 8);
             let pools = Pools {
                 names: 1,
-                chains: std::slice::from_ref(&chain),
+                chains: core::slice::from_ref(&chain),
                 ..pools()
             };
             assert!(
@@ -691,7 +691,7 @@ mod tests {
                 &[chunk],
                 Pools {
                     names: 1,
-                    chains: std::slice::from_ref(&assigning),
+                    chains: core::slice::from_ref(&assigning),
                     ..pools()
                 },
             ),
