@@ -26,6 +26,8 @@
 use alloc::borrow::Cow;
 
 use crate::grain::bytecode::{Op, Receiver};
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 /// Instruction tags.
 ///

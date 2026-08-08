@@ -13,6 +13,8 @@
 //! sharing a case value.
 
 use crate::{ast::RangeCase, INT};
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 use crate::grain::bytecode::SwitchRange;
 

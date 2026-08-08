@@ -1,4 +1,6 @@
 use core::ops::{Range, RangeInclusive};
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 use rhai::{tokenizer::Token, Array, Blob, Dynamic, Map, INT};
 

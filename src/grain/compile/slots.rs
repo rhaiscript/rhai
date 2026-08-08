@@ -1,4 +1,6 @@
 use rhai::ImmutableString;
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 /// Assigns a slot to every local, mirroring how rhai's own `Scope` grows.
 ///

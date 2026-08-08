@@ -1,4 +1,6 @@
 use crate::{ast::RangeCase, Dynamic, INT};
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 /// A `switch`, as one dispatch table.
 ///

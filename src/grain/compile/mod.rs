@@ -3,6 +3,8 @@ mod poolable;
 mod slots;
 
 use core::mem;
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 use crate::ast::{
     ASTFlags, ASTNode, Expr, FlowControl, FnCallExpr, OpAssignment, ScriptFuncDef, Stmt, StmtBlock,

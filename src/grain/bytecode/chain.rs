@@ -1,3 +1,6 @@
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
+
 /// One step along `a.b[i].c(x)`.
 ///
 /// Steps live in the program's chain pool rather than in the instruction

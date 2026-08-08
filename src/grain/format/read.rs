@@ -1,5 +1,7 @@
 use crate::{tokenizer::Token, Dynamic, ImmutableString};
 use core::convert::{TryFrom, TryInto};
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 use crate::grain::bytecode::{
     AssignOp, BadTable, Chain, Chunk, Positions, Root, Step, Strings, Switch, SwitchCase,

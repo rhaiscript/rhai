@@ -1,3 +1,6 @@
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
+
 use crate::ast::{ASTFlags, ASTNode};
 #[cfg(not(feature = "no_module"))]
 use crate::module_resolvers::StaticModuleResolver;

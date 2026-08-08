@@ -1,4 +1,6 @@
 use core::mem;
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 use crate::engine::{FN_IDX_GET, FN_IDX_SET};
 use crate::eval::calc_data_sizes;

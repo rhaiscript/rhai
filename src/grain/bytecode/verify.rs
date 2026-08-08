@@ -1,5 +1,7 @@
 use crate::grain::bytecode::code::{self, tag};
 use crate::grain::bytecode::{Chain, Chunk, Op, Receiver, Root, Step, Switch, Tail};
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 /// What the pools hold, so an instruction's indices can be checked against
 /// something.

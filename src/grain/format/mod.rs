@@ -39,6 +39,8 @@
 //! not something a script author can act on.
 
 use core::convert::TryFrom;
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 mod abi;
 mod read;
