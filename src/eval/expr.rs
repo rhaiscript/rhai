@@ -55,6 +55,54 @@ impl Engine {
     ) -> RhaiResultOf<Target<'s>> {
         // Make sure that the pointer indirection is taken only when absolutely necessary.
 
+        // A bare script-function name is a function pointer, not a variable read.
+        //
+        // Checked ahead of `always_search_scope` rather than inside the match:
+        // that flag means "do not trust the parse-time variable indices", and a
+        // name resolving to a function has no index to distrust. Gating this on
+        // it made the name stop resolving for the rest of a run as soon as
+        // anything set it — an `eval` that changes the scope, a variable
+        // resolver that does, or a program still holding an AST fragment — so
+        // `fn f(x) { x } eval("let m = 1;"); [1].map(f)` reported `f` as an
+        // unknown variable while the same script without the `eval` worked.
+        //
+        // Still only for a variable with no cached index, which is what it was
+        // before: an index means the parser resolved the name to a real
+        // variable, and that variable keeps winning over a function sharing its
+        // name.
+        #[cfg(not(feature = "no_function"))]
+        if let Expr::Variable(v, None, ..) = expr {
+            if let Some(func) = global
+                .lib
+                .iter()
+                .flat_map(|m| m.iter_fn())
+                .filter(|(f, _)| f.is_script())
+                .filter(|(_, m)| m.name == v.1.as_str())
+                .map(|(f, _)| f)
+                .next()
+            {
+                // Embedded environment for scripted function
+                let env = func
+                    .get_shared_encapsulated_environ()
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        // Create a new environment with the current module
+                        crate::Shared::new((&*global).into())
+                    });
+
+                let val: Dynamic = crate::FnPtr {
+                    name: v.1.clone(),
+                    curry: <_>::default(),
+                    env: Some(env),
+                    typ: crate::types::fn_ptr::FnPtrType::Script(
+                        func.get_script_fn_def().cloned().unwrap(),
+                    ),
+                }
+                .into();
+                return Ok(val.into());
+            }
+        }
+
         let index = match expr {
             // Check if the variable is `this`
             Expr::ThisPtr(..) => unreachable!("Expr::ThisPtr should have been handled outside"),
@@ -65,38 +113,6 @@ impl Engine {
             Expr::Variable(v, None, ..) => {
                 #[cfg(not(feature = "no_module"))]
                 debug_assert!(v.2.is_empty(), "variable should not be namespace-qualified");
-
-                // Scripted function with the same name
-                #[cfg(not(feature = "no_function"))]
-                if let Some(func) = global
-                    .lib
-                    .iter()
-                    .flat_map(|m| m.iter_fn())
-                    .filter(|(f, _)| f.is_script())
-                    .filter(|(_, m)| m.name == v.1.as_str())
-                    .map(|(f, _)| f)
-                    .next()
-                {
-                    // Embedded environment for scripted function
-                    let env = func
-                        .get_shared_encapsulated_environ()
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            // Create a new environment with the current module
-                            crate::Shared::new((&*global).into())
-                        });
-
-                    let val: Dynamic = crate::FnPtr {
-                        name: v.1.clone(),
-                        curry: <_>::default(),
-                        env: Some(env),
-                        typ: crate::types::fn_ptr::FnPtrType::Script(
-                            func.get_script_fn_def().cloned().unwrap(),
-                        ),
-                    }
-                    .into();
-                    return Ok(val.into());
-                }
 
                 v.0.map_or(0, NonZeroUsize::get)
             }

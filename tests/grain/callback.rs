@@ -58,6 +58,21 @@ fn a_native_can_call_a_named_function_back() {
     agree("fn double(x) { x * 2 } let a = [1, 2, 3]; a.map(Fn(\"double\"))");
 }
 
+/// A bare function name is a function pointer, not a variable read.
+///
+/// The compiler leaves it to rhai — it is a fragment — and rhai used to refuse
+/// it, because a program holding any fragment sets `always_search_scope` and
+/// the check for a function of that name sat behind the flag. Every spelling
+/// below reported `double` as an unknown variable.
+#[test]
+fn a_bare_function_name_is_a_pointer() {
+    agree("fn double(x) { x * 2 } let a = [1, 2, 3]; a.map(double)");
+    agree("fn double(x) { x * 2 } let r = 0; { let f = double; r = f.call(4); } r");
+    agree("fn double(x) { x * 2 } fn apply(f, v) { f.call(v) } apply(double, 4)");
+    // A variable of the same name still wins over the function.
+    agree("fn double(x) { x * 2 } let double = 7; double");
+}
+
 /// A capture arrives, and has the right value.
 ///
 /// Multiplication commutes, so this says nothing about which *position* it

@@ -150,6 +150,29 @@ fn test_fn_ptr_call() {
     assert_eq!(result, 42);
 }
 
+/// A bare function name is a function pointer, and stays one after something
+/// has set `always_search_scope`.
+///
+/// That flag means "do not trust the parse-time variable indices". A name that
+/// resolves to a function is not a variable and has no index to distrust, but
+/// the check for one used to sit behind the flag — so an `eval` that changed
+/// the scope made every later use of a bare function name report it as an
+/// unknown variable.
+#[test]
+#[cfg(not(feature = "no_function"))]
+fn test_fn_ptr_from_bare_name_survives_a_scope_change() {
+    let engine = Engine::new();
+
+    // The plain case, which always worked.
+    assert_eq!(engine.eval::<INT>("fn dbl(x) { x * 2 } let f = dbl; f.call(4)").unwrap(), 8);
+
+    // And the same once `eval` has changed the scope.
+    assert_eq!(engine.eval::<INT>(r#"fn dbl(x) { x * 2 } eval("let m = 2;"); let f = dbl; f.call(4)"#).unwrap(), 8,);
+
+    // A variable of the same name still wins, which is what the flag is for.
+    assert_eq!(engine.eval::<INT>(r#"fn dbl(x) { x * 2 } eval("let m = 2;"); let dbl = 7; dbl"#).unwrap(), 7,);
+}
+
 #[test]
 #[cfg(not(feature = "no_function"))]
 #[cfg(not(feature = "no_object"))]
