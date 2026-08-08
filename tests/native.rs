@@ -76,8 +76,5 @@ fn test_native_call_fn_raw_reaches_syntactic_functions() {
     assert_eq!(engine.eval::<String>(r#"let s = "a"; ask_type(s)"#).unwrap(), "string");
 
     // And the answer is the script spelling's, whatever the numeric build is.
-    assert_eq!(
-        engine.eval::<String>("let x = 1; ask_type(x)").unwrap(),
-        engine.eval::<String>("let x = 1; type_of(x)").unwrap(),
-    );
+    assert_eq!(engine.eval::<String>("let x = 1; ask_type(x)").unwrap(), engine.eval::<String>("let x = 1; type_of(x)").unwrap(),);
 }
