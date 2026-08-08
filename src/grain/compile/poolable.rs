@@ -32,13 +32,15 @@ pub(crate) fn is_poolable(value: &Dynamic) -> bool {
     if value.is_array() {
         return value
             .read_lock::<Array>()
-            .is_some_and(|array| array.iter().all(is_poolable));
+            .map(|array| array.iter().all(is_poolable))
+            .unwrap_or(false);
     }
 
     if value.is_map() {
         return value
             .read_lock::<Map>()
-            .is_some_and(|map| map.values().all(is_poolable));
+            .map(|map| map.values().all(is_poolable))
+            .unwrap_or(false);
     }
 
     if value.is_blob() {

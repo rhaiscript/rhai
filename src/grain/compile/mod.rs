@@ -1212,7 +1212,8 @@ impl Lowering {
             Expr::DynamicConstant(value, ..)
                 if value
                     .read_lock::<rhai::FnPtr>()
-                    .is_some_and(|f| f.curry().is_empty()) =>
+                    .map(|f| f.curry().is_empty())
+                    .unwrap_or(false) =>
             {
                 let name = value
                     .read_lock::<rhai::FnPtr>()

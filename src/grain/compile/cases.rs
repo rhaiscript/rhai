@@ -119,7 +119,11 @@ pub(crate) fn split(ranges: &[RangeCase]) -> Vec<(SwitchRange, Vec<usize>)> {
 
         // Atoms are contiguous and in order, so one that runs the same arms as
         // the one before it is the same table entry stretched further.
-        if run.as_ref().is_some_and(|open| open.blocks == blocks) {
+        if run
+            .as_ref()
+            .map(|open| open.blocks == blocks)
+            .unwrap_or(false)
+        {
             let open = run.as_mut().expect("just checked");
             open.to = to;
             open.inclusive = inclusive;
