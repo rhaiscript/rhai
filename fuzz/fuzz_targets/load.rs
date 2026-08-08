@@ -42,5 +42,5 @@ fuzz_target!(|data: &[u8]| {
     engine.set_max_map_size(64);
     engine.set_max_call_levels(16);
 
-    let _ = Vm::new(&engine).run(&program, &mut Scope::new());
+    let _ = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program);
 });

@@ -86,6 +86,38 @@ const fn case(name: &'static str, source: &'static str) -> Case {
     Case { name, source }
 }
 
+/// Whether a corpus case exercises anything on this build.
+///
+/// A restriction feature removes the syntax outright — rhai will not parse a
+/// capturing closure under `no_closure`, or a float literal under `no_float` —
+/// so the case tests nothing here, and both sides agreeing on the parse failure
+/// would be an empty agreement rather than a passing one.
+///
+/// Lives here rather than in one harness because every harness that walks
+/// [`CASES`] needs the same answer.
+#[must_use]
+pub fn applies_to_this_build(name: &str) -> bool {
+    #[cfg(feature = "no_closure")]
+    if name.starts_with("closure_") || name.starts_with("is_shared") {
+        return false;
+    }
+    #[cfg(feature = "no_module")]
+    if name.starts_with("import_") || name.starts_with("export_") {
+        return false;
+    }
+    // No shared prefix to key on: a float literal is incidental to most of
+    // these, which are about interpolation, ranges and operator errors.
+    #[cfg(feature = "no_float")]
+    if matches!(
+        name,
+        "float_arithmetic" | "mixed_numeric" | "interpolation_of_every_type" | "switch_float_in_range" | "error_operator_undefined_for_types" | "error_op_assign_undefined_for_types"
+    ) {
+        return false;
+    }
+    let _ = name;
+    true
+}
+
 pub const CASES: &[Case] = &[
     // --- values and operators -------------------------------------------
     case("int_arithmetic", "let a = 7; let b = 3; a * b - a / b + a % b"),

@@ -183,7 +183,12 @@ while i < 64 {
 total;
 "#;
 
+// `SCRIPT` and `follow.rhai` both use floats, and the second is checked in
+// byte-identical to the script the 24-bytes-per-source-byte figure came from —
+// rewriting it to suit a build would make the number mean something else. So
+// the measurement is a default-build one, and says so.
 #[test]
+#[cfg(not(feature = "no_float"))]
 fn allocation_footprint() {
     let engine = Engine::new();
 

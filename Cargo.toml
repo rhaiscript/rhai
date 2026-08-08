@@ -149,6 +149,12 @@ required-features = ["serde"]
 name = "definitions"
 required-features = ["metadata", "internals"]
 
+# VM-versus-walker timings. Run with `--release`; `-- --check` exits non-zero
+# on a case that has fallen below the floor recorded beside it.
+[[example]]
+name = "grain_bench"
+required-features = ["grain"]
+
 # The grain harnesses, as one binary. `tests/mod.rs` wraps them in an inline
 # `mod grain`, which is what puts their module paths inside `tests/grain/`.
 [[test]]

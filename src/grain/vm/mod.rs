@@ -8,9 +8,13 @@ use crate::func::{get_builtin_binary_op_fn, get_builtin_op_assignment_fn};
 use crate::packages::string_basic::print_with_func;
 use crate::types::dynamic::DynamicWriteLock;
 use crate::types::fn_ptr::FnPtrType;
+// `Variant` is only re-exported from the crate root under `internals`, so it
+// comes from where it is defined.
+use crate::ast::Expr;
+use crate::types::dynamic::Variant;
 use crate::{
-    eval::Caches, eval::GlobalRuntimeState, Dynamic, Engine, EvalAltResult, EvalContext,
-    Expression, Scope,
+    eval::Caches, eval::GlobalRuntimeState, CallFnOptions, Dynamic, Engine, EvalAltResult,
+    EvalContext, Scope,
 };
 use crate::{
     Array, FnPtr, ImmutableString, Map, NativeCallContext, Position, ThinVec, FUNC_TO_STRING, INT,
@@ -401,12 +405,136 @@ impl<'e> Vm<'e> {
         result
     }
 
-    /// Run a program's main chunk against `scope`, yielding its value.
-    pub fn run(&mut self, program: &Program, scope: &mut Scope) -> VmResult {
+    /// Call one compiled function by name, instead of running the whole
+    /// program.
+    ///
+    /// Mirrors [`Engine::call_fn`](crate::Engine::call_fn), including that the
+    /// program's body runs first — a function usually needs what the top level
+    /// declared. [`call_fn_with_options`](Self::call_fn_with_options) turns
+    /// that off.
+    ///
+    /// # Errors
+    ///
+    /// `ErrorFunctionNotFound` if no compiled function has that name and
+    /// arity, `ErrorMismatchOutputType` if the result is not a `T`, and
+    /// whatever the function itself raises.
+    pub fn call_fn<T: Variant + Clone>(
+        &mut self,
+        scope: &mut Scope,
+        program: &Program,
+        name: impl AsRef<str>,
+        args: impl crate::FuncArgs,
+    ) -> Result<T, Box<EvalAltResult>> {
+        self.call_fn_with_options(CallFnOptions::new(), scope, program, name, args)
+    }
+
+    /// The same, with rhai's [`CallFnOptions`](crate::CallFnOptions).
+    ///
+    /// Three of the five options mean something here:
+    ///
+    /// * `eval_ast` runs the program's main chunk before the call, so what the
+    ///   top level declares is in scope for it. On by default, as in rhai.
+    /// * `rewind_scope` truncates the scope back afterwards. On by default.
+    /// * `tag` sets the evaluation's custom state.
+    ///
+    /// `this_ptr` is accepted and ignored: a compiled function never reads
+    /// `this`, because the compiler refuses to lower a body that does
+    /// (`compile/mod.rs`), so a bound `this` could not be observed. A body
+    /// that uses `this` is still an AST in the program's library and reached
+    /// through [`Engine::call_fn`](crate::Engine::call_fn) instead.
+    /// `in_all_namespaces` is likewise ignored — this looks only in the
+    /// program's own compiled functions.
+    ///
+    /// # Errors
+    ///
+    /// As [`call_fn`](Self::call_fn).
+    pub fn call_fn_with_options<T: Variant + Clone>(
+        &mut self,
+        options: CallFnOptions,
+        scope: &mut Scope,
+        program: &Program,
+        name: impl AsRef<str>,
+        args: impl crate::FuncArgs,
+    ) -> Result<T, Box<EvalAltResult>> {
+        let name = name.as_ref();
+
+        let mut arg_values = Vec::new();
+        args.parse(&mut arg_values);
+
+        let orig_scope_len = scope.len();
+        if let Some(tag) = options.tag {
+            self.global.tag = tag;
+        }
+
+        if options.eval_ast {
+            // Run for the scope it leaves behind; the body's own value is not
+            // what the caller asked for.
+            let _ = self.eval_with_scope(scope, program)?;
+        }
+
+        let result = self.call_function(program, name, arg_values, 0, Position::NONE);
+
+        if options.rewind_scope {
+            scope.rewind(orig_scope_len);
+        }
+
+        result?.try_cast_result().map_err(|value| {
+            Box::new(EvalAltResult::ErrorMismatchOutputType(
+                self.engine
+                    .map_type_name(core::any::type_name::<T>())
+                    .into(),
+                self.engine.map_type_name(value.type_name()).into(),
+                Position::NONE,
+            ))
+        })
+    }
+
+    /// Evaluate a program's main chunk against `scope`, yielding its value.
+    ///
+    /// The scope is the caller's, as it is for
+    /// [`Engine::eval_ast_with_scope`](crate::Engine::eval_ast_with_scope):
+    /// what the program declares at the top level is left in it, and what the
+    /// caller put there beforehand is visible to the program.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the program raises, and `ErrorRuntime` for a malformed one.
+    pub fn eval_with_scope(&mut self, scope: &mut Scope, program: &Program) -> VmResult {
         self.run_with(program, scope, None)
     }
 
-    /// Run a program that hands function pointers to native functions.
+    /// The same against a scope of its own, for a program that needs none.
+    ///
+    /// # Errors
+    ///
+    /// As [`eval_with_scope`](Self::eval_with_scope).
+    pub fn eval(&mut self, program: &Program) -> VmResult {
+        self.eval_with_scope(&mut Scope::new(), program)
+    }
+
+    /// Evaluate a program against `scope` for its effects, discarding its value.
+    ///
+    /// # Errors
+    ///
+    /// As [`eval_with_scope`](Self::eval_with_scope).
+    pub fn run_with_scope(
+        &mut self,
+        scope: &mut Scope,
+        program: &Program,
+    ) -> Result<(), Box<EvalAltResult>> {
+        self.eval_with_scope(scope, program).map(|_| ())
+    }
+
+    /// The same against a scope of its own.
+    ///
+    /// # Errors
+    ///
+    /// As [`eval_with_scope`](Self::eval_with_scope).
+    pub fn run(&mut self, program: &Program) -> Result<(), Box<EvalAltResult>> {
+        self.run_with_scope(&mut Scope::new(), program)
+    }
+
+    /// Evaluate a program that hands function pointers to native functions.
     ///
     /// The same run, plus one native wrapper per compiled function registered
     /// for its duration, so a pointer this program creates resolves when rhai
@@ -415,15 +543,23 @@ impl<'e> Vm<'e> {
     /// module.
     ///
     /// Only worth the owned program when [`Program::makes_fn_pointers`] says a
-    /// pointer can escape; [`run`](Self::run) is otherwise identical and copies
-    /// nothing. A program that needs this and does not get it still runs — the
-    /// pointer simply fails to resolve, as `ErrorFunctionNotFound`, at the
-    /// point the native tries to call it.
+    /// pointer can escape; [`eval_with_scope`](Self::eval_with_scope) is
+    /// otherwise identical and copies nothing. A program that needs this and
+    /// does not get it still runs — the pointer simply fails to resolve, as
+    /// `ErrorFunctionNotFound`, at the point the native tries to call it.
     ///
     /// Read the `callback` module before relying on it: a crossing is slower than the
     /// walker, and a *capturing* closure handed to a native that binds `this`
     /// arrives with its arguments rotated.
-    pub fn run_with_callbacks(&mut self, program: &SharedProgram, scope: &mut Scope) -> VmResult {
+    ///
+    /// Named `eval_` rather than `run_` because it yields the program's value;
+    /// rhai has no `Engine` method to mirror here, so the crate's own rule is
+    /// the one that applies.
+    ///
+    /// # Errors
+    ///
+    /// As [`eval_with_scope`](Self::eval_with_scope).
+    pub fn eval_with_callbacks(&mut self, scope: &mut Scope, program: &SharedProgram) -> VmResult {
         let wrappers =
             (!program.functions().is_empty()).then(|| callback::wrappers(program).into());
         self.run_with(program, scope, wrappers)
@@ -2348,21 +2484,28 @@ impl<'e> Vm<'e> {
                         .ok_or_else(|| malformed(format!("no residual {index}")))?;
                     let rewind_scope = tag == code::tag::EVAL_AST;
 
-                    let mut context = EvalContext::new(
-                        self.engine,
-                        &mut self.global,
-                        &mut self.caches,
-                        scope,
-                        None,
-                    );
-
-                    // The deprecation marker on this method means "volatile,
-                    // may change", not "going away" — it is the only public
-                    // route from outside the crate to rhai's own walker, and
-                    // total language coverage rests on it.
-                    #[allow(deprecated)]
-                    let value =
-                        context.eval_expression_tree_raw(&Expression::from(expr), rewind_scope)?;
+                    // Straight to the walker's own entry points rather than
+                    // through `EvalContext::eval_expression_tree_raw`, which
+                    // is the same two calls behind a shim that only exists
+                    // under `custom_syntax`. Total language coverage rests on
+                    // this, so it must not depend on a feature.
+                    let value = match expr {
+                        Expr::Stmt(block) => self.engine.eval_stmt_block(
+                            &mut self.global,
+                            &mut self.caches,
+                            scope,
+                            None,
+                            block.statements(),
+                            rewind_scope,
+                        ),
+                        expr => self.engine.eval_expr(
+                            &mut self.global,
+                            &mut self.caches,
+                            scope,
+                            None,
+                            expr,
+                        ),
+                    }?;
 
                     self.stack.push(value);
                 }

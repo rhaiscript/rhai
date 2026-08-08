@@ -42,7 +42,7 @@
 //! // The `Scope` is the caller's locals: a script declares are left in it,
 //! // exactly as `Engine::eval_with_scope` would.
 //! let mut scope = Scope::new();
-//! let value = Vm::new(&engine).run(&program, &mut scope)?;
+//! let value = Vm::new(&engine).eval_with_scope(&mut scope, &program)?;
 //!
 //! assert_eq!(value.as_int().unwrap(), 45);
 //! # Ok::<_, Box<rhai::EvalAltResult>>(())
@@ -71,7 +71,7 @@
 //!
 //! // On the device, with no parser and no `AST` in sight.
 //! let loaded = Program::read(&bytes).expect("written by this build");
-//! let value = Vm::new(&engine).run(&loaded, &mut Scope::new())?;
+//! let value = Vm::new(&engine).eval(&loaded)?;
 //!
 //! assert_eq!(value.as_int().unwrap(), 42);
 //! # Ok::<_, Box<rhai::EvalAltResult>>(())

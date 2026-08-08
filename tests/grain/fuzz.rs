@@ -128,7 +128,7 @@ fn mutated_artifacts_load_or_fail_but_never_misbehave() {
 
             // And must then run without taking the process down. The result is
             // free to be anything at all.
-            let _ = Vm::new(&engine).run(&program, &mut Scope::new());
+            let _ = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program);
         }
     }
 
@@ -156,7 +156,7 @@ fn arbitrary_bytes_never_load_into_something_that_misbehaves() {
 
         if let Ok(program) = Program::read(&bytes) {
             assert!(program.verify().is_ok(), "unverified: {}", hex(&bytes));
-            let _ = Vm::new(&engine).run(&program, &mut Scope::new());
+            let _ = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program);
         }
     }
 }
@@ -294,9 +294,9 @@ fn agree_unoptimised(source: &str) -> bool {
     let mut vm_scope = Scope::new();
     let ours = if program.makes_fn_pointers() {
         let program = program.into_shared();
-        Vm::new(&plain).run_with_callbacks(&program, &mut vm_scope)
+        Vm::new(&plain).eval_with_callbacks(&mut vm_scope, &program)
     } else {
-        Vm::new(&plain).run(&program, &mut vm_scope)
+        Vm::new(&plain).eval_with_scope(&mut vm_scope, &program)
     };
 
     snapshot(&walker_scope, walked) == snapshot(&vm_scope, ours)
@@ -382,9 +382,9 @@ fn generated_scripts_agree_with_the_walker() {
         let mut vm_scope = Scope::new();
         let ours = if program.makes_fn_pointers() {
             let program = program.into_shared();
-            Vm::new(&engine).run_with_callbacks(&program, &mut vm_scope)
+            Vm::new(&engine).eval_with_callbacks(&mut vm_scope, &program)
         } else {
-            Vm::new(&engine).run(&program, &mut vm_scope)
+            Vm::new(&engine).eval_with_scope(&mut vm_scope, &program)
         };
         let ours = snapshot(&vm_scope, ours);
 

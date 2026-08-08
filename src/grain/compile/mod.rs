@@ -769,6 +769,12 @@ impl Lowering {
                 true
             }
 
+            // Standing alone is the position `eval` is usually written in, and
+            // rhai gives it its own node — so this is the arm that catches it,
+            // not the `Expr::FnCall` one. See there for why it defeats the
+            // lowering rather than becoming a fragment.
+            Stmt::FnCall(call, ..) if call.name == crate::engine::KEYWORD_EVAL => false,
+
             // A plain local on the left.
             Stmt::Assignment(payload)
                 if matches!(&payload.1.lhs, Expr::Variable(v, ..)
@@ -1175,10 +1181,31 @@ impl Lowering {
             #[cfg(not(feature = "no_module"))]
             Stmt::Import(..) => false,
 
-            // Not lowered yet. Safe as a fragment because every remaining
-            // statement kind either declares nothing or rewinds what it
-            // declares, so the scope is the same shape afterwards.
-            other => {
+            // Not lowered yet, and listed rather than matched with `_` on
+            // purpose. A wildcard here silently turned `import` and `eval`
+            // into fragments that answered differently from the walker; naming
+            // every kind means a new one added to rhai's AST stops the build
+            // until someone has decided which of the three it is — lowered,
+            // fragment, or too scope-shaped to be either.
+            //
+            // The ones below are fragments because each either declares
+            // nothing or rewinds what it declares, so the scope is the same
+            // shape afterwards. That is the property to check before adding to
+            // this list.
+            other @ (Stmt::Noop(..)
+            | Stmt::FnCall(..)
+            | Stmt::Assignment(..)
+            | Stmt::Return(..)) => {
+                let residual = self.push_residual(wrap_statements(vec![other.clone()]));
+                self.emit(Op::EvalAst {
+                    residual,
+                    rewind_scope: true,
+                });
+                true
+            }
+
+            #[cfg(not(feature = "no_module"))]
+            other @ Stmt::Export(..) => {
                 let residual = self.push_residual(wrap_statements(vec![other.clone()]));
                 self.emit(Op::EvalAst {
                     residual,
@@ -1272,6 +1299,18 @@ impl Lowering {
 
             Expr::FnCall(call, pos) if self.is_lowerable_call(call) => {
                 self.lower_call(call, *pos);
+            }
+
+            // `eval` evaluates a script in the *caller's* scope, so what it
+            // declares outlives it and the next statement can name it. The
+            // slot model resolved its indices against a scope that does not
+            // have those entries, so a lowered read past an `eval` looks in
+            // the wrong place — `eval("let x = 40"); x + 2` found no `x` where
+            // the walker found 40. Refusing the lowering hands the body to the
+            // walker, which is the only thing that knows the real shape.
+            Expr::FnCall(call, ..) if call.name == crate::engine::KEYWORD_EVAL => {
+                self.residual_expr(expr);
+                self.defeated = true;
             }
 
             // A literal whose elements are all constant never reaches here —
@@ -1395,7 +1434,34 @@ impl Lowering {
                 }
             }
 
-            _ => self.residual_expr(expr),
+            // Custom syntax runs host code against an `EvalContext`, which can
+            // declare into the caller's scope. What it declares is invisible
+            // here, so the slot model would be resolved against a scope shape
+            // that is not the one at runtime. Refusing the lowering keeps the
+            // walker's answer, as it does for `eval` above.
+            #[cfg(not(feature = "no_custom_syntax"))]
+            Expr::Custom(..) => {
+                self.residual_expr(expr);
+                self.defeated = true;
+            }
+
+            // Listed rather than matched with `_`, for the reason
+            // [`Lowering::statement`] gives: a wildcard is what let `eval`
+            // become a fragment that answered differently from the walker.
+            //
+            // These are fragments because none of them can change the shape of
+            // the scope the slot model resolved its indices against. The
+            // guarded arms above fall through to here when their guard fails —
+            // a pool-defeating constant, a literal too long for its operand, a
+            // call rhai resolves syntactically.
+            Expr::Coalesce(..)
+            | Expr::MethodCall(..)
+            | Expr::Property(..)
+            | Expr::ThisPtr(..)
+            | Expr::DynamicConstant(..)
+            | Expr::FnCall(..)
+            | Expr::Array(..)
+            | Expr::Map(..) => self.residual_expr(expr),
         }
     }
 

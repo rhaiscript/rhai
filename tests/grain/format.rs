@@ -36,9 +36,9 @@ fn run(engine: &Engine, program: Program) -> Outcome {
     let mut scope = Scope::new();
     let result = if program.makes_fn_pointers() {
         let program = program.into_shared();
-        Vm::new(engine).run_with_callbacks(&program, &mut scope)
+        Vm::new(engine).eval_with_callbacks(&mut scope, &program)
     } else {
-        Vm::new(engine).run(&program, &mut scope)
+        Vm::new(engine).eval_with_scope(&mut scope, &program)
     };
 
     snapshot(&scope, result)
@@ -104,8 +104,11 @@ fn the_round_trip_covers_something_worth_covering() {
     // One per construct the encoder has a branch for, so a branch that stops
     // working names itself.
     for required in [
-        "int_arithmetic",         // Call with an operator token
-        "float_arithmetic",       // a float constant, whose width the ABI pins
+        "int_arithmetic", // Call with an operator token
+        // A float constant, whose width the ABI pins — and which `no_float`
+        // removes from the language, so there is no branch left to cover.
+        #[cfg(not(feature = "no_float"))]
+        "float_arithmetic",
         "shadowing_nested",       // DeclareLocal and UnwindTo
         "while_loop",             // jumps, Tick, AssignLocal with an op
         "loop_break_value",       // backpatched jumps
@@ -150,107 +153,119 @@ fn golden_scope() -> Scope<'static> {
 /// the question it asks is whether that was deliberate. If it was, regenerate:
 ///
 /// ```text
-/// REGENERATE_GOLDEN=1 cargo test --features grain --test mod golden
+/// REGENERATE_GOLDEN=1 cargo test --features grain --test grain golden
 /// ```
 ///
 /// and bump `VERSION` if an older reader would *misread* the new bytes rather
 /// than reject them — the rule is at `src/format/mod.rs:56`.
 #[test]
 fn a_golden_artifact_written_by_an_older_build_still_runs() {
-    let engine = corpus::engine();
-    let source = std::fs::read_to_string(GOLDEN_SOURCE).expect("the golden source is checked in");
-    let ast = engine.compile(&source).expect("the golden source must parse");
-    let program = Compiler::new().compile(&ast);
-    assert_eq!(program.residual_count(), 0, "the golden source must lower whole, or the artifact covers less than it claims: {:?}", program.first_unsupported(),);
-
-    if std::env::var_os("REGENERATE_GOLDEN").is_some() {
-        let bytes = program.write().expect("the golden source must be writable");
-        std::fs::write(GOLDEN_ARTIFACT, &bytes).expect("must write the artifact");
-        println!("wrote {} bytes to {GOLDEN_ARTIFACT}", bytes.len());
+    // The fixture is one build's bytes and its source is that build's source,
+    // which uses floats. `no_float` cannot parse it, so there is nothing here
+    // to check — the same reason the ABI guard skips below, reached earlier.
+    #[cfg(feature = "no_float")]
+    {
+        println!("skipped: the golden source uses floats, which this build has no syntax for");
         return;
     }
 
-    let bytes = std::fs::read(GOLDEN_ARTIFACT).expect("the golden artifact is checked in");
-    let loaded = match Program::read(&bytes) {
-        Ok(loaded) => loaded,
-        // The header records the ABI the fixture was written under, and a build
-        // with different numeric widths or restriction flags refuses it *by
-        // design* — that refusal is what `abi.rs` is for. The fixture is one
-        // build's bytes, so it can only be checked on that build; anywhere else
-        // this would be testing the ABI guard rather than the encoding.
-        Err(err) if format!("{err}").contains("written with") => {
-            println!("skipped: the golden fixture is a default-build artifact ({err})");
+    #[cfg(not(feature = "no_float"))]
+    {
+        let engine = corpus::engine();
+        let source = std::fs::read_to_string(GOLDEN_SOURCE).expect("the golden source is checked in");
+        let ast = engine.compile(&source).expect("the golden source must parse");
+        let program = Compiler::new().compile(&ast);
+        assert_eq!(program.residual_count(), 0, "the golden source must lower whole, or the artifact covers less than it claims: {:?}", program.first_unsupported(),);
+
+        if std::env::var_os("REGENERATE_GOLDEN").is_some() {
+            let bytes = program.write().expect("the golden source must be writable");
+            std::fs::write(GOLDEN_ARTIFACT, &bytes).expect("must write the artifact");
+            println!("wrote {} bytes to {GOLDEN_ARTIFACT}", bytes.len());
             return;
         }
-        Err(err) => panic!(
-            "the golden artifact no longer loads: {err}\n\
+
+        let bytes = std::fs::read(GOLDEN_ARTIFACT).expect("the golden artifact is checked in");
+        let loaded = match Program::read(&bytes) {
+            Ok(loaded) => loaded,
+            // The header records the ABI the fixture was written under, and a build
+            // with different numeric widths or restriction flags refuses it *by
+            // design* — that refusal is what `abi.rs` is for. The fixture is one
+            // build's bytes, so it can only be checked on that build; anywhere else
+            // this would be testing the ABI guard rather than the encoding.
+            Err(err) if format!("{err}").contains("written with") => {
+                println!("skipped: the golden fixture is a default-build artifact ({err})");
+                return;
+            }
+            Err(err) => panic!(
+                "the golden artifact no longer loads: {err}\n\
              The format moved. If that was deliberate, regenerate the fixture with \
-             `REGENERATE_GOLDEN=1 cargo test --features grain --test mod golden`.",
-        ),
-    };
-
-    // A fixture only pins what it contains, and narrowing one while editing the
-    // source is easy and silent. These are read off the *artifact*, so they say
-    // what the encoder branch coverage actually is rather than what the source
-    // looks like it should give.
-    let kinds: std::collections::BTreeSet<String> = rhai::grain::bytecode::disassemble(loaded.code())
-        .map(|(_, op)| format!("{op:?}").split(['(', ' ', '{']).next().unwrap_or_default().to_string())
-        .collect();
-    for required in [
-        "Chain",             // a chain record, with all three of its roots
-        "CallRef",           // and both by-reference call forms
-        "Rotate",            // which only a named receiver needs
-        "LoadNamed",         // the caller's variable, flat
-        "LoadSharedNamed",   // and as the cell a capture binds
-        "MakeClosure",       // a function pointer to a compiled chunk
-        "Curry",             // with what it captured bound onto it
-        "MakeArray",         // a literal the optimizer could not fold
-        "MakeMap",           // and its template-plus-pairs cousin
-        "CheckSize",         // the per-element size check beside it
-        "PushHandler",       // a handler region, whose catch variable is pooled
-        "Throw",             //
-        "IterNext",          // an iterator, and the two-edged instruction
-        "InterpolateAppend", // a string built a segment at a time
-    ] {
-        assert!(
-            kinds.contains(required),
-            "the golden no longer contains `{required}`, so its encoder branch \
-             is unpinned again — put it back or say why it went",
-        );
-    }
-    assert!(
-        kinds.len() >= 35,
-        "the golden covers only {} instruction kinds, which is narrower than it \
-         was written to be: {kinds:?}",
-        kinds.len(),
-    );
-
-    let walked = {
-        let mut scope = golden_scope();
-        let result = engine.eval_ast_with_scope::<Dynamic>(&mut scope, &ast);
-        snapshot(&scope, result)
-    };
-    let ran = {
-        let mut scope = golden_scope();
-        // Whether the program can hand a pointer to a native is read back off
-        // the bytes, so how it must be run is part of what is being checked.
-        let result = if loaded.makes_fn_pointers() {
-            let loaded = loaded.into_shared();
-            Vm::new(&engine).run_with_callbacks(&loaded, &mut scope)
-        } else {
-            Vm::new(&engine).run(&loaded, &mut scope)
+             `REGENERATE_GOLDEN=1 cargo test --features grain --test grain golden`.",
+            ),
         };
-        snapshot(&scope, result)
-    };
 
-    assert_eq!(
-        ran, walked,
-        "the golden artifact no longer means what its source means.\n\
+        // A fixture only pins what it contains, and narrowing one while editing the
+        // source is easy and silent. These are read off the *artifact*, so they say
+        // what the encoder branch coverage actually is rather than what the source
+        // looks like it should give.
+        let kinds: std::collections::BTreeSet<String> = rhai::grain::bytecode::disassemble(loaded.code())
+            .map(|(_, op)| format!("{op:?}").split(['(', ' ', '{']).next().unwrap_or_default().to_string())
+            .collect();
+        for required in [
+            "Chain",             // a chain record, with all three of its roots
+            "CallRef",           // and both by-reference call forms
+            "Rotate",            // which only a named receiver needs
+            "LoadNamed",         // the caller's variable, flat
+            "LoadSharedNamed",   // and as the cell a capture binds
+            "MakeClosure",       // a function pointer to a compiled chunk
+            "Curry",             // with what it captured bound onto it
+            "MakeArray",         // a literal the optimizer could not fold
+            "MakeMap",           // and its template-plus-pairs cousin
+            "CheckSize",         // the per-element size check beside it
+            "PushHandler",       // a handler region, whose catch variable is pooled
+            "Throw",             //
+            "IterNext",          // an iterator, and the two-edged instruction
+            "InterpolateAppend", // a string built a segment at a time
+        ] {
+            assert!(
+                kinds.contains(required),
+                "the golden no longer contains `{required}`, so its encoder branch \
+             is unpinned again — put it back or say why it went",
+            );
+        }
+        assert!(
+            kinds.len() >= 35,
+            "the golden covers only {} instruction kinds, which is narrower than it \
+         was written to be: {kinds:?}",
+            kinds.len(),
+        );
+
+        let walked = {
+            let mut scope = golden_scope();
+            let result = engine.eval_ast_with_scope::<Dynamic>(&mut scope, &ast);
+            snapshot(&scope, result)
+        };
+        let ran = {
+            let mut scope = golden_scope();
+            // Whether the program can hand a pointer to a native is read back off
+            // the bytes, so how it must be run is part of what is being checked.
+            let result = if loaded.makes_fn_pointers() {
+                let loaded = loaded.into_shared();
+                Vm::new(&engine).eval_with_callbacks(&mut scope, &loaded)
+            } else {
+                Vm::new(&engine).eval_with_scope(&mut scope, &loaded)
+            };
+            snapshot(&scope, result)
+        };
+
+        assert_eq!(
+            ran, walked,
+            "the golden artifact no longer means what its source means.\n\
          The format moved without the reader noticing, which is the failure this \
          fixture exists to catch. If the change was deliberate, regenerate with \
-         `REGENERATE_GOLDEN=1 cargo test --features grain --test mod golden`.",
-    );
-    assert!(ran.result.is_ok(), "the golden must produce a value, not an error: {ran:?}",);
+         `REGENERATE_GOLDEN=1 cargo test --features grain --test grain golden`.",
+        );
+        assert!(ran.result.is_ok(), "the golden must produce a value, not an error: {ran:?}",);
+    }
 }
 
 /// A chain rooted at a caller's variable, which the corpus cannot cover.
@@ -283,7 +298,7 @@ fn a_chain_rooted_at_a_name_survives_the_round_trip() {
     let mut loaded = Scope::new();
     seed(&mut loaded);
     let actual = {
-        let out = Vm::new(&engine).run(&reloaded, &mut loaded);
+        let out = Vm::new(&engine).eval_with_scope(&mut loaded, &reloaded);
         snapshot(&loaded, out)
     };
 
@@ -371,14 +386,21 @@ fn a_function_the_compiler_cannot_lower_refuses_to_write() {
 /// receiver that is not on the operand stack, so a corrupted one is read
 /// against a different depth than any other call's.
 fn sample(engine: &Engine) -> Vec<u8> {
-    let ast = engine
-        .compile(
-            "let a = 1; let b = 2.5; while a < 10 { a += 1 } \
-             let c = [a]; push(c, b); push(caller_supplied, a); \
-             caller_supplied[0] = a; \
-             switch a { 1 => \"one\", 0..=20 => \"some\", _ => \"many\" }",
-        )
-        .expect("must compile");
+    // A float in the constant pool is part of what this covers, and `no_float`
+    // has no float to put there. The rest of the shape — a loop, an array, a
+    // caller variable, an indexed write, a switch — is the same either way.
+    #[cfg(not(feature = "no_float"))]
+    const SECOND: &str = "2.5";
+    #[cfg(feature = "no_float")]
+    const SECOND: &str = "2";
+
+    let source = format!(
+        "let a = 1; let b = {SECOND}; while a < 10 {{ a += 1 }} \
+         let c = [a]; push(c, b); push(caller_supplied, a); \
+         caller_supplied[0] = a; \
+         switch a {{ 1 => \"one\", 0..=20 => \"some\", _ => \"many\" }}"
+    );
+    let ast = engine.compile(&source).expect("must compile");
     Compiler::new().compile(&ast).write().expect("the sample must be writable")
 }
 
@@ -505,7 +527,7 @@ fn no_single_bit_flip_can_panic_or_smuggle_a_bad_chunk() {
                 loaded += 1;
                 program.verify().expect("read must not return a chunk that fails verification");
                 // The result is free to be anything; not crashing is the claim.
-                let _ = Vm::new(&engine).run(&program, &mut Scope::new());
+                let _ = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program);
             }
         }
     }
@@ -537,7 +559,7 @@ fn a_stripped_program_reports_an_address_the_host_can_resolve() {
     assert!(device.positions().is_stripped(), "a stripped artifact must not carry positions",);
 
     let mut vm = Vm::new(&engine);
-    let error = vm.run(&device, &mut Scope::new()).expect_err("dividing by zero must fail");
+    let error = vm.eval_with_scope(&mut Scope::new(), &device).expect_err("dividing by zero must fail");
     let address = vm.fault_pc().expect("a failed run must name an instruction");
 
     // Host: resolve what came back.

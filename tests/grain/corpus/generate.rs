@@ -410,6 +410,10 @@ impl Generator {
     fn atom(&mut self) -> String {
         match self.rng.below(8) {
             0..=2 => format!("{}", self.rng.below(64)),
+            // A float literal is not syntax under `no_float` — rhai reads the
+            // `.` as a property access — so the whole script would fail to
+            // parse and test nothing.
+            #[cfg(not(feature = "no_float"))]
             3 => format!("{}.{}", self.rng.below(8), self.rng.below(8)),
             4 => format!("\"s{}\"", self.rng.below(8)),
             5 => self.rng.one_of(&["true", "false"]).to_string(),

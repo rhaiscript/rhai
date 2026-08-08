@@ -68,7 +68,7 @@ fn agree_with(engine: &Engine, source: &str, build: impl Fn(&mut Scope), writabl
     let mut run = Scope::new();
     build(&mut run);
     let actual = {
-        let result = Vm::new(engine).run(&program, &mut run);
+        let result = Vm::new(engine).eval_with_scope(&mut run, &program);
         capture(&run, result)
     };
 
@@ -398,13 +398,13 @@ fn a_global_module_constant_resolves() {
     let program = Compiler::new().compile(&ast);
     assert_eq!(program.residual_count(), 0);
 
-    let value = Vm::new(&engine).run(&program, &mut Scope::new()).expect("a module constant must resolve");
+    let value = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).expect("a module constant must resolve");
     assert_eq!(value.as_int().unwrap(), 256);
 
     // And writing to one is refused, because it is a value and not a place.
     let ast = engine.compile("CHANNELS = 1").expect("must compile");
     let program = Compiler::new().compile(&ast);
-    let err = Vm::new(&engine).run(&program, &mut Scope::new()).expect_err("a module constant is not assignable");
+    let err = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).expect_err("a module constant is not assignable");
     assert!(matches!(*err, rhai::EvalAltResult::ErrorAssignmentToConstant(..)), "got {err:?}",);
 }
 
@@ -421,6 +421,7 @@ fn a_global_module_constant_resolves() {
 /// as one block. These cases are here to keep it refusing: an `import` that
 /// started lowering again would put the divergence straight back.
 #[test]
+#[cfg(not(feature = "no_module"))]
 fn an_import_keeps_the_walkers_answer() {
     let mut engine = corpus::engine();
 
@@ -444,6 +445,50 @@ fn an_import_keeps_the_walkers_answer() {
     // In a function body the fallback is per-function: that body stays an AST
     // in the library and the top level still lowers whole.
     agree_with(&engine, r#"fn via_kit() { import "kit" as k; k::double(3) } via_kit()"#, |_| {}, true);
+}
+
+/// `eval` costs the body its lowering, and must.
+///
+/// It runs against the caller's scope and can declare into it, and the AST
+/// does not say so. The slot model resolves indices against the scope shape it
+/// can see, so a read after one looks in the wrong place —
+/// `eval("let x = 40"); x + 2` found no `x` where the walker found 40.
+///
+/// Written as a divergence rather than a missing feature, which is what makes
+/// it worth a test: it used to become an ordinary fragment and answer wrongly.
+#[test]
+fn eval_keeps_the_walkers_answer() {
+    let engine = corpus::engine();
+
+    for source in [
+        // The case that diverged: what `eval` declares outlives it.
+        r#"eval("let x = 40"); x + 2"#,
+        r#"let x = 1; eval("x = 99"); x"#,
+        r#"eval("1 + 1")"#,
+        r#"eval("let y = 7; y * 3")"#,
+    ] {
+        agree_with(&engine, source, |_| {}, false);
+    }
+}
+
+/// The same for custom syntax, which reaches the caller's scope through an
+/// `EvalContext` and is likewise invisible to the slot model.
+#[test]
+#[cfg(not(feature = "no_custom_syntax"))]
+fn custom_syntax_keeps_the_walkers_answer() {
+    let mut engine = corpus::engine();
+    engine
+        .register_custom_syntax(["declare", "$ident$", "=", "$int$"], true, |context, inputs| {
+            let name = inputs[0].get_string_value().unwrap().to_string();
+            let value = inputs[1].get_literal_value::<INT>().unwrap();
+            context.scope_mut().push(name, value);
+            Ok(Dynamic::UNIT)
+        })
+        .expect("the custom syntax must register");
+
+    for source in [r#"declare foo = 41; foo + 1"#, r#"declare bar = 5; 10"#] {
+        agree_with(&engine, source, |_| {}, false);
+    }
 }
 
 /// The first of the three, and the one a VM would most plausibly skip: a
@@ -471,12 +516,12 @@ fn a_variable_resolver_is_consulted_first() {
     scope.push("ordinary", 5 as INT);
 
     let program = compile(&engine, "injected + ordinary");
-    let value = Vm::new(&engine).run(&program, &mut scope.clone()).expect("both must resolve");
+    let value = Vm::new(&engine).eval_with_scope(&mut scope.clone(), &program).expect("both must resolve");
     assert_eq!(value.as_int().unwrap(), 104);
 
     // A resolver hands back a value rather than a place, so it is read-only.
     let program = compile(&engine, "injected = 1");
-    let err = Vm::new(&engine).run(&program, &mut scope.clone()).expect_err("a resolved variable is not assignable");
+    let err = Vm::new(&engine).eval_with_scope(&mut scope.clone(), &program).expect_err("a resolved variable is not assignable");
     assert!(matches!(*err, rhai::EvalAltResult::ErrorAssignmentToConstant(..)), "got {err:?}",);
 
     // And the walker agrees about all of it.
@@ -504,7 +549,7 @@ fn a_resolver_that_grows_the_scope_forces_a_search() {
     assert_eq!(program.residual_count(), 0);
 
     let mut scope = Scope::new();
-    let value = Vm::new(&engine).run(&program, &mut scope).expect("must run");
+    let value = Vm::new(&engine).eval_with_scope(&mut scope, &program).expect("must run");
 
     let mut walked = Scope::new();
     let expected = engine.eval_ast_with_scope::<Dynamic>(&mut walked, &ast).expect("the walker must run it too");
@@ -547,7 +592,7 @@ fn a_resolved_receiver_is_not_the_scope_entry_it_shadows() {
 
     let mut run = Scope::new();
     start(&mut run);
-    let ours = Vm::new(&engine).run(&program, &mut run);
+    let ours = Vm::new(&engine).eval_with_scope(&mut run, &program);
 
     // Read-only all the way through, so rhai refuses the call outright rather
     // than mutating a copy — which is a sharper thing to agree on.
@@ -575,7 +620,7 @@ fn a_closure_pointer_is_late_bound() {
     let program = Compiler::new().compile(&ast);
     assert_eq!(program.residual_count(), 0, "the closure must lower");
 
-    let ours = Vm::new(&engine).run(&program, &mut Scope::new()).expect("must run");
+    let ours = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).expect("must run");
     let walker = engine.eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast).expect("must run under rhai too");
 
     let (ours, walker) = (format!("{ours:?}"), format!("{walker:?}"));
@@ -612,6 +657,50 @@ fn a_compiled_function_can_be_called_by_name() {
     // The operand stack is where it started, so a caller can keep using it.
     let value = vm.call_function(&program, "add", vec![lit(10), lit(1)], 0, rhai::Position::NONE).expect("must call again");
     assert_eq!(value.as_int().unwrap(), 11);
+}
+
+/// The same call through the API a host actually reaches for, which mirrors
+/// [`Engine::call_fn`].
+///
+/// The differences from `call_function` are the ones rhai's own `call_fn` has:
+/// arguments as a tuple rather than a `Vec<Dynamic>`, a typed result, and the
+/// program's body run first — which is what sets up anything the call needs.
+#[test]
+fn call_fn_mirrors_the_engines() {
+    let engine = corpus::engine();
+    let ast = engine.compile("fn add(a, b) { a + b } let marker = 10; 0").expect("must compile");
+    let program = Compiler::new().compile(&ast);
+
+    let mut vm = Vm::new(&engine);
+    let mut scope = Scope::new();
+
+    let sum: INT = vm.call_fn(&mut scope, &program, "add", (2 as INT, 3 as INT)).expect("must call");
+    assert_eq!(sum, 5);
+    // `eval_ast` ran the body, and `rewind_scope` took back what it declared.
+    // Both default to on, as they do in rhai.
+    assert_eq!(scope.len(), 0, "the default rewinds what the body declared");
+
+    let keep = rhai::CallFnOptions::new().rewind_scope(false);
+    let sum: INT = vm.call_fn_with_options(keep, &mut scope, &program, "add", (4 as INT, 5 as INT)).expect("must call");
+    assert_eq!(sum, 9);
+    assert_eq!(scope.len(), 1, "`marker` outlives the call now");
+    assert_eq!(scope.get_value::<INT>("marker").unwrap(), 10);
+
+    // Skipping the body is what a caller does when the function needs nothing
+    // from it — the common case, and the one that costs nothing.
+    let mut fresh = Scope::new();
+    let skip = rhai::CallFnOptions::new().eval_ast(false);
+    let sum: INT = vm.call_fn_with_options(skip, &mut fresh, &program, "add", (1 as INT, 1 as INT)).expect("must call");
+    assert_eq!(sum, 2);
+    assert_eq!(fresh.len(), 0, "the body never ran, so it declared nothing");
+
+    // A result that is not the type asked for is an error, not a panic.
+    let err = vm.call_fn::<String>(&mut scope, &program, "add", (1 as INT, 2 as INT)).expect_err("an INT is not a String");
+    assert!(matches!(*err, rhai::EvalAltResult::ErrorMismatchOutputType(..)), "got {err:?}",);
+
+    // And a missing name still misses.
+    let err = vm.call_fn::<INT>(&mut scope, &program, "nope", (1 as INT,)).expect_err("no such function");
+    assert!(matches!(*err, rhai::EvalAltResult::ErrorFunctionNotFound(..)), "got {err:?}",);
 }
 
 /// The flag a host uses to decide whether a program has to be owned.
@@ -663,7 +752,7 @@ fn a_program_reading_caller_state_can_be_written() {
     let mut scope = Scope::new();
     scope.push("brightness", 5 as INT);
     scope.push("mode", "chase".to_string());
-    let value = Vm::new(&engine).run(&reloaded, &mut scope).expect("must run");
+    let value = Vm::new(&engine).eval_with_scope(&mut scope, &reloaded).expect("must run");
 
     assert_eq!(value.as_int().unwrap(), 15);
 }

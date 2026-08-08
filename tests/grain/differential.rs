@@ -51,9 +51,9 @@ fn run_vm(engine: &Engine, source: &str) -> Outcome {
         // against a configuration nobody would ship.
         if program.makes_fn_pointers() {
             let program = program.into_shared();
-            Vm::new(engine).run_with_callbacks(&program, &mut scope)
+            Vm::new(engine).eval_with_callbacks(&mut scope, &program)
         } else {
-            Vm::new(engine).run(&program, &mut scope)
+            Vm::new(engine).eval_with_scope(&mut scope, &program)
         }
         .map(|value| format!("{value:?}"))
         .map_err(|err| format!("{err:?}"))
@@ -68,7 +68,7 @@ fn vm_agrees_with_rhai() {
 
     let mut failures = Vec::new();
 
-    for case in corpus::CASES {
+    for case in corpus::CASES.iter().filter(|c| applies_to_this_build(c.name)) {
         let stock = run_stock(&engine, case.source);
         let vm = run_vm(&engine, case.source);
 
@@ -81,7 +81,8 @@ fn vm_agrees_with_rhai() {
         }
     }
 
-    assert!(failures.is_empty(), "{} of {} corpus scripts diverged:{}", failures.len(), corpus::CASES.len(), failures.join(""),);
+    let applicable = corpus::CASES.iter().filter(|c| applies_to_this_build(c.name)).count();
+    assert!(failures.is_empty(), "{} of {applicable} corpus scripts diverged:{}", failures.len(), failures.join(""),);
 }
 
 /// The corpus is only worth anything if the comparison can actually fail.
@@ -107,6 +108,7 @@ fn every_corpus_script_parses() {
 
     let broken: Vec<_> = corpus::CASES
         .iter()
+        .filter(|case| applies_to_this_build(case.name))
         .filter_map(|case| engine.compile(case.source).err().map(|err| format!("\n  {}: {err}", case.name)))
         .collect();
 
@@ -115,22 +117,10 @@ fn every_corpus_script_parses() {
 
 /// Whether a corpus case exercises anything on this build.
 ///
-/// Distinct from [`MAY_FRAGMENT`], which is a tolerance. A restriction feature
-/// removes the syntax outright — rhai will not parse a capturing closure under
-/// `no_closure` — so the case tests nothing here, and both sides agreeing on
-/// the parse failure would be an empty agreement rather than a passing one.
-fn applies_to_this_build(name: &str) -> bool {
-    #[cfg(feature = "no_closure")]
-    if name.starts_with("closure_") || name.starts_with("is_shared") {
-        return false;
-    }
-    #[cfg(feature = "no_module")]
-    if name.starts_with("import_") || name.starts_with("export_") {
-        return false;
-    }
-    let _ = name;
-    true
-}
+/// Distinct from [`MAY_FRAGMENT`], which is a tolerance: this says the syntax
+/// is not in the language on this build at all. Defined beside the cases, in
+/// `corpus`, because every harness that walks them needs the same answer.
+use corpus::applies_to_this_build;
 
 /// A case that errors unintentionally is nearly as weak as one that does not
 /// parse: both sides agree on the failure, and the machinery the case was
@@ -258,7 +248,7 @@ fn residual_census() {
         }
     }
 
-    println!("\n{} of {} scripts fully lowered, {total_nodes} AST nodes still in fragments", at_zero.len(), corpus::CASES.len(),);
+    println!("\n{} of {applicable} scripts fully lowered, {total_nodes} AST nodes still in fragments", at_zero.len(),);
     println!("\nfully lowered: {}", at_zero.join(", "));
     println!("\nremaining:");
     remaining.sort_by_key(|(_, count)| std::cmp::Reverse(*count));

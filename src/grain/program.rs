@@ -15,7 +15,7 @@ pub(crate) type SharedModule = Shared<Module>;
 
 /// A program a native function can be handed a way back into.
 ///
-/// [`Vm::run_with_callbacks`](crate::grain::Vm::run_with_callbacks) registers one
+/// [`Vm::eval_with_callbacks`](crate::grain::Vm::eval_with_callbacks) registers one
 /// wrapper per compiled function, and rhai requires a registered function to be
 /// `'static` — so the program cannot still be borrowing an artifact, and the
 /// wrappers have to share ownership of it rather than borrow it.
@@ -176,6 +176,7 @@ fn unsupported_kind(node: &ASTNode) -> Option<&'static str> {
         },
         ASTNode::Expr(expr) => match expr {
             Expr::InterpolatedString(..) => "string interpolation",
+            #[cfg(not(feature = "no_custom_syntax"))]
             Expr::Custom(..) => "custom syntax",
             Expr::Map(..) => "a non-constant map literal",
             _ => return None,
@@ -286,7 +287,7 @@ impl<'a> Program<'a> {
     /// Give up the artifact and share the program, so a native can be handed a
     /// way back into it.
     ///
-    /// What [`Vm::run_with_callbacks`](crate::grain::Vm::run_with_callbacks) takes.
+    /// What [`Vm::eval_with_callbacks`](crate::grain::Vm::eval_with_callbacks) takes.
     /// Worth the copy only when [`makes_fn_pointers`](Self::makes_fn_pointers)
     /// says a pointer can escape.
     #[must_use]

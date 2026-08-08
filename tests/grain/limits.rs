@@ -32,7 +32,7 @@ fn run_vm(engine: &Engine, source: &str) -> Result<Dynamic, Box<EvalAltResult>> 
     // `track_operation`, and the tests below would hang rather than fail.
     assert!(program.main().ops(program.code()).any(|(_, op)| op == Op::Tick), "{source:?} lowered to a loop with no operation tick",);
 
-    Vm::new(engine).run(&program, &mut Scope::new())
+    Vm::new(engine).eval_with_scope(&mut Scope::new(), &program)
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn a_loop_with_its_tick_removed_still_hits_the_limit() {
     let tickless = Program::read(&bytes).expect("still a valid artifact");
     assert!(!tickless.main().ops(tickless.code()).any(|(_, op)| op == Op::Tick), "the tick should be gone, or this tests nothing",);
 
-    let err = Vm::new(&engine).run(&tickless, &mut Scope::new()).expect_err("a tickless loop must still be stopped");
+    let err = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &tickless).expect_err("a tickless loop must still be stopped");
     assert!(matches!(*err, EvalAltResult::ErrorTooManyOperations(..)), "expected ErrorTooManyOperations, got {err:?}",);
 }
 
@@ -137,7 +137,7 @@ fn interpolation_respects_the_string_limit() {
     assert_eq!(program.residual_count(), 0, "must be lowered, not walked");
 
     let walker = engine.eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast).expect_err("the walker must refuse it");
-    let vm = Vm::new(&engine).run(&program, &mut Scope::new()).expect_err("and so must the VM");
+    let vm = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).expect_err("and so must the VM");
 
     assert!(matches!(*vm, EvalAltResult::ErrorDataTooLarge(..)), "got {vm:?}",);
     assert_eq!(format!("{vm:?}"), format!("{walker:?}"), "including the position of the segment that went over",);
@@ -154,7 +154,7 @@ fn ticking_does_not_disturb_a_bounded_loop() {
     let ast = engine.compile(source).expect("must compile");
 
     let program = Compiler::new().compile(&ast);
-    let vm = Vm::new(&engine).run(&program, &mut Scope::new()).expect("bounded loop must finish");
+    let vm = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).expect("bounded loop must finish");
 
     let walker = engine.eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast).expect("bounded loop must finish under rhai too");
 

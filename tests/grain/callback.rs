@@ -18,7 +18,7 @@ fn run(engine: &Engine, source: &str) -> Result<String, String> {
     let ast = engine.compile(source).map_err(|err| format!("{err:?}"))?;
     let program = Compiler::new().compile(&ast).into_shared();
     Vm::new(engine)
-        .run_with_callbacks(&program, &mut Scope::new())
+        .eval_with_callbacks(&mut Scope::new(), &program)
         .map(|value| format!("{value:?}"))
         .map_err(|err| format!("{err:?}"))
 }
@@ -183,7 +183,7 @@ fn a_callback_costs_more_call_levels() {
 
 #[test]
 fn without_the_wrappers_the_pointer_does_not_resolve() {
-    // The whole reason `run_with_callbacks` exists. A plain `run` leaves rhai
+    // The whole reason `eval_with_callbacks` exists. A plain eval leaves rhai
     // nowhere to look, and the failure is a lookup failure rather than
     // anything worse.
     let engine = corpus::engine();
@@ -191,6 +191,6 @@ fn without_the_wrappers_the_pointer_does_not_resolve() {
     let ast = engine.compile(source).unwrap();
     let program = Compiler::new().compile(&ast);
 
-    let err = Vm::new(&engine).run(&program, &mut Scope::new()).unwrap_err();
+    let err = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).unwrap_err();
     assert!(format!("{err:?}").contains("ErrorFunctionNotFound"), "{err}");
 }

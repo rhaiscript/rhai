@@ -105,7 +105,7 @@ fn optimizer_lost_a_local(source: &str, direct: &str) -> bool {
     let program = Compiler::new().compile(&ast);
 
     let expected = outcome(|scope| plain.eval_ast_with_scope::<Dynamic>(scope, &ast));
-    let ours = outcome(|scope| Vm::new(&plain).run(&program, scope));
+    let ours = outcome(|scope| Vm::new(&plain).eval_with_scope(scope, &program));
     ours == expected
 }
 
@@ -124,8 +124,8 @@ fuzz_target!(|source: String| {
         .makes_fn_pointers()
         .then(|| Compiler::new().compile(&ast).into_shared());
     let run = |scope: &mut Scope| match &shared {
-        Some(shared) => Vm::new(&engine).run_with_callbacks(shared, scope),
-        None => Vm::new(&engine).run(&program, scope),
+        Some(shared) => Vm::new(&engine).eval_with_callbacks(scope, shared),
+        None => Vm::new(&engine).eval_with_scope(scope, &program),
     };
 
     let direct = outcome(run);
@@ -146,7 +146,7 @@ fuzz_target!(|source: String| {
         return;
     };
     let reloaded = Program::read(&bytes).expect("what we wrote must read back");
-    let loaded = outcome(|scope| Vm::new(&engine).run(&reloaded, scope));
+    let loaded = outcome(|scope| Vm::new(&engine).eval_with_scope(scope, &reloaded));
 
     assert_eq!(
         loaded, expected,
