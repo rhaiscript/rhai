@@ -10,11 +10,7 @@ use rhai::{CallFnOptions, Dynamic, Engine, EvalAltResult, Scope, INT};
 
 /// A receiver for the methods below.
 fn holder(count: INT) -> Dynamic {
-    Dynamic::from_map(
-        [("count".into(), Dynamic::from(count))]
-            .into_iter()
-            .collect(),
-    )
+    Dynamic::from_map([("count".into(), Dynamic::from(count))].into_iter().collect())
 }
 
 /// `this` is what keeps `inner` an AST in the program's library, which is the
@@ -34,17 +30,13 @@ const SHADOWED: &str = "
 
 fn walked(engine: &Engine, source: &str) -> INT {
     let ast = engine.compile(source).unwrap();
-    engine
-        .call_fn(&mut Scope::new(), &ast, "outer", (holder(7),))
-        .unwrap()
+    engine.call_fn(&mut Scope::new(), &ast, "outer", (holder(7),)).unwrap()
 }
 
 fn run(engine: &Engine, source: &str) -> INT {
     let ast = engine.compile(source).unwrap();
     let program = Compiler::new().compile(&ast);
-    Vm::new(engine)
-        .call_fn(&mut Scope::new(), &program, "outer", (holder(7),))
-        .unwrap()
+    Vm::new(engine).call_fn(&mut Scope::new(), &program, "outer", (holder(7),)).unwrap()
 }
 
 #[test]
@@ -71,13 +63,7 @@ fn the_main_chunk_still_runs_before_the_call() {
 
     let mut scope = Scope::new();
     let value: INT = Vm::new(&engine)
-        .call_fn_with_options(
-            CallFnOptions::new().rewind_scope(false),
-            &mut scope,
-            &program,
-            "outer",
-            (),
-        )
+        .call_fn_with_options(CallFnOptions::new().rewind_scope(false), &mut scope, &program, "outer", ())
         .unwrap();
 
     assert_eq!(value, 1);
@@ -94,13 +80,7 @@ fn eval_ast_off_skips_the_main_chunk() {
 
     let mut scope = Scope::new();
     let _: INT = Vm::new(&engine)
-        .call_fn_with_options(
-            CallFnOptions::new().eval_ast(false).rewind_scope(false),
-            &mut scope,
-            &program,
-            "outer",
-            (),
-        )
+        .call_fn_with_options(CallFnOptions::new().eval_ast(false).rewind_scope(false), &mut scope, &program, "outer", ())
         .unwrap();
 
     assert!(scope.get_value::<INT>("started").is_none());
@@ -113,9 +93,7 @@ fn an_error_inside_a_call_carries_the_program_source() {
     ast.set_source("handlers.rhai");
     let program = Compiler::new().compile(&ast);
 
-    let err = *Vm::new(&engine)
-        .call_fn::<Dynamic>(&mut Scope::new(), &program, "outer", ())
-        .unwrap_err();
+    let err = *Vm::new(&engine).call_fn::<Dynamic>(&mut Scope::new(), &program, "outer", ()).unwrap_err();
 
     match err {
         EvalAltResult::ErrorInFunctionCall(name, source, ..) => {
