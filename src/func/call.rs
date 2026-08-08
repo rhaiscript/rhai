@@ -546,6 +546,57 @@ impl Engine {
         }
     }
 
+    /// The functions answered by name rather than by dispatch.
+    ///
+    /// `type_of` and `is_shared` have no registered implementation anywhere —
+    /// this *is* their implementation, and the rest of the names here exist only
+    /// as syntax, so reaching one of them by dispatch is always an error.
+    ///
+    /// `None` means the name is not one of these and should be dispatched
+    /// normally. `Some` is the whole answer: the value, or the error for a
+    /// spelling that has none — `type_of` with the wrong number of arguments, or
+    /// a name that is only ever syntax.
+    ///
+    /// Shared with [`NativeCallContext::call_fn_raw`], which reaches names it
+    /// decided were native-only without going through [`Self::exec_fn_call`] at
+    /// all. Keeping one copy is the point: these used to be answerable only
+    /// through the script path, so a host calling `call_fn_raw("type_of", ..)`
+    /// — and the bytecode VM, which dispatches every call that way — got
+    /// `ErrorFunctionNotFound` for a function rhai does implement.
+    pub(crate) fn exec_syntactic_fn_call(
+        &self,
+        fn_name: &str,
+        args: &FnCallArgs,
+        pos: Position,
+    ) -> Option<RhaiResult> {
+        let only_syntax = match fn_name {
+            // Handle type_of()
+            KEYWORD_TYPE_OF if args.len() == 1 => {
+                let typ = self.get_interned_string(self.map_type_name(args[0].type_name()));
+                return Some(Ok(typ.into()));
+            }
+
+            #[cfg(not(feature = "no_closure"))]
+            crate::engine::KEYWORD_IS_SHARED if args.len() == 1 => {
+                return Some(Ok(args[0].is_shared().into()))
+            }
+            #[cfg(not(feature = "no_closure"))]
+            crate::engine::KEYWORD_IS_SHARED => true,
+
+            #[cfg(not(feature = "no_function"))]
+            crate::engine::KEYWORD_IS_DEF_FN => true,
+
+            KEYWORD_TYPE_OF | KEYWORD_FN_PTR | KEYWORD_EVAL | KEYWORD_IS_DEF_VAR
+            | KEYWORD_FN_PTR_CALL | KEYWORD_FN_PTR_CURRY => true,
+
+            _ => false,
+        };
+
+        only_syntax.then(|| {
+            Err(ERR::ErrorFunctionNotFound(self.gen_fn_call_signature(fn_name, args), pos).into())
+        })
+    }
+
     /// # Main Entry-Point (By Name)
     ///
     /// Perform an actual function call, native Rust or scripted, by name, taking care of special functions.
@@ -570,32 +621,10 @@ impl Engine {
         pos: Position,
     ) -> RhaiResultOf<(Dynamic, bool)> {
         // These may be redirected from method style calls.
-        if hashes.is_native_only()
-            && match fn_name {
-                // Handle type_of()
-                KEYWORD_TYPE_OF if args.len() == 1 => {
-                    let typ = self.get_interned_string(self.map_type_name(args[0].type_name()));
-                    return Ok((typ.into(), false));
-                }
-
-                #[cfg(not(feature = "no_closure"))]
-                crate::engine::KEYWORD_IS_SHARED if args.len() == 1 => {
-                    return Ok((args[0].is_shared().into(), false))
-                }
-                #[cfg(not(feature = "no_closure"))]
-                crate::engine::KEYWORD_IS_SHARED => true,
-
-                #[cfg(not(feature = "no_function"))]
-                crate::engine::KEYWORD_IS_DEF_FN => true,
-
-                KEYWORD_TYPE_OF | KEYWORD_FN_PTR | KEYWORD_EVAL | KEYWORD_IS_DEF_VAR
-                | KEYWORD_FN_PTR_CALL | KEYWORD_FN_PTR_CURRY => true,
-
-                _ => false,
+        if hashes.is_native_only() {
+            if let Some(result) = self.exec_syntactic_fn_call(fn_name, args, pos) {
+                return result.map(|value| (value, false));
             }
-        {
-            let sig = self.gen_fn_call_signature(fn_name, args);
-            return Err(ERR::ErrorFunctionNotFound(sig, pos).into());
         }
 
         // Check for data race.

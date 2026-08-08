@@ -585,4 +585,12 @@ pub const CASES: &[Case] = &[
     case("closure_for_each_binds_this", "let t = 0; [1, 2, 3].for_each(|| t += this); t"),
     // And the argument form, which takes the element as a parameter instead.
     case("closure_map_takes_an_argument", "[1, 2, 3].map(|x| x * 2)"),
+    // `type_of` has no registered implementation anywhere — rhai answers it by
+    // name — so it is reached through the same door every other call is.
+    // A constant argument is folded by the optimizer and proves nothing.
+    case("type_of_a_variable", "let x = 1; type_of(x)"),
+    case("type_of_a_container", "let a = [1]; type_of(a)"),
+    case("type_of_a_host_type", "let w = widget(1); type_of(w)"),
+    case("type_of_method_style", "let s = \"a\"; s.type_of()"),
+    case("type_of_a_pointer", "let r = \"\"; { let f = |x| x; r = type_of(f); } r"),
 ];

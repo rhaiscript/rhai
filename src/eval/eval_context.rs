@@ -489,6 +489,14 @@ fn _call_fn_raw(
     let args_len = args.len();
 
     if native_only {
+        // The functions rhai answers by name are all reserved names, and a
+        // reserved name is what makes a call native-only — so without this the
+        // branch routes straight past their only implementation. See
+        // `Engine::exec_syntactic_fn_call`.
+        if let Some(result) = engine.exec_syntactic_fn_call(fn_name, args, Position::NONE) {
+            return result;
+        }
+
         let hash = calc_fn_hash(None, fn_name, args_len);
 
         return engine
