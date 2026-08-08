@@ -24,7 +24,7 @@ use rhai::{Dynamic, Engine, Scope};
 mod generate {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../tests/corpus/generate.rs"
+        "/../tests/grain/corpus/generate.rs"
     ));
 }
 

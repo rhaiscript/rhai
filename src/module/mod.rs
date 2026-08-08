@@ -374,8 +374,11 @@ impl FuncRegistration {
     /// # Parameter Examples
     ///
     /// `"foo: &str"`   <- parameter name = `foo`, type = `&str`
+    ///
     /// `"bar"`         <- parameter name = `bar`, type unknown
+    ///
     /// `"_: i64"`      <- parameter name unknown, type = `i64`
+    ///
     /// `"MyType"`      <- parameter name unknown, type = `MyType`
     #[cfg(feature = "metadata")]
     #[must_use]

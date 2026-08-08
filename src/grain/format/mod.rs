@@ -193,9 +193,14 @@ impl<'a> Cursor<'a> {
         let mut value = 0u64;
         for shift in (0..64).step_by(7) {
             let byte = self.byte()?;
-            value |= u64::from(byte & 0x7f)
-                .checked_shl(shift)
-                .ok_or(ReadError::MalformedVarint)?;
+            let payload = u64::from(byte & 0x7f);
+            // The tenth group has a single bit left to land in. Shifting would
+            // drop the other six rather than refuse them, so a value too wide
+            // for 64 bits would decode as a smaller one.
+            if shift == 63 && payload > 1 {
+                return Err(ReadError::MalformedVarint);
+            }
+            value |= payload << shift;
             if byte & 0x80 == 0 {
                 return Ok(value);
             }
@@ -305,6 +310,24 @@ mod tests {
             Cursor::new(&never_ends).uvarint(),
             Err(ReadError::MalformedVarint),
         );
+    }
+
+    /// The tenth group is the one place a shift could silently lose bits, so a
+    /// wide value there must be refused rather than truncated into a small one.
+    #[test]
+    fn a_tenth_group_wider_than_one_bit_is_refused() {
+        let mut ten = [0x80u8; 10];
+
+        // The largest value there is: nine full groups and a final bit.
+        let widest = [[0xffu8; 9].as_slice(), &[0x01]].concat();
+        assert_eq!(Cursor::new(&widest).uvarint(), Ok(u64::MAX));
+
+        // One past it. Shifting would drop the payload and read this as zero.
+        ten[9] = 0x02;
+        assert_eq!(Cursor::new(&ten).uvarint(), Err(ReadError::MalformedVarint));
+
+        ten[9] = 0x7f;
+        assert_eq!(Cursor::new(&ten).uvarint(), Err(ReadError::MalformedVarint));
     }
 
     #[test]

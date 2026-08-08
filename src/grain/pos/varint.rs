@@ -29,9 +29,14 @@ pub fn u64(bytes: &[u8], at: &mut usize) -> Result<u64, Error> {
     for shift in (0..64).step_by(7) {
         let byte = *bytes.get(*at).ok_or(Error::Truncated)?;
         *at += 1;
-        value |= ((byte & 0x7f) as u64)
-            .checked_shl(shift)
-            .ok_or(Error::Overflow)?;
+        let payload = u64::from(byte & 0x7f);
+        // The tenth group has a single bit left to land in. Shifting would drop
+        // the other six rather than refuse them, so a value too wide for 64 bits
+        // would decode as a smaller one.
+        if shift == 63 && payload > 1 {
+            return Err(Error::Overflow);
+        }
+        value |= payload << shift;
         if byte & 0x80 == 0 {
             return Ok(value);
         }
@@ -125,6 +130,27 @@ mod tests {
         assert_eq!(u64(&[], &mut at), Err(Error::Truncated));
         let mut at = 0;
         assert_eq!(u64(&[0x80], &mut at), Err(Error::Truncated));
+    }
+
+    /// The tenth group is the one place a shift could silently lose bits, so a
+    /// wide value there must be refused rather than truncated into a small one.
+    #[test]
+    fn a_tenth_group_wider_than_one_bit_is_refused() {
+        let mut ten = [0x80u8; 10];
+
+        // The largest value there is: nine full groups and a final bit.
+        ten[9] = 0x01;
+        let mut at = 0;
+        assert_eq!(u64(&[[0xffu8; 9].as_slice(), &[0x01]].concat(), &mut at), Ok(u64::MAX));
+
+        // One past it. Shifting would drop the payload and read this as zero.
+        ten[9] = 0x02;
+        let mut at = 0;
+        assert_eq!(u64(&ten, &mut at), Err(Error::Overflow));
+
+        ten[9] = 0x7f;
+        let mut at = 0;
+        assert_eq!(u64(&ten, &mut at), Err(Error::Overflow));
     }
 
     #[test]
