@@ -59,9 +59,15 @@ pub enum Error {
     Overflow,
     /// Addresses are not strictly ascending, so the scan's early exit would be
     /// wrong and a lookup could silently return the wrong site.
-    OutOfOrder { at: u32 },
+    OutOfOrder {
+        /// The address that did not ascend
+        at: u32,
+    },
     /// Bytes remain after the last entry, so this is not the table it claims.
-    TrailingBytes { count: usize },
+    TrailingBytes {
+        /// How many bytes are left over
+        count: usize,
+    },
 }
 
 impl From<varint::Error> for Error {

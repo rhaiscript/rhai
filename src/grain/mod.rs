@@ -14,7 +14,7 @@
 //! variable access and operator fast paths are reimplemented.
 //!
 //! A program that has been lowered all the way through can be written out with
-//! [`Program::write`] and read back with [`Program::read`] — see [`format`].
+//! [`Program::write`] and read back with [`Program::read`] — see [`mod@format`].
 //! That is the artifact the device loads, and the reason the tree never has to
 //! exist there.
 //!

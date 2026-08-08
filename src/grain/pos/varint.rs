@@ -43,7 +43,7 @@ pub fn u64(bytes: &[u8], at: &mut usize) -> Result<u64, Error> {
 ///
 /// # Errors
 ///
-/// As [`u64`].
+/// As [`u64`](fn@u64).
 pub fn i64(bytes: &[u8], at: &mut usize) -> Result<i64, Error> {
     let raw = u64(bytes, at)?;
     Ok(((raw >> 1) as i64) ^ -((raw & 1) as i64))
@@ -53,7 +53,8 @@ pub fn i64(bytes: &[u8], at: &mut usize) -> Result<i64, Error> {
 ///
 /// # Errors
 ///
-/// As [`u64`], plus [`Error::Overflow`] if the value is too wide for the field.
+/// As [`u64`](fn@u64), plus [`Error::Overflow`] if the value is too wide for
+/// the field.
 pub fn u32(bytes: &[u8], at: &mut usize) -> Result<u32, Error> {
     core::convert::TryFrom::try_from(u64(bytes, at)?).map_err(|_| Error::Overflow)
 }

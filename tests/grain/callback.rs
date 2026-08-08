@@ -8,11 +8,10 @@
 
 // Only the engine is wanted here; the corpus scripts belong to the harnesses
 // that run all of them.
-#[allow(dead_code)]
-mod corpus;
+use super::corpus;
 
+use rhai::grain::{Compiler, Vm};
 use rhai::{Dynamic, Engine, Scope};
-use rhaigrain::{Compiler, Vm};
 
 /// Run a source through the VM with the callback wrappers installed.
 fn run(engine: &Engine, source: &str) -> Result<String, String> {
@@ -27,10 +26,7 @@ fn run(engine: &Engine, source: &str) -> Result<String, String> {
 /// The same source through the walker, which is what the answer has to be.
 fn walk(engine: &Engine, source: &str) -> Result<String, String> {
     let ast = engine.compile(source).map_err(|err| format!("{err:?}"))?;
-    engine
-        .eval_ast::<Dynamic>(&ast)
-        .map(|value| format!("{value:?}"))
-        .map_err(|err| format!("{err:?}"))
+    engine.eval_ast::<Dynamic>(&ast).map(|value| format!("{value:?}")).map_err(|err| format!("{err:?}"))
 }
 
 fn agree(source: &str) {
@@ -46,10 +42,7 @@ fn lowered(source: &str) {
     let engine = corpus::engine();
     let ast = engine.compile(source).unwrap();
     let program = Compiler::new().compile(&ast);
-    assert!(
-        program.residual_count() == 0,
-        "{source} still fragments, so it does not test the callback path",
-    );
+    assert!(program.residual_count() == 0, "{source} still fragments, so it does not test the callback path",);
     assert!(program.makes_fn_pointers(), "{source}");
 }
 
@@ -119,16 +112,8 @@ fn stock_rhai_does_the_same_to_its_own_native_pointers() {
     engine.register_fn("nsub", |a: i64, b: i64| a - b);
 
     let curried = "let s = \"ns\" + \"ub\"; let f = Fn(s).curry(10);";
-    assert_eq!(
-        walk(&engine, &format!("{curried} [1, 2, 3].map(f)")),
-        Ok("[-9, -8, -7]".to_string()),
-        "rhai puts the element before the curried value",
-    );
-    assert_eq!(
-        walk(&engine, &format!("{curried} f.call(1)")),
-        Ok("9".to_string()),
-        "and the curried value first when there is no element",
-    );
+    assert_eq!(walk(&engine, &format!("{curried} [1, 2, 3].map(f)")), Ok("[-9, -8, -7]".to_string()), "rhai puts the element before the curried value",);
+    assert_eq!(walk(&engine, &format!("{curried} f.call(1)")), Ok("9".to_string()), "and the curried value first when there is no element",);
 }
 
 #[test]
@@ -206,11 +191,6 @@ fn without_the_wrappers_the_pointer_does_not_resolve() {
     let ast = engine.compile(source).unwrap();
     let program = Compiler::new().compile(&ast);
 
-    let err = Vm::new(&engine)
-        .run(&program, &mut Scope::new())
-        .unwrap_err();
-    assert!(
-        format!("{err:?}").contains("ErrorFunctionNotFound"),
-        "{err}"
-    );
+    let err = Vm::new(&engine).run(&program, &mut Scope::new()).unwrap_err();
+    assert!(format!("{err:?}").contains("ErrorFunctionNotFound"), "{err}");
 }

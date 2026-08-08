@@ -23,7 +23,12 @@ pub enum ReadError {
     /// Not a rhaigrain artifact at all.
     BadMagic,
     /// Written by a format this build does not know how to read.
-    UnsupportedVersion { found: u16, supported: u16 },
+    UnsupportedVersion {
+        /// The version the artifact claims
+        found: u16,
+        /// The version this build reads
+        supported: u16,
+    },
     /// Written against a different value representation. Loading anyway would
     /// decode integers or floats as the wrong type.
     Abi(AbiMismatch),
@@ -34,17 +39,33 @@ pub enum ReadError {
     /// A string that is not UTF-8.
     BadUtf8,
     /// A tag this build has no meaning for.
-    UnknownTag { section: &'static str, tag: u8 },
+    UnknownTag {
+        /// Which section it was read from
+        section: &'static str,
+        /// The tag itself
+        tag: u8,
+    },
     /// An operator syntax rhai does not recognise.
-    UnknownToken { syntax: String },
+    UnknownToken {
+        /// The syntax that was read
+        syntax: String,
+    },
     /// The artifact's `switch` case hashes were computed by a differently
     /// seeded hasher, so none of them would ever match.
-    HashSeedMismatch { artifact: u64, host: u64 },
-    /// Constants nested past [`MAX_CONSTANT_DEPTH`].
+    HashSeedMismatch {
+        /// The seed the writer used
+        artifact: u64,
+        /// The seed this build uses
+        host: u64,
+    },
+    /// Constants nested past `MAX_CONSTANT_DEPTH`.
     ConstantTooDeep,
     /// Bytes left over after the last section, so the file is not what it
     /// claims to be even though every field parsed.
-    TrailingBytes { count: usize },
+    TrailingBytes {
+        /// How many bytes are left over
+        count: usize,
+    },
     /// The chunk parsed but does not agree with itself.
     Unverifiable(VerifyError),
     /// The position table is malformed, or belongs to a different program.

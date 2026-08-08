@@ -53,7 +53,7 @@ pub struct Abi {
     pub int_bytes: u8,
     /// `size_of::<rhai::FLOAT>()`, or 0 under `no_float`.
     pub float_bytes: u8,
-    /// [`FLAGS`] as a bitmask, low bit first.
+    /// `FLAGS` as a bitmask, low bit first.
     pub flags: u32,
 }
 
@@ -65,13 +65,18 @@ pub struct Abi {
 pub enum AbiMismatch {
     /// A width differs, which means integers or floats would decode wrong.
     Width {
+        /// Which width differs
         what: &'static str,
+        /// What the writer used
         artifact: u8,
+        /// What this build uses
         host: u8,
     },
     /// A restriction differs. `artifact` is whether the writer had it on.
     Flag {
+        /// Which flag differs
         flag: &'static str,
+        /// Whether the writer had it on
         artifact: bool,
     },
 }

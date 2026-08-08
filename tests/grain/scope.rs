@@ -17,11 +17,10 @@
 
 // Only the engine is wanted here; the corpus scripts belong to the harnesses
 // that run all of them.
-#[allow(dead_code)]
-mod corpus;
+use super::corpus;
 
+use rhai::grain::{Compiler, Vm};
 use rhai::{Dynamic, Engine, Module, Scope};
-use rhaigrain::{Compiler, Vm};
 
 /// What a run produced, in a form two runs can be compared on.
 #[derive(Debug, PartialEq, Eq)]
@@ -32,13 +31,8 @@ struct Outcome {
 
 fn capture(scope: &Scope, result: Result<Dynamic, Box<rhai::EvalAltResult>>) -> Outcome {
     Outcome {
-        result: result
-            .map(|value| format!("{value:?}"))
-            .map_err(|err| format!("{err:?}")),
-        scope: scope
-            .iter_raw()
-            .map(|(name, _, value)| (name.to_string(), format!("{value:?}")))
-            .collect(),
+        result: result.map(|value| format!("{value:?}")).map_err(|err| format!("{err:?}")),
+        scope: scope.iter_raw().map(|(name, _, value)| (name.to_string(), format!("{value:?}"))).collect(),
     }
 }
 
@@ -61,19 +55,11 @@ fn agree_with(engine: &Engine, source: &str, build: impl Fn(&mut Scope), writabl
     let ast = engine.compile(source).expect("must compile");
     let program = Compiler::new().compile(&ast);
 
-    assert_eq!(
-        program.residual_count() == 0,
-        writable,
-        "{source:?} fragments: {:?}",
-        program.first_unsupported(),
-    );
+    assert_eq!(program.residual_count() == 0, writable, "{source:?} fragments: {:?}", program.first_unsupported(),);
 
     let mut walked = Scope::new();
     build(&mut walked);
-    let expected = capture(
-        &walked.clone(),
-        engine.eval_ast_with_scope::<Dynamic>(&mut walked, &ast),
-    );
+    let expected = capture(&walked.clone(), engine.eval_ast_with_scope::<Dynamic>(&mut walked, &ast));
     let expected = Outcome {
         scope: capture(&walked, Ok(Dynamic::UNIT)).scope,
         ..expected
@@ -95,7 +81,13 @@ fn lit(value: i64) -> Dynamic {
 
 #[test]
 fn a_caller_variable_can_be_read() {
-    agree("brightness * 2", |s| { s.push("brightness", 21_i64); }, true);
+    agree(
+        "brightness * 2",
+        |s| {
+            s.push("brightness", 21_i64);
+        },
+        true,
+    );
     agree(
         "mode + \"!\"",
         |s| {
@@ -107,8 +99,20 @@ fn a_caller_variable_can_be_read() {
 
 #[test]
 fn a_caller_variable_can_be_written() {
-    agree("brightness = 7; brightness", |s| { s.push("brightness", 1_i64); }, true);
-    agree("brightness += 5; brightness", |s| { s.push("brightness", 1_i64); }, true);
+    agree(
+        "brightness = 7; brightness",
+        |s| {
+            s.push("brightness", 1_i64);
+        },
+        true,
+    );
+    agree(
+        "brightness += 5; brightness",
+        |s| {
+            s.push("brightness", 1_i64);
+        },
+        true,
+    );
     // The op-assignment expansion path: no `-=` for strings, so rhai falls
     // back to `x = x - y` and fails there rather than reporting no `-=`.
     agree(
@@ -128,19 +132,39 @@ fn a_caller_variable_can_be_written() {
 /// script's variable is a local is not something the script says.
 #[test]
 fn a_caller_variable_in_first_argument_position_is_taken_by_reference() {
-    agree("push(log, 2); log", |s| { s.push("log", vec![Dynamic::from(1_i64)]); }, true);
-    agree("bump(w); w.level", |s| { s.push("w", corpus::Widget::default()); }, true);
+    agree(
+        "push(log, 2); log",
+        |s| {
+            s.push("log", vec![Dynamic::from(1_i64)]);
+        },
+        true,
+    );
+    agree(
+        "bump(w); w.level",
+        |s| {
+            s.push("w", corpus::Widget::default());
+        },
+        true,
+    );
     // A constant is not a place rhai will hand out, so the mutation is
     // discarded — and the caller's entry has to come back untouched.
     agree(
         "push(log, 2); log",
-        |s| { s.push_constant("log", vec![Dynamic::from(1_i64)]); },
+        |s| {
+            s.push_constant("log", vec![Dynamic::from(1_i64)]);
+        },
         true,
     );
     // Read after the other arguments, so it is the second name reported
     // missing rather than the first.
     agree("nosuch(gone, missing)", |_| {}, true);
-    agree("nosuch(gone, brightness)", |s| { s.push("brightness", 1_i64); }, true);
+    agree(
+        "nosuch(gone, brightness)",
+        |s| {
+            s.push("brightness", 1_i64);
+        },
+        true,
+    );
 }
 
 /// A chain rooted at a caller's variable, which is the last root shape that
@@ -156,19 +180,67 @@ fn a_chain_can_be_rooted_at_a_caller_variable() {
     let array = || vec![Dynamic::from(1_i64)];
 
     // A writable entry: read, mutate through a method, and assign through.
-    agree("host[0]", |s| { s.push("host", array()); }, true);
-    agree("host.push(2); host", |s| { s.push("host", array()); }, true);
-    agree("host[0] = 9; host", |s| { s.push("host", array()); }, true);
-    agree("host.level", |s| { s.push("host", corpus::Widget::default()); }, true);
-    agree("host.level = 3; host.level", |s| { s.push("host", corpus::Widget::default()); }, true);
+    agree(
+        "host[0]",
+        |s| {
+            s.push("host", array());
+        },
+        true,
+    );
+    agree(
+        "host.push(2); host",
+        |s| {
+            s.push("host", array());
+        },
+        true,
+    );
+    agree(
+        "host[0] = 9; host",
+        |s| {
+            s.push("host", array());
+        },
+        true,
+    );
+    agree(
+        "host.level",
+        |s| {
+            s.push("host", corpus::Widget::default());
+        },
+        true,
+    );
+    agree(
+        "host.level = 3; host.level",
+        |s| {
+            s.push("host", corpus::Widget::default());
+        },
+        true,
+    );
 
     // A constant is not a place. Rhai refuses the assignment outright and
     // refuses a mutating method too, because it never hands out a reference to
     // one and a non-pure native will not take a read-only first argument
     // (`func/call.rs:405`).
-    agree("host[0] = 9; host", |s| { s.push_constant("host", array()); }, true);
-    agree("host.push(2); host", |s| { s.push_constant("host", array()); }, true);
-    agree("host[0]", |s| { s.push_constant("host", array()); }, true);
+    agree(
+        "host[0] = 9; host",
+        |s| {
+            s.push_constant("host", array());
+        },
+        true,
+    );
+    agree(
+        "host.push(2); host",
+        |s| {
+            s.push_constant("host", array());
+        },
+        true,
+    );
+    agree(
+        "host[0]",
+        |s| {
+            s.push_constant("host", array());
+        },
+        true,
+    );
 
     // A shared entry walks through its cell's guard, so the mutation lands
     // where every holder of the cell can see it. The closure is made in a
@@ -176,7 +248,9 @@ fn a_chain_can_be_rooted_at_a_caller_variable() {
     // two sides render differently on purpose.
     agree(
         "{ let keep = || host.len(); } host.push(2); host",
-        |s| { s.push("host", array()); },
+        |s| {
+            s.push("host", array());
+        },
         true,
     );
 
@@ -237,16 +311,8 @@ fn a_closure_can_capture_a_caller_variable() {
 
     // The write happens after the closure is made, so a captured copy answers
     // with the old length.
-    agree(
-        "let n = 0; { let f = || first.len(); first.push(9); n = f.call(); } n",
-        seed,
-        true,
-    );
-    agree(
-        "let n = 0; { let f = || second.len(); second.push(9); n = f.call(); } n",
-        seed,
-        true,
-    );
+    agree("let n = 0; { let f = || first.len(); first.push(9); n = f.call(); } n", seed, true);
+    agree("let n = 0; { let f = || second.len(); second.push(9); n = f.call(); } n", seed, true);
     // And the capture is what shares it, which `is_shared` can see.
     agree("{ let f = || first.len(); } is_shared(first)", seed, true);
     agree("{ let f = || first.len(); } is_shared(second)", seed, true);
@@ -258,14 +324,18 @@ fn a_closure_can_capture_a_caller_variable() {
 fn a_local_shadows_the_caller_without_disturbing_it() {
     agree(
         "let brightness = 1; brightness += 1; brightness",
-        |s| { s.push("brightness", 100_i64); },
+        |s| {
+            s.push("brightness", 100_i64);
+        },
         true,
     );
     // And the other order: read before the local exists, so the same name is
     // two different variables in one script.
     agree(
         "let first = brightness; let brightness = 1; [first, brightness]",
-        |s| { s.push("brightness", 100_i64); },
+        |s| {
+            s.push("brightness", 100_i64);
+        },
         true,
     );
 }
@@ -302,18 +372,12 @@ fn a_name_that_is_nowhere_is_reported_the_same_way() {
 #[test]
 fn a_script_function_name_is_not_a_variable() {
     let engine = corpus::engine();
-    let ast = engine
-        .compile("fn helper() { 1 } let f = helper; f.call()")
-        .expect("must compile");
+    let ast = engine.compile("fn helper() { 1 } let f = helper; f.call()").expect("must compile");
     let program = Compiler::new().compile(&ast);
 
+    assert!(program.residual_count() > 0, "a function name must not become a name lookup",);
     assert!(
-        program.residual_count() > 0,
-        "a function name must not become a name lookup",
-    );
-    assert!(
-        !rhaigrain::bytecode::disassemble(program.code())
-            .any(|(.., op)| matches!(op, rhaigrain::bytecode::Op::LoadNamed(..))),
+        !rhai::grain::bytecode::disassemble(program.code()).any(|(.., op)| matches!(op, rhai::grain::bytecode::Op::LoadNamed(..))),
         "nothing in {:?} may load `helper` by name",
         program,
     );
@@ -332,21 +396,14 @@ fn a_global_module_constant_resolves() {
     let program = Compiler::new().compile(&ast);
     assert_eq!(program.residual_count(), 0);
 
-    let value = Vm::new(&engine)
-        .run(&program, &mut Scope::new())
-        .expect("a module constant must resolve");
+    let value = Vm::new(&engine).run(&program, &mut Scope::new()).expect("a module constant must resolve");
     assert_eq!(value.as_int().unwrap(), 256);
 
     // And writing to one is refused, because it is a value and not a place.
     let ast = engine.compile("CHANNELS = 1").expect("must compile");
     let program = Compiler::new().compile(&ast);
-    let err = Vm::new(&engine)
-        .run(&program, &mut Scope::new())
-        .expect_err("a module constant is not assignable");
-    assert!(
-        matches!(*err, rhai::EvalAltResult::ErrorAssignmentToConstant(..)),
-        "got {err:?}",
-    );
+    let err = Vm::new(&engine).run(&program, &mut Scope::new()).expect_err("a module constant is not assignable");
+    assert!(matches!(*err, rhai::EvalAltResult::ErrorAssignmentToConstant(..)), "got {err:?}",);
 }
 
 /// The first of the three, and the one a VM would most plausibly skip: a
@@ -374,26 +431,17 @@ fn a_variable_resolver_is_consulted_first() {
     scope.push("ordinary", 5_i64);
 
     let program = compile(&engine, "injected + ordinary");
-    let value = Vm::new(&engine)
-        .run(&program, &mut scope.clone())
-        .expect("both must resolve");
+    let value = Vm::new(&engine).run(&program, &mut scope.clone()).expect("both must resolve");
     assert_eq!(value.as_int().unwrap(), 104);
 
     // A resolver hands back a value rather than a place, so it is read-only.
     let program = compile(&engine, "injected = 1");
-    let err = Vm::new(&engine)
-        .run(&program, &mut scope.clone())
-        .expect_err("a resolved variable is not assignable");
-    assert!(
-        matches!(*err, rhai::EvalAltResult::ErrorAssignmentToConstant(..)),
-        "got {err:?}",
-    );
+    let err = Vm::new(&engine).run(&program, &mut scope.clone()).expect_err("a resolved variable is not assignable");
+    assert!(matches!(*err, rhai::EvalAltResult::ErrorAssignmentToConstant(..)), "got {err:?}",);
 
     // And the walker agrees about all of it.
     let ast = engine.compile("injected + ordinary").expect("must compile");
-    let expected = engine
-        .eval_ast_with_scope::<Dynamic>(&mut scope.clone(), &ast)
-        .expect("the walker must agree");
+    let expected = engine.eval_ast_with_scope::<Dynamic>(&mut scope.clone(), &ast).expect("the walker must agree");
     assert_eq!(expected.as_int().unwrap(), 104);
 }
 
@@ -416,14 +464,10 @@ fn a_resolver_that_grows_the_scope_forces_a_search() {
     assert_eq!(program.residual_count(), 0);
 
     let mut scope = Scope::new();
-    let value = Vm::new(&engine)
-        .run(&program, &mut scope)
-        .expect("must run");
+    let value = Vm::new(&engine).run(&program, &mut scope).expect("must run");
 
     let mut walked = Scope::new();
-    let expected = engine
-        .eval_ast_with_scope::<Dynamic>(&mut walked, &ast)
-        .expect("the walker must run it too");
+    let expected = engine.eval_ast_with_scope::<Dynamic>(&mut walked, &ast).expect("the walker must run it too");
 
     assert_eq!(format!("{value:?}"), format!("{expected:?}"));
 }
@@ -467,19 +511,9 @@ fn a_resolved_receiver_is_not_the_scope_entry_it_shadows() {
 
     // Read-only all the way through, so rhai refuses the call outright rather
     // than mutating a copy — which is a sharper thing to agree on.
-    assert!(
-        matches!(
-            walker.as_ref().unwrap_err().as_ref(),
-            rhai::EvalAltResult::ErrorNonPureMethodCallOnConstant(..),
-        ),
-        "got {walker:?}",
-    );
+    assert!(matches!(walker.as_ref().unwrap_err().as_ref(), rhai::EvalAltResult::ErrorNonPureMethodCallOnConstant(..),), "got {walker:?}",);
     assert_eq!(capture(&run, ours), capture(&walked, walker));
-    assert_eq!(
-        format!("{:?}", run.get_value::<Dynamic>("shadowed").unwrap()),
-        "[1]",
-        "the entry the resolver shadowed must come back untouched",
-    );
+    assert_eq!(format!("{:?}", run.get_value::<Dynamic>("shadowed").unwrap()), "[1]", "the entry the resolver shadowed must come back untouched",);
 }
 
 /// The one place a compiled closure is not the walker's closure.
@@ -501,22 +535,12 @@ fn a_closure_pointer_is_late_bound() {
     let program = Compiler::new().compile(&ast);
     assert_eq!(program.residual_count(), 0, "the closure must lower");
 
-    let ours = Vm::new(&engine)
-        .run(&program, &mut Scope::new())
-        .expect("must run");
-    let walker = engine
-        .eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast)
-        .expect("must run under rhai too");
+    let ours = Vm::new(&engine).run(&program, &mut Scope::new()).expect("must run");
+    let walker = engine.eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast).expect("must run under rhai too");
 
     let (ours, walker) = (format!("{ours:?}"), format!("{walker:?}"));
-    assert!(
-        ours.starts_with("Fn(\"anon$"),
-        "ours is a plain named pointer: {ours}",
-    );
-    assert!(
-        walker.starts_with("Fn*+(\"anon$"),
-        "rhai's carries a script body and an environment: {walker}",
-    );
+    assert!(ours.starts_with("Fn(\"anon$"), "ours is a plain named pointer: {ours}",);
+    assert!(walker.starts_with("Fn*+(\"anon$"), "rhai's carries a script body and an environment: {walker}",);
 
     // And the difference is only in the binding: calling either gives the
     // same answer, which is what the corpus covers.
@@ -528,20 +552,12 @@ fn a_closure_pointer_is_late_bound() {
 #[test]
 fn a_compiled_function_can_be_called_by_name() {
     let engine = corpus::engine();
-    let ast = engine
-        .compile("fn add(a, b) { a + b } fn boom() { throw 7; } 0")
-        .expect("must compile");
+    let ast = engine.compile("fn add(a, b) { a + b } fn boom() { throw 7; } 0").expect("must compile");
     let program = Compiler::new().compile(&ast);
 
     let mut vm = Vm::new(&engine);
     let value = vm
-        .call_function(
-            &program,
-            "add",
-            vec![Dynamic::from(2_i64), Dynamic::from(3_i64)],
-            0,
-            rhai::Position::NONE,
-        )
+        .call_function(&program, "add", vec![Dynamic::from(2_i64), Dynamic::from(3_i64)], 0, rhai::Position::NONE)
         .expect("must call");
     assert_eq!(value.as_int().unwrap(), 5);
 
@@ -552,23 +568,12 @@ fn a_compiled_function_can_be_called_by_name() {
     assert!(matches!(*err, rhai::EvalAltResult::ErrorFunctionNotFound(..)));
 
     // And what the function raises comes back, wrapped as rhai wraps it.
-    let err = vm
-        .call_function(&program, "boom", Vec::new(), 0, rhai::Position::NONE)
-        .expect_err("must propagate");
-    assert!(
-        matches!(*err, rhai::EvalAltResult::ErrorInFunctionCall(..)),
-        "got {err:?}",
-    );
+    let err = vm.call_function(&program, "boom", Vec::new(), 0, rhai::Position::NONE).expect_err("must propagate");
+    assert!(matches!(*err, rhai::EvalAltResult::ErrorInFunctionCall(..)), "got {err:?}",);
 
     // The operand stack is where it started, so a caller can keep using it.
     let value = vm
-        .call_function(
-            &program,
-            "add",
-            vec![Dynamic::from(10_i64), Dynamic::from(1_i64)],
-            0,
-            rhai::Position::NONE,
-        )
+        .call_function(&program, "add", vec![Dynamic::from(10_i64), Dynamic::from(1_i64)], 0, rhai::Position::NONE)
         .expect("must call again");
     assert_eq!(value.as_int().unwrap(), 11);
 }
@@ -597,20 +602,12 @@ fn the_compiler_says_whether_a_program_makes_function_pointers() {
     ] {
         let ast = engine.compile(source).expect("must compile");
         let program = Compiler::new().compile(&ast);
-        assert_eq!(
-            program.makes_fn_pointers(),
-            expected,
-            "for {source:?}",
-        );
+        assert_eq!(program.makes_fn_pointers(), expected, "for {source:?}",);
 
         // Read off the code, so an artifact answers the same.
         if let Ok(bytes) = program.write() {
-            let reloaded = rhaigrain::Program::read(&bytes).expect("must load");
-            assert_eq!(
-                reloaded.makes_fn_pointers(),
-                expected,
-                "after a round trip, for {source:?}",
-            );
+            let reloaded = rhai::grain::Program::read(&bytes).expect("must load");
+            assert_eq!(reloaded.makes_fn_pointers(), expected, "after a round trip, for {source:?}",);
         }
     }
 }
@@ -625,14 +622,12 @@ fn a_program_reading_caller_state_can_be_written() {
     let program = Compiler::new().compile(&ast);
     let bytes = program.write().expect("must be writable");
 
-    let reloaded = rhaigrain::Program::read(&bytes).expect("must load");
+    let reloaded = rhai::grain::Program::read(&bytes).expect("must load");
 
     let mut scope = Scope::new();
     scope.push("brightness", 5_i64);
     scope.push("mode", "chase".to_string());
-    let value = Vm::new(&engine)
-        .run(&reloaded, &mut scope)
-        .expect("must run");
+    let value = Vm::new(&engine).run(&reloaded, &mut scope).expect("must run");
 
     assert_eq!(value.as_int().unwrap(), 15);
 }

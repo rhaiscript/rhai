@@ -22,8 +22,11 @@ pub enum WriteError {
     /// deciding whether to ship source instead needs to know what it is
     /// falling back for.
     HasResiduals {
+        /// How many fragments the program still has
         count: usize,
+        /// What the first of them is
         construct: &'static str,
+        /// Where it is in the source
         pos: rhai::Position,
     },
     /// Script functions are still ASTs in the program's library. Compiling them
@@ -31,10 +34,18 @@ pub enum WriteError {
     HasScriptFunctions,
     /// A pooled constant carries something that has no meaning in another
     /// process — a host type, a function pointer, a clock reading.
-    UnserializableConstant { index: usize, type_name: String },
+    UnserializableConstant {
+        /// Index into the constant pool
+        index: usize,
+        /// What the constant holds
+        type_name: String,
+    },
     /// An operator token that does not survive `syntax -> token`. Storing it
     /// would silently change which built-in the VM reaches.
-    AmbiguousToken { token: String },
+    AmbiguousToken {
+        /// The token's syntax
+        token: String,
+    },
 }
 
 impl core::fmt::Display for WriteError {

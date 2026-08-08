@@ -26,8 +26,8 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicIsize, Ordering};
 
+use rhai::grain::Compiler;
 use rhai::Engine;
-use rhaigrain::Compiler;
 
 static LIVE: AtomicIsize = AtomicIsize::new(0);
 static COUNT: AtomicIsize = AtomicIsize::new(0);
@@ -36,14 +36,7 @@ static PEAK: AtomicIsize = AtomicIsize::new(0);
 /// Live allocations by size class, `SIZE_CLASSES[i-1] < size <= SIZE_CLASSES[i]`.
 /// The small classes are what a per-allocation header punishes, and an AST is
 /// mostly small classes.
-static BUCKETS: [AtomicIsize; 6] = [
-    AtomicIsize::new(0),
-    AtomicIsize::new(0),
-    AtomicIsize::new(0),
-    AtomicIsize::new(0),
-    AtomicIsize::new(0),
-    AtomicIsize::new(0),
-];
+static BUCKETS: [AtomicIsize; 6] = [AtomicIsize::new(0), AtomicIsize::new(0), AtomicIsize::new(0), AtomicIsize::new(0), AtomicIsize::new(0), AtomicIsize::new(0)];
 const SIZE_CLASSES: [usize; 6] = [8, 16, 32, 64, 256, usize::MAX];
 
 fn bucket_of(size: usize) -> usize {
@@ -69,8 +62,7 @@ unsafe impl GlobalAlloc for Counting {
     }
 
     unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
-        let now = LIVE.fetch_add(new as isize - l.size() as isize, Ordering::Relaxed) + new as isize
-            - l.size() as isize;
+        let now = LIVE.fetch_add(new as isize - l.size() as isize, Ordering::Relaxed) + new as isize - l.size() as isize;
         PEAK.fetch_max(now, Ordering::Relaxed);
         BUCKETS[bucket_of(l.size())].fetch_sub(1, Ordering::Relaxed);
         BUCKETS[bucket_of(new)].fetch_add(1, Ordering::Relaxed);
@@ -203,32 +195,17 @@ fn allocation_footprint() {
     let per_source_byte = ast.bytes as f64 / source_bytes as f64;
 
     println!("\nsource                    {source_bytes} bytes");
-    println!(
-        "\n{:<24} {:>10} {:>10} {:>10}",
-        "", "bytes", "allocs", "peak"
-    );
-    println!(
-        "{:<24} {:>10} {:>10} {:>10}",
-        "Engine::new", engine_cost.bytes, engine_cost.count, engine_cost.peak
-    );
-    println!(
-        "{:<24} {:>10} {:>10} {:>10}",
-        "engine.compile (AST)", ast.bytes, ast.count, ast.peak
-    );
-    println!(
-        "{:<24} {:>10} {:>10} {:>10}",
-        "Compiler::compile", program.bytes, program.count, program.peak
-    );
+    println!("\n{:<24} {:>10} {:>10} {:>10}", "", "bytes", "allocs", "peak");
+    println!("{:<24} {:>10} {:>10} {:>10}", "Engine::new", engine_cost.bytes, engine_cost.count, engine_cost.peak);
+    println!("{:<24} {:>10} {:>10} {:>10}", "engine.compile (AST)", ast.bytes, ast.count, ast.peak);
+    println!("{:<24} {:>10} {:>10} {:>10}", "Compiler::compile", program.bytes, program.count, program.peak);
 
     // Not yet comparable to traffic-light's 24.0: that is a 32-bit device
     // figure measured against minified source, this is a host figure against
     // unminified source. M1 makes them comparable by measuring follow.rhai,
     // minified, the way the server actually ships it.
     println!("\nAST bytes per source byte {per_source_byte:.1}  (host, unminified)");
-    println!(
-        "AST parser peak / retained {:.2}x  (the peak is what has to fit)",
-        ast.peak as f64 / ast.bytes as f64
-    );
+    println!("AST parser peak / retained {:.2}x  (the peak is what has to fit)", ast.peak as f64 / ast.bytes as f64);
 
     println!("\nAST live allocations by size class");
     let labels = ["<=8", "<=16", "<=32", "<=64", "<=256", ">256"];
@@ -245,20 +222,9 @@ fn allocation_footprint() {
     // `Expr::Variable` payload — and this script has 457 of them. Compare
     // against 77968, not against this, until M6 builds the restricted set.
     println!("\nfollow.rhai — {} source bytes", FOLLOW.len());
-    println!(
-        "{:<24} {:>10} {:>10} {:>10}",
-        "engine.compile (AST)", follow_ast.bytes, follow_ast.count, follow_ast.peak
-    );
-    println!(
-        "{:<24} {:>10.1}",
-        "bytes per source byte",
-        follow_ast.bytes as f64 / FOLLOW.len() as f64
-    );
-    println!(
-        "{:<24} {:>10.2}x",
-        "parser peak / retained",
-        follow_ast.peak as f64 / follow_ast.bytes as f64
-    );
+    println!("{:<24} {:>10} {:>10} {:>10}", "engine.compile (AST)", follow_ast.bytes, follow_ast.count, follow_ast.peak);
+    println!("{:<24} {:>10.1}", "bytes per source byte", follow_ast.bytes as f64 / FOLLOW.len() as f64);
+    println!("{:<24} {:>10.2}x", "parser peak / retained", follow_ast.peak as f64 / follow_ast.bytes as f64);
     println!("\nfollow.rhai AST live allocations by size class");
     for (label, n) in labels.iter().zip(follow_ast.buckets) {
         println!("  {label:>6} {n:>8}");
@@ -273,16 +239,9 @@ fn allocation_footprint() {
     // The measurement the whole project was for: the real script, the real
     // tree, and the artifact that replaces it.
     let follow_program = Compiler::new().compile(&follow_ast.value);
-    assert_eq!(
-        follow_program.residual_count(),
-        0,
-        "follow.rhai must lower completely, or there is nothing to write",
-    );
-    let (follow_artifact, follow_table) = follow_program
-        .write_stripped()
-        .expect("follow.rhai must be writable");
-    let follow_loaded =
-        measure(|| rhaigrain::Program::read(&follow_artifact).expect("must load"));
+    assert_eq!(follow_program.residual_count(), 0, "follow.rhai must lower completely, or there is nothing to write",);
+    let (follow_artifact, follow_table) = follow_program.write_stripped().expect("follow.rhai must be writable");
+    let follow_loaded = measure(|| rhai::grain::Program::read(&follow_artifact).expect("must load"));
 
     println!(
         "\nfollow.rhai: {} source bytes\n  tree      {:>8} bytes retained, {:>5} allocs, {:>8} peak\n  \
@@ -297,20 +256,14 @@ fn allocation_footprint() {
         follow_loaded.bytes,
         follow_loaded.count,
     );
-    println!(
-        "  {:.1}x less retained, and no parser peak at all",
-        follow_ast.bytes as f64 / follow_loaded.bytes as f64,
-    );
+    println!("  {:.1}x less retained, and no parser peak at all", follow_ast.bytes as f64 / follow_loaded.bytes as f64,);
 
     // Measured at several lengths, because the ratio at one length says almost
     // nothing. Repeating the same statements grows the instruction stream while
     // the set of distinct names stays put — which is exactly the shape the
     // claim is about, and the shape a real script has as it gets longer.
     println!("\nloading an artifact against parsing the same script");
-    println!(
-        "{:>7} {:>9} {:>9} {:>9} {:>8} {:>7}",
-        "source", "artifact", "tree", "loaded", "allocs", "ratio"
-    );
+    println!("{:>7} {:>9} {:>9} {:>9} {:>8} {:>7}", "source", "artifact", "tree", "loaded", "allocs", "ratio");
 
     let mut ratios = Vec::new();
     for repeats in [1usize, 4, 16] {
@@ -318,66 +271,39 @@ fn allocation_footprint() {
 
         let tree = measure(|| engine.compile(&source).expect("must compile"));
         let program = Compiler::new().compile(&tree.value);
-        assert_eq!(
-            program.residual_count(),
-            0,
-            "LOADABLE must lower completely, or this measures the walker",
-        );
+        assert_eq!(program.residual_count(), 0, "LOADABLE must lower completely, or this measures the walker",);
 
         let (stripped, _) = program.write_stripped().expect("must be writable");
-        let loaded = measure(|| rhaigrain::Program::read(&stripped).expect("must load"));
+        let loaded = measure(|| rhai::grain::Program::read(&stripped).expect("must load"));
 
         // Borrowed, not copied: the code section contributes nothing at all to
         // what a load retains, which is the whole reason for the byte encoding.
         let code = loaded.value.code();
         assert!(
-            code.as_ptr() >= stripped.as_ptr()
-                && code.as_ptr() as usize <= stripped.as_ptr() as usize + stripped.len(),
+            code.as_ptr() >= stripped.as_ptr() && code.as_ptr() as usize <= stripped.as_ptr() as usize + stripped.len(),
             "the loaded chunk must point into the artifact, not into a copy of it",
         );
 
         let ratio = tree.bytes as f64 / loaded.bytes as f64;
         ratios.push(ratio);
-        println!(
-            "{:>7} {:>9} {:>9} {:>9} {:>8} {:>6.1}x",
-            source.len(),
-            stripped.len(),
-            tree.bytes,
-            loaded.bytes,
-            loaded.count,
-            ratio,
-        );
+        println!("{:>7} {:>9} {:>9} {:>9} {:>8} {:>6.1}x", source.len(), stripped.len(), tree.bytes, loaded.bytes, loaded.count, ratio,);
     }
 
     // The property, rather than a number that would need updating: what a tree
     // retains grows with the program, what a load retains does not. A ratio
     // that stopped climbing would mean something in the loader had started
     // scaling with length.
-    assert!(
-        ratios[2] > ratios[1] && ratios[1] > ratios[0],
-        "the saving must grow with the program, got {ratios:?}",
-    );
+    assert!(ratios[2] > ratios[1] && ratios[1] > ratios[0], "the saving must grow with the program, got {ratios:?}",);
 
     // The instrument has to be working before any milestone can lean on it.
-    assert!(
-        ast.count > 0 && ast.bytes > 0,
-        "the counters saw nothing; the global allocator is not installed",
-    );
-    assert!(
-        ast.peak >= ast.bytes,
-        "peak ({}) below retained ({}) means peak tracking is broken",
-        ast.peak,
-        ast.bytes,
-    );
+    assert!(ast.count > 0 && ast.bytes > 0, "the counters saw nothing; the global allocator is not installed",);
+    assert!(ast.peak >= ast.bytes, "peak ({}) below retained ({}) means peak tracking is broken", ast.peak, ast.bytes,);
 
     // M0's compiler clones the whole statement list into one residual, so the
     // Program is a second copy of the tree rather than a saving. Pinning that
     // here means M1's first real lowering shows up as this assertion failing,
     // which is the intended way to notice progress.
-    assert!(
-        program.bytes > 0,
-        "a whole-program residual should cost about what the tree costs",
-    );
+    assert!(program.bytes > 0, "a whole-program residual should cost about what the tree costs",);
 
     drop(program);
     drop(ast);

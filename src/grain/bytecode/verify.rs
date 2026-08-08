@@ -9,12 +9,19 @@ use crate::grain::bytecode::{Chain, Chunk, Op, Receiver, Root, Step, Switch, Tai
 /// stack a chain consumes, and where a switch can send control.
 #[derive(Debug, Clone, Copy)]
 pub struct Pools<'a> {
+    /// How many constants there are.
     pub consts: usize,
+    /// How many interned names there are.
     pub names: usize,
+    /// How many operator tokens there are.
     pub tokens: usize,
+    /// How many op-assignments there are.
     pub assign_ops: usize,
+    /// How many residual AST fragments there are.
     pub residuals: usize,
+    /// The chain pool.
     pub chains: &'a [Chain],
+    /// The switch pool.
     pub switches: &'a [Switch],
 }
 
@@ -27,42 +34,91 @@ pub struct Pools<'a> {
 pub enum VerifyError {
     /// A tag with no instruction behind it, or one whose operands run past the
     /// end of the chunk.
-    Undecodable { at: usize },
+    Undecodable {
+        /// Byte offset of the offending tag
+        at: usize,
+    },
     /// The last instruction stops short of the end, so the trailing bytes are
     /// not instructions.
-    TrailingBytes { at: usize, len: usize },
+    TrailingBytes {
+        /// Where the trailing bytes start
+        at: usize,
+        /// How long the code is
+        len: usize,
+    },
     /// A chunk names a span the code does not have.
-    ChunkOutOfRange { entry: u32, end: u32, len: usize },
+    ChunkOutOfRange {
+        /// The chunk's first byte offset
+        entry: u32,
+        /// One past its last
+        end: u32,
+        /// How long the code is
+        len: usize,
+    },
     /// A jump leaves the chunk it is in — including into another chunk, which
     /// would run that function's instructions against this frame's locals.
-    JumpOutOfRange { at: usize, target: u32 },
+    JumpOutOfRange {
+        /// Byte offset of the jump
+        at: usize,
+        /// The byte offset it names
+        target: u32,
+    },
     /// A jump lands inside an instruction rather than on one. Decoding from
     /// there would read an operand's bytes as a tag.
-    JumpIntoAnInstruction { at: usize, target: u32 },
+    JumpIntoAnInstruction {
+        /// Byte offset of the jump
+        at: usize,
+        /// The byte offset it names
+        target: u32,
+    },
     /// Two paths reach the same instruction with different stack depths, so
     /// the depth at that point is not a static property.
     DepthConflict {
+        /// Byte offset of the instruction
         at: usize,
+        /// The depth already recorded for it
         expected: usize,
+        /// The depth the other path arrives with
         found: usize,
     },
     /// An instruction pops more than is on the stack.
-    Underflow { at: usize, need: usize, have: usize },
+    Underflow {
+        /// Byte offset of the instruction
+        at: usize,
+        /// How many values it pops
+        need: usize,
+        /// How many are on the stack
+        have: usize,
+    },
     /// Execution can run past the last instruction.
     FallsOffTheEnd,
     /// The chunk claims less stack than it uses.
-    StackExceedsDeclared { needed: usize, declared: u16 },
+    StackExceedsDeclared {
+        /// The depth actually reached
+        needed: usize,
+        /// The depth the chunk declares
+        declared: u16,
+    },
     /// An iterator is dropped where none was made. The compiler pairs these
     /// up lexically; an artifact off a wire has to be asked.
-    IteratorUnderflow { at: usize },
+    IteratorUnderflow {
+        /// Byte offset of the instruction
+        at: usize,
+    },
     /// A handler is disarmed where none was armed. A stale handler is worse
     /// than a missing one: the next unrelated error would be caught into an
     /// already-exited `catch` block.
-    HandlerUnderflow { at: usize },
+    HandlerUnderflow {
+        /// Byte offset of the instruction
+        at: usize,
+    },
     /// An index into a pool with nothing behind it.
     BadIndex {
+        /// Byte offset of the instruction
         at: usize,
+        /// Which pool was indexed
         what: &'static str,
+        /// The index it used
         index: u32,
     },
 }

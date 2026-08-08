@@ -28,8 +28,11 @@ pub enum Step {
     /// carrying one position between it and its neighbours would name the
     /// wrong one.
     Index {
+        /// Where the index sits on the operand stack.
         operand: u16,
+        /// Where the index expression starts.
         pos: rhai::Position,
+        /// The `[` in front of it.
         bracket: rhai::Position,
     },
 
@@ -43,16 +46,19 @@ pub enum Step {
         getter: u32,
         /// `set$name`, for the write-back.
         setter: u32,
+        /// Where the property is in the source.
         pos: rhai::Position,
     },
 
     /// `.name(args)`, with the receiver as the first argument by reference.
     Method {
+        /// The name of the method
         name: u32,
         /// How many arguments, not counting the receiver.
         argc: u8,
         /// Where the first of them sits on the operand stack.
         operand: u16,
+        /// Where the call is in the source.
         pos: rhai::Position,
     },
 }
@@ -103,6 +109,7 @@ pub enum Root {
     /// to land in the scope entry, and walking a copy of it would lose the
     /// mutation.
     Local {
+        /// The slot index
         slot: u16,
         /// Names it in `ErrorAssignmentToConstant`.
         name: u32,
@@ -123,7 +130,12 @@ pub enum Root {
     /// chain. That costs nothing extra: chain positions already live in this
     /// pool rather than in the strippable table, for the reason [`Step::pos`]
     /// gives.
-    Named { name: u32, pos: rhai::Position },
+    Named {
+        /// The name of the variable
+        name: u32,
+        /// Where the variable is in the source.
+        pos: rhai::Position,
+    },
 
     /// A value the instruction takes off the operand stack, pushed above the
     /// step operands.
@@ -138,8 +150,11 @@ pub enum Root {
 /// A whole `a.b[i].c` chain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chain {
+    /// Where the chain starts.
     pub root: Root,
+    /// The steps, in source order.
     pub steps: Vec<Step>,
+    /// What happens at the end.
     pub tail: Tail,
     /// How many operand-stack values the *steps* consume, so the VM knows
     /// where they start. Not the whole instruction's appetite — see

@@ -17,8 +17,8 @@ use crate::Position;
 /// back-edge passes a position to `track_operation` on every iteration, and the
 /// built-in operator path builds a `NativeCallContext` around one — both on the
 /// hot path, both needing it only if something goes wrong. Indexing an array is
-/// what makes that free. The compact delta form in [`rhaigrain_pos`] is the
-/// wire form, expanded once at load.
+/// what makes that free. The compact delta form in [`pos`](crate::grain::pos)
+/// is the wire form, expanded once at load.
 ///
 /// [`Positions::Stripped`] is not a degraded mode to apologise for: it is what
 /// a device runs. Errors come back carrying an instruction address instead of a
@@ -61,7 +61,8 @@ impl Positions {
         matches!(self, Self::Stripped)
     }
 
-    /// Encode as the compact table [`rhaigrain_pos::resolve`] reads.
+    /// Encode as the compact table [`pos::resolve`](crate::grain::pos::resolve)
+    /// reads.
     ///
     /// Instructions with no position are skipped, which is most of them.
     #[must_use]
@@ -89,7 +90,7 @@ impl Positions {
     ///
     /// # Errors
     ///
-    /// Whatever [`rhaigrain_pos::check`] found, or [`TableError::PastTheEnd`]
+    /// Whatever [`pos::check`](crate::grain::pos::check) found, or [`TableError::PastTheEnd`]
     /// for an address that does not name an instruction.
     pub fn from_table(table: &[u8], instructions: usize) -> Result<Self, TableError> {
         crate::grain::pos::check(table).map_err(TableError::Malformed)?;
@@ -130,8 +131,11 @@ pub enum TableError {
     /// The table names addresses this chunk does not have, so it belongs to a
     /// different program.
     PastTheEnd {
+        /// How many entries the table holds
         entries: usize,
+        /// How many of them landed on an instruction
         matched: usize,
+        /// How many instructions the chunk has
         instructions: usize,
     },
 }

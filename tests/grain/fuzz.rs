@@ -17,13 +17,12 @@
 
 // Only the sources are wanted here; the names belong to the harnesses that
 // report per-case results.
-#[allow(dead_code)]
-mod corpus;
+use super::corpus;
 
+use rhai::grain::{Compiler, Program, Vm};
 use rhai::{Dynamic, Engine, Scope};
-use rhaigrain::{Compiler, Program, Vm};
 
-use corpus::generate::{Generator, Rng};
+use super::corpus::generate::{Generator, Rng};
 
 /// Ways an artifact can arrive wrong. Truncation and splicing matter as much
 /// as corruption: a length field that disagrees with what follows is how a
@@ -92,11 +91,7 @@ fn mutated_artifacts_load_or_fail_but_never_misbehave() {
         })
         .collect();
 
-    assert!(
-        seeds.len() >= 50,
-        "only {} artifacts to mutate, which is too few to prove anything",
-        seeds.len(),
-    );
+    assert!(seeds.len() >= 50, "only {} artifacts to mutate, which is too few to prove anything", seeds.len(),);
 
     // A budget, because verification proves structure and not termination: a
     // corrupted-but-in-range jump target is a valid infinite loop.
@@ -137,14 +132,8 @@ fn mutated_artifacts_load_or_fail_but_never_misbehave() {
         }
     }
 
-    println!(
-        "{loaded} of {} mutations loaded and ran",
-        ROUNDS * seeds.len(),
-    );
-    assert!(
-        loaded > 0,
-        "no mutation survived, so nothing was actually executed",
-    );
+    println!("{loaded} of {} mutations loaded and ran", ROUNDS * seeds.len(),);
+    assert!(loaded > 0, "no mutation survived, so nothing was actually executed",);
 }
 
 /// Bytes that were never an artifact, which is the other way in.
@@ -190,13 +179,8 @@ impl std::fmt::Debug for Outcome {
 
 fn snapshot(scope: &Scope, result: Result<Dynamic, Box<rhai::EvalAltResult>>) -> Outcome {
     Outcome {
-        result: result
-            .map(|value| format!("{value:?}"))
-            .map_err(|err| format!("{err:?}")),
-        scope: scope
-            .iter_raw()
-            .map(|(name, _, value)| (name.to_string(), format!("{value:?}")))
-            .collect(),
+        result: result.map(|value| format!("{value:?}")).map_err(|err| format!("{err:?}")),
+        scope: scope.iter_raw().map(|(name, _, value)| (name.to_string(), format!("{value:?}"))).collect(),
     }
 }
 
@@ -212,9 +196,7 @@ fn hit_a_limit(outcome: &Outcome) -> bool {
     let Err(err) = &outcome.result else {
         return false;
     };
-    ["ErrorTooManyOperations", "ErrorStackOverflow", "ErrorTooManyVariables"]
-        .iter()
-        .any(|limit| err.contains(limit))
+    ["ErrorTooManyOperations", "ErrorStackOverflow", "ErrorTooManyVariables"].iter().any(|limit| err.contains(limit))
 }
 
 /// Run something that may panic, without the panic reaching the console.
@@ -265,9 +247,7 @@ fn rhai_drops_a_local_its_optimizer_still_refers_to() {
     plain.set_optimization_level(rhai::OptimizationLevel::None);
 
     let ast = engine.compile(WRONG).expect("it parses");
-    let value = engine
-        .eval_ast::<Dynamic>(&ast)
-        .expect("rhai runs it, which is the problem");
+    let value = engine.eval_ast::<Dynamic>(&ast).expect("rhai runs it, which is the problem");
     assert_eq!(
         value.as_int().ok(),
         Some(1),
@@ -306,8 +286,7 @@ fn agree_unoptimised(source: &str) -> bool {
     };
 
     let mut walker_scope = Scope::new();
-    let Some(walked) = quietly(|| plain.eval_ast_with_scope::<Dynamic>(&mut walker_scope, &ast))
-    else {
+    let Some(walked) = quietly(|| plain.eval_ast_with_scope::<Dynamic>(&mut walker_scope, &ast)) else {
         return false;
     };
 
@@ -384,8 +363,7 @@ fn generated_scripts_agree_with_the_walker() {
         // nothing to compare against a side that did not finish, so those are
         // counted and dropped rather than blamed on the VM.
         let mut walker_scope = Scope::new();
-        let Some(walked) = quietly(|| engine.eval_ast_with_scope::<Dynamic>(&mut walker_scope, &ast))
-        else {
+        let Some(walked) = quietly(|| engine.eval_ast_with_scope::<Dynamic>(&mut walker_scope, &ast)) else {
             walker_panics += 1;
             continue;
         };
@@ -421,18 +399,13 @@ fn generated_scripts_agree_with_the_walker() {
         // Not every disagreement is one to have: rhai's optimizer can delete a
         // `let` whose variable is still read, and then there is no agreeing
         // with it. See `rhai_drops_a_local_its_optimizer_still_refers_to`.
-        if format!("{ours:?}").contains("ErrorVariableNotFound")
-            && agree_unoptimised(&source)
-        {
+        if format!("{ours:?}").contains("ErrorVariableNotFound") && agree_unoptimised(&source) {
             lost_a_local += 1;
             continue;
         }
 
         if failures.len() < 5 {
-            failures.push(format!(
-                "\n=== script {n} (seed {:#x}) ===\n  {source}\n  rhai: {walked:?}\n  vm:   {ours:?}",
-                SEED ^ n as u64,
-            ));
+            failures.push(format!("\n=== script {n} (seed {:#x}) ===\n  {source}\n  rhai: {walked:?}\n  vm:   {ours:?}", SEED ^ n as u64,));
         }
     }
 
@@ -494,9 +467,5 @@ fn generated_scripts_agree_with_the_walker() {
          deciding the outcome rather than the code",
     );
 
-    assert!(
-        failures.is_empty(),
-        "generated scripts diverged:{}",
-        failures.join(""),
-    );
+    assert!(failures.is_empty(), "generated scripts diverged:{}", failures.join(""),);
 }

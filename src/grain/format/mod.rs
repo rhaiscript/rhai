@@ -1,4 +1,4 @@
-//! The on-the-wire form of a [`Program`](crate::Program).
+//! The on-the-wire form of a [`Program`].
 //!
 //! This is what the project is for. A device that loads bytes runs no parser
 //! and builds no tree, so neither the nodes a retained rhai `AST` costs nor the
@@ -27,7 +27,7 @@
 //! Everything outside the code section is LEB128, signed values zigzagged,
 //! because it is read once at load. The code section is not: it is the bytes
 //! the VM executes, copied in and sliced back out untouched, with fixed-width
-//! operands so dispatch does not decode. See [`crate::bytecode::code`].
+//! operands so dispatch does not decode. See [`crate::grain::bytecode::code`].
 //!
 //! ## What it refuses to write
 //!
@@ -115,7 +115,7 @@ impl<'a> Program<'a> {
     ///
     /// This is the split the debug layer exists for. Ship the first half to the
     /// device and keep the second: errors then arrive carrying an instruction
-    /// address, and [`rhaigrain_pos::resolve`] turns it back into a position
+    /// address, and [`pos::resolve`](crate::grain::pos::resolve) turns it back into a position
     /// where the source still is. The table can also be sent back later with
     /// [`Program::attach_positions`].
     ///

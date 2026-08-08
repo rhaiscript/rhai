@@ -1,3 +1,6 @@
+//! The instruction set, the pools it indexes, and the checks a chunk must pass
+//! before it runs.
+
 pub mod code;
 
 mod chain;

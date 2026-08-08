@@ -14,9 +14,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use rhai::grain::bytecode::Op;
+use rhai::grain::{Compiler, Program, Vm};
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
-use rhaigrain::bytecode::Op;
-use rhaigrain::{Compiler, Program, Vm};
 
 /// A bare infinite loop, which the compiler lowers with nothing left over —
 /// asserted below, so this cannot silently become a test of the fallback.
@@ -26,21 +26,11 @@ fn run_vm(engine: &Engine, source: &str) -> Result<Dynamic, Box<EvalAltResult>> 
     let ast = engine.compile(source).expect("must compile");
     let program = Compiler::new().compile(&ast);
 
-    assert_eq!(
-        program.residual_count(),
-        0,
-        "{source:?} must be fully lowered, or this tests rhai rather than the VM",
-    );
+    assert_eq!(program.residual_count(), 0, "{source:?} must be fully lowered, or this tests rhai rather than the VM",);
 
     // Without a tick on the back-edge nothing in a compiled loop ever reaches
     // `track_operation`, and the tests below would hang rather than fail.
-    assert!(
-        program
-            .main()
-            .ops(program.code())
-            .any(|(_, op)| op == Op::Tick),
-        "{source:?} lowered to a loop with no operation tick",
-    );
+    assert!(program.main().ops(program.code()).any(|(_, op)| op == Op::Tick), "{source:?} lowered to a loop with no operation tick",);
 
     Vm::new(engine).run(&program, &mut Scope::new())
 }
@@ -52,10 +42,7 @@ fn compiled_loop_hits_the_operation_limit() {
 
     let err = run_vm(&engine, SPIN).expect_err("an unbounded loop must be stopped");
 
-    assert!(
-        matches!(*err, EvalAltResult::ErrorTooManyOperations(..)),
-        "expected ErrorTooManyOperations, got {err:?}",
-    );
+    assert!(matches!(*err, EvalAltResult::ErrorTooManyOperations(..)), "expected ErrorTooManyOperations, got {err:?}",);
 }
 
 #[test]
@@ -72,14 +59,8 @@ fn compiled_loop_honours_the_progress_interrupt() {
 
     let err = run_vm(&engine, SPIN).expect_err("the interrupt must stop the loop");
 
-    assert!(
-        matches!(*err, EvalAltResult::ErrorTerminated(..)),
-        "expected ErrorTerminated, got {err:?}",
-    );
-    assert!(
-        ticks.load(Ordering::SeqCst) >= 500,
-        "on_progress should have been called on every back-edge",
-    );
+    assert!(matches!(*err, EvalAltResult::ErrorTerminated(..)), "expected ErrorTerminated, got {err:?}",);
+    assert!(ticks.load(Ordering::SeqCst) >= 500, "on_progress should have been called on every back-edge",);
 }
 
 /// A chunk that loops with no tick in it must still be stopped.
@@ -106,39 +87,21 @@ fn a_loop_with_its_tick_removed_still_hits_the_limit() {
     // Where the tick sits inside the code, and what the code looks like, so the
     // same bytes can be found again inside the finished artifact.
     let code = program.code().to_vec();
-    let (tick_at, _) = program
-        .main()
-        .ops(program.code())
-        .find(|(_, op)| *op == Op::Tick)
-        .expect("the compiler ticks a loop");
+    let (tick_at, _) = program.main().ops(program.code()).find(|(_, op)| *op == Op::Tick).expect("the compiler ticks a loop");
 
     let mut bytes = program.write().expect("a lowered program must write");
-    let start = bytes
-        .windows(code.len())
-        .position(|window| window == code)
-        .expect("the artifact embeds the code verbatim");
+    let start = bytes.windows(code.len()).position(|window| window == code).expect("the artifact embeds the code verbatim");
 
     // `Checkpoint` is the other one-byte instruction that does nothing to the
     // stack, so this swap leaves every offset, jump target and position entry
     // exactly where it was. Only the metering goes.
-    bytes[start + tick_at] = rhaigrain::bytecode::code::tag::CHECKPOINT;
+    bytes[start + tick_at] = rhai::grain::bytecode::code::tag::CHECKPOINT;
 
     let tickless = Program::read(&bytes).expect("still a valid artifact");
-    assert!(
-        !tickless
-            .main()
-            .ops(tickless.code())
-            .any(|(_, op)| op == Op::Tick),
-        "the tick should be gone, or this tests nothing",
-    );
+    assert!(!tickless.main().ops(tickless.code()).any(|(_, op)| op == Op::Tick), "the tick should be gone, or this tests nothing",);
 
-    let err = Vm::new(&engine)
-        .run(&tickless, &mut Scope::new())
-        .expect_err("a tickless loop must still be stopped");
-    assert!(
-        matches!(*err, EvalAltResult::ErrorTooManyOperations(..)),
-        "expected ErrorTooManyOperations, got {err:?}",
-    );
+    let err = Vm::new(&engine).run(&tickless, &mut Scope::new()).expect_err("a tickless loop must still be stopped");
+    assert!(matches!(*err, EvalAltResult::ErrorTooManyOperations(..)), "expected ErrorTooManyOperations, got {err:?}",);
 }
 
 /// The walker and the VM must agree that the script *fails*, even though they
@@ -149,14 +112,9 @@ fn the_walker_agrees_the_loop_is_stopped() {
     engine.set_max_operations(10_000);
 
     let ast = engine.compile(SPIN).expect("must compile");
-    let err = engine
-        .eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast)
-        .expect_err("rhai must stop it too");
+    let err = engine.eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast).expect_err("rhai must stop it too");
 
-    assert!(
-        matches!(*err, EvalAltResult::ErrorTooManyOperations(..)),
-        "expected ErrorTooManyOperations, got {err:?}",
-    );
+    assert!(matches!(*err, EvalAltResult::ErrorTooManyOperations(..)), "expected ErrorTooManyOperations, got {err:?}",);
 }
 
 /// `max_string_size` is a host's defence, and interpolation is the easiest way
@@ -178,22 +136,11 @@ fn interpolation_respects_the_string_limit() {
     let program = Compiler::new().compile(&ast);
     assert_eq!(program.residual_count(), 0, "must be lowered, not walked");
 
-    let walker = engine
-        .eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast)
-        .expect_err("the walker must refuse it");
-    let vm = Vm::new(&engine)
-        .run(&program, &mut Scope::new())
-        .expect_err("and so must the VM");
+    let walker = engine.eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast).expect_err("the walker must refuse it");
+    let vm = Vm::new(&engine).run(&program, &mut Scope::new()).expect_err("and so must the VM");
 
-    assert!(
-        matches!(*vm, EvalAltResult::ErrorDataTooLarge(..)),
-        "got {vm:?}",
-    );
-    assert_eq!(
-        format!("{vm:?}"),
-        format!("{walker:?}"),
-        "including the position of the segment that went over",
-    );
+    assert!(matches!(*vm, EvalAltResult::ErrorDataTooLarge(..)), "got {vm:?}",);
+    assert_eq!(format!("{vm:?}"), format!("{walker:?}"), "including the position of the segment that went over",);
 }
 
 /// A loop that does terminate must not be killed by the tick itself, and must
@@ -207,13 +154,9 @@ fn ticking_does_not_disturb_a_bounded_loop() {
     let ast = engine.compile(source).expect("must compile");
 
     let program = Compiler::new().compile(&ast);
-    let vm = Vm::new(&engine)
-        .run(&program, &mut Scope::new())
-        .expect("bounded loop must finish");
+    let vm = Vm::new(&engine).run(&program, &mut Scope::new()).expect("bounded loop must finish");
 
-    let walker = engine
-        .eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast)
-        .expect("bounded loop must finish under rhai too");
+    let walker = engine.eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast).expect("bounded loop must finish under rhai too");
 
     assert_eq!(format!("{vm:?}"), format!("{walker:?}"));
 }

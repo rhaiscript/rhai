@@ -8,11 +8,11 @@
 //! every single-byte corruption of a valid artifact either loads or fails, and
 //! never panics.
 
-mod corpus;
+use super::corpus;
 
+use rhai::grain::format::{ReadError, WriteError};
+use rhai::grain::{Compiler, Program, Vm};
 use rhai::{Dynamic, Engine, Scope};
-use rhaigrain::format::{ReadError, WriteError};
-use rhaigrain::{Compiler, Program, Vm};
 
 /// What a run produced, in a form two runs can be compared on.
 #[derive(Debug, PartialEq, Eq)]
@@ -24,13 +24,8 @@ struct Outcome {
 /// A finished run, reduced to what two of them can be compared on.
 fn snapshot(scope: &Scope, result: Result<Dynamic, Box<rhai::EvalAltResult>>) -> Outcome {
     Outcome {
-        result: result
-            .map(|value| format!("{value:?}"))
-            .map_err(|err| format!("{err:?}")),
-        scope: scope
-            .iter_raw()
-            .map(|(name, _, value)| (name.to_string(), format!("{value:?}")))
-            .collect(),
+        result: result.map(|value| format!("{value:?}")).map_err(|err| format!("{err:?}")),
+        scope: scope.iter_raw().map(|(name, _, value)| (name.to_string(), format!("{value:?}"))).collect(),
     }
 }
 
@@ -89,18 +84,11 @@ fn an_artifact_runs_as_the_program_it_came_from() {
         let actual = run(&engine, reloaded);
 
         if expected != actual {
-            failures.push(format!(
-                "\n  {name}: {source}\n    rhai: {expected:?}\n    artifact: {actual:?}"
-            ));
+            failures.push(format!("\n  {name}: {source}\n    rhai: {expected:?}\n    artifact: {actual:?}"));
         }
     }
 
-    assert!(
-        failures.is_empty(),
-        "{} artifacts do not mean what they came from:{}",
-        failures.len(),
-        failures.join(""),
-    );
+    assert!(failures.is_empty(), "{} artifacts do not mean what they came from:{}", failures.len(), failures.join(""),);
 }
 
 /// A round trip over an empty set passes trivially, so pin the size of the set
@@ -111,39 +99,32 @@ fn the_round_trip_covers_something_worth_covering() {
     let written = writable(&engine);
     let names: Vec<_> = written.iter().map(|(name, ..)| *name).collect();
 
-    assert!(
-        written.len() >= 20,
-        "only {} corpus scripts are writable, which is too few to prove anything: {names:?}",
-        written.len(),
-    );
+    assert!(written.len() >= 20, "only {} corpus scripts are writable, which is too few to prove anything: {names:?}", written.len(),);
 
     // One per construct the encoder has a branch for, so a branch that stops
     // working names itself.
     for required in [
-        "int_arithmetic",     // Call with an operator token
-        "float_arithmetic",   // a float constant, whose width the ABI pins
-        "shadowing_nested",   // DeclareLocal and UnwindTo
-        "while_loop",         // jumps, Tick, AssignLocal with an op
-        "loop_break_value",   // backpatched jumps
-        "error_divide_by_zero", // a position that has to survive
-        "switch_range",         // a switch table, and the hasher probe with it
-        "switch_guard",         // and one whose arms are a chain rather than a target
-        "string_slice_read",    // a range constant, which is a host type in `Dynamic`
+        "int_arithmetic",         // Call with an operator token
+        "float_arithmetic",       // a float constant, whose width the ABI pins
+        "shadowing_nested",       // DeclareLocal and UnwindTo
+        "while_loop",             // jumps, Tick, AssignLocal with an op
+        "loop_break_value",       // backpatched jumps
+        "error_divide_by_zero",   // a position that has to survive
+        "switch_range",           // a switch table, and the hasher probe with it
+        "switch_guard",           // and one whose arms are a chain rather than a target
+        "string_slice_read",      // a range constant, which is a host type in `Dynamic`
         "string_slice_inclusive", // and the other range tag
         "index_assign_array",     // a chain rooted at a slot, and its name
         "temp_root_array_method", // and one rooted on the operand stack instead
     ] {
-        assert!(
-            names.contains(&required),
-            "`{required}` no longer writes, so the encoder branch it covers is untested",
-        );
+        assert!(names.contains(&required), "`{required}` no longer writes, so the encoder branch it covers is untested",);
     }
 }
 
 /// Where the golden pair lives. The source is checked in beside the artifact so
 /// a regeneration is a visible two-file change.
-const GOLDEN_SOURCE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/golden.rhai");
-const GOLDEN_ARTIFACT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/golden.rgrn");
+const GOLDEN_SOURCE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grain/fixtures/golden.rhai");
+const GOLDEN_ARTIFACT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grain/fixtures/golden.rgrn");
 
 /// The caller state `golden.rhai` expects. Part of the fixture, so it lives
 /// with it rather than being invented at each use.
@@ -169,7 +150,7 @@ fn golden_scope() -> Scope<'static> {
 /// the question it asks is whether that was deliberate. If it was, regenerate:
 ///
 /// ```text
-/// REGENERATE_GOLDEN=1 cargo test --test format golden
+/// REGENERATE_GOLDEN=1 cargo test --features grain --test mod golden
 /// ```
 ///
 /// and bump `VERSION` if an older reader would *misread* the new bytes rather
@@ -180,12 +161,7 @@ fn a_golden_artifact_written_by_an_older_build_still_runs() {
     let source = std::fs::read_to_string(GOLDEN_SOURCE).expect("the golden source is checked in");
     let ast = engine.compile(&source).expect("the golden source must parse");
     let program = Compiler::new().compile(&ast);
-    assert_eq!(
-        program.residual_count(),
-        0,
-        "the golden source must lower whole, or the artifact covers less than it claims: {:?}",
-        program.first_unsupported(),
-    );
+    assert_eq!(program.residual_count(), 0, "the golden source must lower whole, or the artifact covers less than it claims: {:?}", program.first_unsupported(),);
 
     if std::env::var_os("REGENERATE_GOLDEN").is_some() {
         let bytes = program.write().expect("the golden source must be writable");
@@ -209,7 +185,7 @@ fn a_golden_artifact_written_by_an_older_build_still_runs() {
         Err(err) => panic!(
             "the golden artifact no longer loads: {err}\n\
              The format moved. If that was deliberate, regenerate the fixture with \
-             `REGENERATE_GOLDEN=1 cargo test --test format golden`.",
+             `REGENERATE_GOLDEN=1 cargo test --features grain --test mod golden`.",
         ),
     };
 
@@ -217,16 +193,9 @@ fn a_golden_artifact_written_by_an_older_build_still_runs() {
     // source is easy and silent. These are read off the *artifact*, so they say
     // what the encoder branch coverage actually is rather than what the source
     // looks like it should give.
-    let kinds: std::collections::BTreeSet<String> =
-        rhaigrain::bytecode::disassemble(loaded.code())
-            .map(|(_, op)| {
-                format!("{op:?}")
-                    .split(['(', ' ', '{'])
-                    .next()
-                    .unwrap_or_default()
-                    .to_string()
-            })
-            .collect();
+    let kinds: std::collections::BTreeSet<String> = rhai::grain::bytecode::disassemble(loaded.code())
+        .map(|(_, op)| format!("{op:?}").split(['(', ' ', '{']).next().unwrap_or_default().to_string())
+        .collect();
     for required in [
         "Chain",             // a chain record, with all three of its roots
         "CallRef",           // and both by-reference call forms
@@ -279,12 +248,9 @@ fn a_golden_artifact_written_by_an_older_build_still_runs() {
         "the golden artifact no longer means what its source means.\n\
          The format moved without the reader noticing, which is the failure this \
          fixture exists to catch. If the change was deliberate, regenerate with \
-         `REGENERATE_GOLDEN=1 cargo test --test format golden`.",
+         `REGENERATE_GOLDEN=1 cargo test --features grain --test mod golden`.",
     );
-    assert!(
-        ran.result.is_ok(),
-        "the golden must produce a value, not an error: {ran:?}",
-    );
+    assert!(ran.result.is_ok(), "the golden must produce a value, not an error: {ran:?}",);
 }
 
 /// A chain rooted at a caller's variable, which the corpus cannot cover.
@@ -347,10 +313,7 @@ fn refusing_to_write_names_the_construct_responsible() {
         let ast = engine.compile(source).expect("must compile");
         let program = Compiler::new().compile(&ast);
 
-        assert!(
-            program.residual_count() > 0,
-            "{source:?} must still fragment, or this test has gone stale",
-        );
+        assert!(program.residual_count() > 0, "{source:?} must still fragment, or this test has gone stale",);
 
         let Err(err @ WriteError::HasResiduals { construct, pos, .. }) = program.write() else {
             panic!("{source:?} must refuse to write");
@@ -376,19 +339,12 @@ fn script_functions_survive_the_round_trip() {
     ] {
         let ast = engine.compile(source).expect("must compile");
         let program = Compiler::new().compile(&ast);
-        assert!(
-            !program.functions().is_empty(),
-            "{source:?} must compile its functions, not leave them to the walker",
-        );
+        assert!(!program.functions().is_empty(), "{source:?} must compile its functions, not leave them to the walker",);
 
         let bytes = program.write().expect("must be writable");
         let reloaded = Program::read(&bytes).expect("must load");
 
-        assert_eq!(
-            run(&engine, reloaded),
-            run_stock(&engine, source),
-            "{source:?} does not mean the same after a round trip",
-        );
+        assert_eq!(run(&engine, reloaded), run_stock(&engine, source), "{source:?} does not mean the same after a round trip",);
     }
 }
 
@@ -399,23 +355,11 @@ fn script_functions_survive_the_round_trip() {
 fn a_function_the_compiler_cannot_lower_refuses_to_write() {
     let engine = corpus::engine();
     // `this` is not a scope entry, so no slot addresses it.
-    let ast = engine
-        .compile("fn double() { this * 2 } let x = 21; x.double()")
-        .expect("must compile");
+    let ast = engine.compile("fn double() { this * 2 } let x = 21; x.double()").expect("must compile");
     let program = Compiler::new().compile(&ast);
 
-    assert!(
-        program.functions().is_empty(),
-        "a body using `this` must not become a chunk",
-    );
-    assert!(
-        matches!(
-            program.write(),
-            Err(WriteError::HasScriptFunctions | WriteError::HasResiduals { .. }),
-        ),
-        "got {:?}",
-        program.write(),
-    );
+    assert!(program.functions().is_empty(), "a body using `this` must not become a chunk",);
+    assert!(matches!(program.write(), Err(WriteError::HasScriptFunctions | WriteError::HasResiduals { .. }),), "got {:?}", program.write(),);
 }
 
 /// A program with one of everything the corruption tests need to reach: a
@@ -435,19 +379,13 @@ fn sample(engine: &Engine) -> Vec<u8> {
              switch a { 1 => \"one\", 0..=20 => \"some\", _ => \"many\" }",
         )
         .expect("must compile");
-    Compiler::new()
-        .compile(&ast)
-        .write()
-        .expect("the sample must be writable")
+    Compiler::new().compile(&ast).write().expect("the sample must be writable")
 }
 
 #[test]
 fn something_that_is_not_an_artifact_is_refused_at_the_first_bytes() {
     assert_eq!(Program::read(b"").unwrap_err(), ReadError::Truncated);
-    assert_eq!(
-        Program::read(b"not an artifact at all").unwrap_err(),
-        ReadError::BadMagic,
-    );
+    assert_eq!(Program::read(b"not an artifact at all").unwrap_err(), ReadError::BadMagic,);
 }
 
 #[test]
@@ -457,10 +395,7 @@ fn a_future_format_version_is_refused_rather_than_guessed_at() {
     bytes[4] = 0xff;
     bytes[5] = 0xff;
 
-    assert!(matches!(
-        Program::read(&bytes).unwrap_err(),
-        ReadError::UnsupportedVersion { found: 0xffff, .. },
-    ));
+    assert!(matches!(Program::read(&bytes).unwrap_err(), ReadError::UnsupportedVersion { found: 0xffff, .. },));
 }
 
 /// The fingerprint is the difference between a clean failure and integers
@@ -472,18 +407,12 @@ fn a_different_value_representation_is_refused_by_name() {
     let mut narrow = sample(&engine);
     narrow[6] = 4; // INT width
     let message = Program::read(&narrow).unwrap_err().to_string();
-    assert!(
-        message.contains("INT") && message.contains('4'),
-        "the message must name the width: {message}",
-    );
+    assert!(message.contains("INT") && message.contains('4'), "the message must name the width: {message}",);
 
     let mut restricted = sample(&engine);
     restricted[8] ^= 0b100; // the `no_index` bit
     let message = Program::read(&restricted).unwrap_err().to_string();
-    assert!(
-        message.contains("no_index"),
-        "the message must name the flag: {message}",
-    );
+    assert!(message.contains("no_index"), "the message must name the flag: {message}",);
 }
 
 /// A `switch` carries hashes rhai's parser computed, and rhai seeds its hasher
@@ -500,24 +429,15 @@ fn a_switch_hashed_by_a_different_seed_is_refused() {
 
     // The probe is the only place the artifact repeats this value, and finding
     // it that way means the test does not have to know the layout.
-    let probe = rhaigrain::bytecode::probe().to_le_bytes();
-    let at = bytes
-        .windows(probe.len())
-        .position(|window| window == probe)
-        .expect("an artifact with a switch in it carries a probe");
+    let probe = rhai::grain::bytecode::probe().to_le_bytes();
+    let at = bytes.windows(probe.len()).position(|window| window == probe).expect("an artifact with a switch in it carries a probe");
 
     let mut corrupt = bytes.clone();
     corrupt[at] ^= 1;
 
     let err = Program::read(&corrupt).expect_err("a foreign hasher must be refused");
-    assert!(
-        matches!(err, ReadError::HashSeedMismatch { .. }),
-        "got {err:?}",
-    );
-    assert!(
-        err.to_string().contains("set_hashing_seed"),
-        "the message must say how to fix it: {err}",
-    );
+    assert!(matches!(err, ReadError::HashSeedMismatch { .. }), "got {err:?}",);
+    assert!(err.to_string().contains("set_hashing_seed"), "the message must say how to fix it: {err}",);
 
     // And the uncorrupted one still loads, so the check is not simply always
     // failing.
@@ -532,11 +452,7 @@ fn every_truncation_fails_cleanly() {
     let bytes = sample(&engine);
 
     for cut in 0..bytes.len() {
-        assert!(
-            Program::read(&bytes[..cut]).is_err(),
-            "a {cut}-byte prefix of a {}-byte artifact loaded",
-            bytes.len(),
-        );
+        assert!(Program::read(&bytes[..cut]).is_err(), "a {cut}-byte prefix of a {}-byte artifact loaded", bytes.len(),);
     }
 
     assert!(Program::read(&bytes).is_ok(), "the whole thing must load");
@@ -550,10 +466,7 @@ fn trailing_bytes_are_refused() {
     let mut bytes = sample(&engine);
     bytes.push(0);
 
-    assert_eq!(
-        Program::read(&bytes).unwrap_err(),
-        ReadError::TrailingBytes { count: 1 },
-    );
+    assert_eq!(Program::read(&bytes).unwrap_err(), ReadError::TrailingBytes { count: 1 },);
 }
 
 /// The safety claim in one test: a corrupted artifact is a `Result`, never a
@@ -587,9 +500,7 @@ fn no_single_bit_flip_can_panic_or_smuggle_a_bad_chunk() {
 
             if let Ok(program) = Program::read(&corrupt) {
                 loaded += 1;
-                program
-                    .verify()
-                    .expect("read must not return a chunk that fails verification");
+                program.verify().expect("read must not return a chunk that fails verification");
                 // The result is free to be anything; not crashing is the claim.
                 let _ = Vm::new(&engine).run(&program, &mut Scope::new());
             }
@@ -599,10 +510,7 @@ fn no_single_bit_flip_can_panic_or_smuggle_a_bad_chunk() {
     // Most flips land in a length, a tag or the fingerprint and are rejected.
     // Some land in a constant's value and legitimately still load; that is the
     // case worth having run above.
-    println!(
-        "{loaded} of {} single-bit corruptions still loaded",
-        bytes.len() * 8,
-    );
+    println!("{loaded} of {} single-bit corruptions still loaded", bytes.len() * 8,);
 }
 
 /// The whole point of the split, end to end.
@@ -623,41 +531,25 @@ fn a_stripped_program_reports_an_address_the_host_can_resolve() {
 
     // Device: run bytes, with no table and no source.
     let device = Program::read(&shipped).expect("the device must load it");
-    assert!(
-        device.positions().is_stripped(),
-        "a stripped artifact must not carry positions",
-    );
+    assert!(device.positions().is_stripped(), "a stripped artifact must not carry positions",);
 
     let mut vm = Vm::new(&engine);
-    let error = vm
-        .run(&device, &mut Scope::new())
-        .expect_err("dividing by zero must fail");
+    let error = vm.run(&device, &mut Scope::new()).expect_err("dividing by zero must fail");
     let address = vm.fault_pc().expect("a failed run must name an instruction");
 
     // Host: resolve what came back.
-    let site = rhaigrain_pos::resolve(&table, address as u32)
-        .expect("the failing instruction must have a recorded site");
+    let site = rhai::grain::pos::resolve(&table, address as u32).expect("the failing instruction must have a recorded site");
 
-    assert_eq!(
-        (site.line, site.column),
-        (3, 3),
-        "the division is at line 3, column 3 of {source:?}",
-    );
+    assert_eq!((site.line, site.column), (3, 3), "the division is at line 3, column 3 of {source:?}",);
 
     // And the same program with its table attached says so itself, exactly as
     // rhai does — which is what makes the resolved site trustworthy.
     let mut reattached = Program::read(&shipped).unwrap();
-    reattached
-        .attach_positions(&table)
-        .expect("its own table must attach");
+    reattached.attach_positions(&table).expect("its own table must attach");
     assert_eq!(run(&engine, reattached), expected);
 
     // The stripped run is the same failure, minus the position.
-    assert!(
-        error.position().is_none(),
-        "a stripped program has no position to report, got {:?}",
-        error.position(),
-    );
+    assert!(error.position().is_none(), "a stripped program has no position to report, got {:?}", error.position(),);
 }
 
 /// Attaching another program's table would misreport every error rather than
@@ -667,17 +559,13 @@ fn a_table_from_a_different_program_is_refused() {
     let engine = corpus::engine();
 
     let short = Compiler::new().compile(&engine.compile("1 + 1").unwrap());
-    let long = Compiler::new()
-        .compile(&engine.compile("let a = 1; while a < 9 { a += 1 } a").unwrap());
+    let long = Compiler::new().compile(&engine.compile("let a = 1; while a < 9 { a += 1 } a").unwrap());
 
     let (_, long_table) = long.write_stripped().expect("must be writable");
     let (short_bytes, _) = short.write_stripped().expect("must be writable");
 
     let mut program = Program::read(&short_bytes).unwrap();
-    assert!(
-        program.attach_positions(&long_table).is_err(),
-        "a table naming instructions this chunk does not have must be refused",
-    );
+    assert!(program.attach_positions(&long_table).is_err(), "a table naming instructions this chunk does not have must be refused",);
 }
 
 /// A stripped artifact that arrives with a table still in it is a contradiction
@@ -688,10 +576,7 @@ fn an_artifact_carrying_a_mismatched_table_does_not_load() {
     let bytes = sample(&engine);
     let program = Program::read(&bytes).expect("the sample must load");
 
-    assert!(
-        !program.positions().is_stripped(),
-        "`write` keeps the table, so this one must have positions",
-    );
+    assert!(!program.positions().is_stripped(), "`write` keeps the table, so this one must have positions",);
 }
 
 /// What the split costs, and what it saves.
@@ -719,10 +604,7 @@ fn stripping_positions_shrinks_the_artifact() {
         100.0 * (with - without) as f64 / with as f64,
     );
 
-    assert!(
-        without < with,
-        "stripping must actually remove something: {without} vs {with}",
-    );
+    assert!(without < with, "stripping must actually remove something: {without} vs {with}",);
 }
 
 /// The number this project exists to move: bytes retained per source byte,
@@ -752,17 +634,10 @@ fn artifact_size_census() {
     for (name, source, artifact) in &rows {
         println!("{source:>7}  {artifact:>7}  {name}");
     }
-    println!(
-        "\n{} scripts: {source_bytes} source bytes -> {artifact_bytes} artifact bytes ({:.2}x)",
-        rows.len(),
-        artifact_bytes as f64 / source_bytes as f64,
-    );
+    println!("\n{} scripts: {source_bytes} source bytes -> {artifact_bytes} artifact bytes ({:.2}x)", rows.len(), artifact_bytes as f64 / source_bytes as f64,);
 
     // Not a target, a tripwire. The plan is explicit that bytecode need not
     // beat minified source on bytes — but an encoding several times larger
     // than its input has a bug in it, not a tradeoff.
-    assert!(
-        artifact_bytes < source_bytes * 3,
-        "{artifact_bytes} artifact bytes for {source_bytes} of source is not an encoding",
-    );
+    assert!(artifact_bytes < source_bytes * 3, "{artifact_bytes} artifact bytes for {source_bytes} of source is not an encoding",);
 }

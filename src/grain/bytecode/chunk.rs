@@ -41,6 +41,7 @@ impl Chunk {
         self.end
     }
 
+    /// The deepest the operand stack gets, as proven by the verifier.
     #[must_use]
     pub fn max_stack(&self) -> u16 {
         self.max_stack

@@ -67,11 +67,13 @@ pub struct Compiler {
 }
 
 impl Compiler {
+    /// Create a new [`Compiler`] with default options.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Lower an `AST` into a [`Program`].
     #[must_use]
     pub fn compile(&self, ast: &AST) -> Program<'static> {
         // A bare script-function name used as a value is not a variable read

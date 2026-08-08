@@ -70,7 +70,7 @@ debugging = ["internals"]
 ## Features and dependencies required by `bin` tools: `decimal`, `metadata`, `serde`, `debugging` and [`rustyline`](https://crates.io/crates/rustyline).
 bin-features = ["decimal", "metadata", "serde", "debugging", "rustyline"]
 ## Enable fuzzing via the [`arbitrary`](https://crates.io/crates/arbitrary) crate.
-fuzz = ["arbitrary", "rust_decimal?/rust-fuzz", "serde"]
+fuzz = ["arbitrary", "rust_decimal?/rust-fuzz", "serde", "grain"]
 ## Enable the experimental `grain` bytecode VM
 grain = []
 
@@ -148,6 +148,21 @@ required-features = ["serde"]
 [[example]]
 name = "definitions"
 required-features = ["metadata", "internals"]
+
+# The grain harnesses, as one binary. `tests/mod.rs` wraps them in an inline
+# `mod grain`, which is what puts their module paths inside `tests/grain/`.
+[[test]]
+name = "mod"
+path = "tests/mod.rs"
+required-features = ["grain"]
+
+# Its own binary, and not negotiable: it installs a counting global allocator
+# and reads process-global counters as deltas around each call, so any test
+# allocating on another thread corrupts every number it reports.
+[[test]]
+name = "grain_allocation"
+path = "tests/grain/allocation.rs"
+required-features = ["grain"]
 
 [profile.release]
 lto = "fat"

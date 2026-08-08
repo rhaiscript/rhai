@@ -51,10 +51,10 @@ pub enum Receiver {
 /// One VM instruction, as the compiler emits it and a disassembly shows it.
 ///
 /// **Not the executed form.** A program's code is a byte slice, assembled from
-/// these by [`assemble`](crate::bytecode::assemble) and dispatched on directly,
-/// so a loaded program can borrow its instructions from the artifact rather
-/// than building sixteen bytes of enum per instruction. See
-/// [`code`](crate::bytecode::code) for the encoding.
+/// these by [`assemble`](crate::grain::bytecode::assemble) and dispatched on
+/// directly, so a loaded program can borrow its instructions from the artifact
+/// rather than building sixteen bytes of enum per instruction. See
+/// [`code`](crate::grain::bytecode::code) for the encoding.
 ///
 /// A stack machine: operands are pushed and consumed on an operand stack, and
 /// locals live in slots addressed directly. `EvalAst` is the escape hatch that
@@ -64,7 +64,7 @@ pub enum Receiver {
 ///
 /// Instructions carry no source position. Several of them can fail against a
 /// place in the source, and the position for that comes from the program's
-/// [`Positions`](crate::bytecode::Positions) table, keyed on the instruction's
+/// [`Positions`](crate::grain::bytecode::Positions) table, keyed on the instruction's
 /// own address. Keeping it out means the diagnostics can be stripped from an
 /// artifact without touching the code.
 ///
@@ -110,6 +110,7 @@ pub enum Op {
     /// value the resolver produced, a module's constant, a `const` — is
     /// `ErrorAssignmentToConstant`, as it is in the walker.
     AssignNamed {
+        /// The name of the variable
         name: u32,
         /// Index into the op-assignment pool; absent for a plain `=`.
         op: Option<u32>,
@@ -122,6 +123,7 @@ pub enum Op {
     /// looks for an op-assignment implementation that mutates in place, and
     /// only expands to the binary form if there is none.
     AssignLocal {
+        /// The slot index
         slot: u16,
         /// Names the variable in `ErrorAssignmentToConstant`.
         var_name: u32,
@@ -134,7 +136,12 @@ pub enum Op {
     /// at the top of the scope. Carries the name because locals live in the
     /// caller's `Scope`, where entries are named, and carries constness
     /// because rhai enforces it through the value's own access mode.
-    DeclareLocal { name: u32, is_const: bool },
+    DeclareLocal {
+        /// The name of the variable
+        name: u32,
+        /// Whether the variable is declared `const`.
+        is_const: bool,
+    },
 
     /// Discard the top of the operand stack.
     Pop,
@@ -148,13 +155,19 @@ pub enum Op {
     /// Pop a condition and jump to `.0` if it is true. Mirrors
     /// [`Op::JumpIfFalse`]; both exist so short-circuit `&&` and `||` lower
     /// without an extra negation.
-    JumpIfTrue { target: u32 },
+    JumpIfTrue {
+        /// Where to jump to
+        target: u32,
+    },
     /// Pop a condition and jump to `.0` if it is false.
     ///
     /// Its position-table entry is the condition's own position, because rhai
     /// rejects a non-boolean guard against the guard expression rather than the
     /// statement — and the differential harness compares error positions.
-    JumpIfFalse { target: u32 },
+    JumpIfFalse {
+        /// Where to jump to
+        target: u32,
+    },
 
     /// Pop `argc` arguments and call the function named by `name`, pushing the
     /// result.
@@ -173,8 +186,11 @@ pub enum Op {
     /// to a function pointer rather than dispatching, and a VM that did not
     /// would be slower than the tree it replaced.
     Call {
+        /// The name of the function
         name: u32,
+        /// How many arguments to pop
         argc: u8,
+        /// Index into the operator pool; absent unless the call is an operator.
         op: Option<u32>,
     },
 
@@ -198,8 +214,11 @@ pub enum Op {
     /// short-circuits before the rewrite (`func/call.rs:1775`), so `a + b`
     /// reads `a` first and needs no reference.
     CallRef {
+        /// The name of the function
         name: u32,
+        /// How many arguments to pop, not counting the receiver.
         argc: u8,
+        /// Where the first argument is found.
         receiver: Receiver,
     },
 
@@ -298,7 +317,12 @@ pub enum Op {
     /// an error: rhai takes the first argument as the pointer and binds the
     /// target as `this` (`func/call.rs:816-919`), which is how a closure is
     /// called against a receiver.
-    CallFnPtr { argc: u8, method: bool },
+    CallFnPtr {
+        /// How many arguments to pop
+        argc: u8,
+        /// Whether the call is in method position (`f.call(x)`).
+        method: bool,
+    },
 
     /// Push an empty buffer for an interpolated string to be built in.
     ///
@@ -361,6 +385,7 @@ pub enum Op {
     /// keeps those positions strippable, which matters more for a literal than
     /// for a chain: an array can have any number of elements.
     CheckSize {
+        /// The element's index within its literal
         index: u16,
         /// Whether the element counts towards the map limit rather than the
         /// array one. Rhai adds one to a different member of the triple for
@@ -417,7 +442,12 @@ pub enum Op {
     /// rewind, so they cannot disturb the scope shape slots were resolved
     /// against. A whole-program fragment does not, because rhai does not
     /// rewind top-level statements and callers can see what they declared.
-    EvalAst { residual: u32, rewind_scope: bool },
+    EvalAst {
+        /// Index into the residual pool
+        residual: u32,
+        /// Whether locals the fragment declares are discarded afterwards.
+        rewind_scope: bool,
+    },
 
     /// Arm a handler covering the instructions up to the matching
     /// [`Op::PopHandler`], catching to `target`.
@@ -433,7 +463,12 @@ pub enum Op {
     /// `catch_var` names the variable the error is bound to. Its table entry
     /// is that variable's position, which is what rhai reports
     /// `ErrorTooManyVariables` against.
-    PushHandler { target: u32, catch_var: Option<u32> },
+    PushHandler {
+        /// Where to jump to when an error is caught.
+        target: u32,
+        /// The name the error is bound to; absent for a bare `catch`.
+        catch_var: Option<u32>,
+    },
 
     /// Disarm the innermost handler.
     ///
@@ -463,9 +498,13 @@ pub enum Op {
     /// Its table entry is the iterable's position — `position`, not
     /// `start_position` — because that is what a fallible iterator's error is
     /// filled in with (`eval/stmt.rs:749`).
-    /// `indexed` is `for (x, i) in seq`: the count is pushed under the item,
-    /// so the two `StoreShared`s that follow pop them in declaration order.
-    IterNext { exit: u32, indexed: bool },
+    IterNext {
+        /// Where to jump to once the iterator is exhausted.
+        exit: u32,
+        /// `for (x, i) in seq`: the count is pushed under the item, so the two
+        /// `StoreShared`s that follow pop them in declaration order.
+        indexed: bool,
+    },
 
     /// Discard the current iterator.
     ///

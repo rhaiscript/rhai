@@ -35,61 +35,117 @@ use crate::grain::bytecode::{Op, Receiver};
 /// Operators get their own tag rather than an optional field, so the common
 /// call pays nothing for the one that carries a token.
 pub mod tag {
+    /// [`Op::Const`](super::Op::Const).
     pub const CONST: u8 = 0x01;
+    /// [`Op::Unit`](super::Op::Unit).
     pub const UNIT: u8 = 0x02;
+    /// [`Op::Bool`](super::Op::Bool) holding `false`.
     pub const FALSE: u8 = 0x03;
+    /// [`Op::Bool`](super::Op::Bool) holding `true`.
     pub const TRUE: u8 = 0x04;
+    /// [`Op::LoadLocal`](super::Op::LoadLocal).
     pub const LOAD_LOCAL: u8 = 0x05;
+    /// [`Op::StoreLocal`](super::Op::StoreLocal).
     pub const STORE_LOCAL: u8 = 0x06;
+    /// [`Op::AssignLocal`](super::Op::AssignLocal) with a plain `=`.
     pub const ASSIGN_LOCAL: u8 = 0x07;
+    /// [`Op::AssignLocal`](super::Op::AssignLocal) through an operator.
     pub const ASSIGN_LOCAL_OP: u8 = 0x08;
+    /// [`Op::DeclareLocal`](super::Op::DeclareLocal) for a `let`.
     pub const DECLARE_LOCAL: u8 = 0x09;
+    /// [`Op::DeclareLocal`](super::Op::DeclareLocal) for a `const`.
     pub const DECLARE_CONST: u8 = 0x0a;
+    /// [`Op::Pop`](super::Op::Pop).
     pub const POP: u8 = 0x0b;
+    /// [`Op::Jump`](super::Op::Jump).
     pub const JUMP: u8 = 0x0c;
+    /// [`Op::JumpIfTrue`](super::Op::JumpIfTrue).
     pub const JUMP_IF_TRUE: u8 = 0x0d;
+    /// [`Op::JumpIfFalse`](super::Op::JumpIfFalse).
     pub const JUMP_IF_FALSE: u8 = 0x0e;
+    /// [`Op::Call`](super::Op::Call) to an ordinary function.
     pub const CALL: u8 = 0x0f;
+    /// [`Op::Call`](super::Op::Call) to an operator.
     pub const CALL_OP: u8 = 0x10;
+    /// [`Op::UnwindTo`](super::Op::UnwindTo).
     pub const UNWIND_TO: u8 = 0x11;
+    /// [`Op::Tick`](super::Op::Tick).
     pub const TICK: u8 = 0x12;
+    /// [`Op::Return`](super::Op::Return).
     pub const RETURN: u8 = 0x13;
+    /// [`Op::EvalAst`](super::Op::EvalAst) that rewinds the scope.
     pub const EVAL_AST: u8 = 0x14;
+    /// [`Op::EvalAst`](super::Op::EvalAst) that keeps what it declared.
     pub const EVAL_AST_KEEP: u8 = 0x15;
+    /// [`Op::Chain`](super::Op::Chain).
     pub const CHAIN: u8 = 0x16;
+    /// [`Op::MakeArray`](super::Op::MakeArray).
     pub const MAKE_ARRAY: u8 = 0x17;
+    /// [`Op::Switch`](super::Op::Switch).
     pub const SWITCH: u8 = 0x18;
+    /// [`Op::LoadNamed`](super::Op::LoadNamed).
     pub const LOAD_NAMED: u8 = 0x19;
+    /// [`Op::AssignNamed`](super::Op::AssignNamed) with a plain `=`.
     pub const ASSIGN_NAMED: u8 = 0x1a;
+    /// [`Op::AssignNamed`](super::Op::AssignNamed) through an operator.
     pub const ASSIGN_NAMED_OP: u8 = 0x1b;
+    /// [`Op::Throw`](super::Op::Throw).
     pub const THROW: u8 = 0x1c;
+    /// [`Op::IterInit`](super::Op::IterInit).
     pub const ITER_INIT: u8 = 0x1d;
+    /// [`Op::IterNext`](super::Op::IterNext).
     pub const ITER_NEXT: u8 = 0x1e;
+    /// [`Op::IterDrop`](super::Op::IterDrop).
     pub const ITER_DROP: u8 = 0x1f;
+    /// [`Op::StoreShared`](super::Op::StoreShared).
     pub const STORE_SHARED: u8 = 0x20;
+    /// [`Op::IterNext`](super::Op::IterNext) that also pushes the count.
     pub const ITER_NEXT_INDEXED: u8 = 0x21;
+    /// [`Op::PopHandler`](super::Op::PopHandler).
     pub const POP_HANDLER: u8 = 0x22;
+    /// [`Op::PushHandler`](super::Op::PushHandler) for a bare `catch`.
     pub const PUSH_HANDLER: u8 = 0x23;
+    /// [`Op::PushHandler`](super::Op::PushHandler) binding a catch variable.
     pub const PUSH_HANDLER_VAR: u8 = 0x24;
+    /// [`Op::InterpolateStart`](super::Op::InterpolateStart).
     pub const INTERPOLATE_START: u8 = 0x25;
+    /// [`Op::InterpolateAppend`](super::Op::InterpolateAppend).
     pub const INTERPOLATE_APPEND: u8 = 0x26;
+    /// [`Op::InterpolateEnd`](super::Op::InterpolateEnd).
     pub const INTERPOLATE_END: u8 = 0x27;
+    /// [`Op::MakeFnPtr`](super::Op::MakeFnPtr).
     pub const MAKE_FN_PTR: u8 = 0x28;
+    /// [`Op::Curry`](super::Op::Curry).
     pub const CURRY: u8 = 0x29;
+    /// [`Op::CallFnPtr`](super::Op::CallFnPtr) in call position.
     pub const CALL_FN_PTR: u8 = 0x2a;
+    /// [`Op::CallFnPtr`](super::Op::CallFnPtr) in method position.
     pub const CALL_FN_PTR_METHOD: u8 = 0x2b;
+    /// [`Op::Share`](super::Op::Share).
     pub const SHARE: u8 = 0x2c;
+    /// [`Op::ShareNamed`](super::Op::ShareNamed).
     pub const SHARE_NAMED: u8 = 0x2d;
+    /// [`Op::LoadShared`](super::Op::LoadShared).
     pub const LOAD_SHARED: u8 = 0x2e;
+    /// [`Op::MakeClosure`](super::Op::MakeClosure).
     pub const MAKE_CLOSURE: u8 = 0x2f;
+    /// [`Op::IsShared`](super::Op::IsShared).
     pub const IS_SHARED: u8 = 0x30;
+    /// [`Op::Checkpoint`](super::Op::Checkpoint).
     pub const CHECKPOINT: u8 = 0x31;
+    /// [`Op::CheckSize`](super::Op::CheckSize) against the array limit.
     pub const CHECK_ARRAY_SIZE: u8 = 0x32;
+    /// [`Op::CheckSize`](super::Op::CheckSize) against the map limit.
     pub const CHECK_MAP_SIZE: u8 = 0x33;
+    /// [`Op::MakeMap`](super::Op::MakeMap).
     pub const MAKE_MAP: u8 = 0x34;
+    /// [`Op::CallRef`](super::Op::CallRef) through [`Receiver::Local`](super::Receiver::Local).
     pub const CALL_LOCAL_REF: u8 = 0x35;
+    /// [`Op::Rotate`](super::Op::Rotate).
     pub const ROTATE: u8 = 0x36;
+    /// [`Op::CallRef`](super::Op::CallRef) through [`Receiver::Named`](super::Receiver::Named).
     pub const CALL_NAMED_REF: u8 = 0x37;
+    /// [`Op::LoadSharedNamed`](super::Op::LoadSharedNamed).
     pub const LOAD_SHARED_NAMED: u8 = 0x38;
 }
 
@@ -207,14 +263,32 @@ pub fn u32_at(code: &[u8], at: usize) -> Option<u32> {
 pub enum AssembleError {
     /// A pool grew past what a `u16` operand can name. The compiler falls back
     /// to a whole-program fragment rather than emitting a truncated index.
-    PoolTooLarge { what: &'static str, entries: usize },
+    PoolTooLarge {
+        /// Which pool overflowed
+        what: &'static str,
+        /// How many entries it holds
+        entries: usize,
+    },
     /// A jump naming an instruction that does not exist. A compiler bug.
-    JumpOutOfRange { at: usize, target: u32 },
+    JumpOutOfRange {
+        /// Index of the jump instruction
+        at: usize,
+        /// The instruction index it names
+        target: u32,
+    },
     /// The same, for a jump that lives in a switch table rather than in the
     /// code.
-    SwitchTargetOutOfRange { table: usize, target: u32 },
+    SwitchTargetOutOfRange {
+        /// Index into the switch pool
+        table: usize,
+        /// The instruction index the entry names
+        target: u32,
+    },
     /// A chunk longer than a `u32` of bytes.
-    ChunkTooLarge { bytes: usize },
+    ChunkTooLarge {
+        /// How long the chunk is
+        bytes: usize,
+    },
 }
 
 /// Pack instructions into their executable form.

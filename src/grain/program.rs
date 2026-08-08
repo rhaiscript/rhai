@@ -12,11 +12,27 @@ pub(crate) type SharedModule = Shared<Module>;
 
 /// A program a native function can be handed a way back into.
 ///
-/// [`Vm::run_with_callbacks`](crate::Vm::run_with_callbacks) registers one
+/// [`Vm::run_with_callbacks`](crate::grain::Vm::run_with_callbacks) registers one
 /// wrapper per compiled function, and rhai requires a registered function to be
 /// `'static` — so the program cannot still be borrowing an artifact, and the
 /// wrappers have to share ownership of it rather than borrow it.
 pub type SharedProgram = Shared<Program<'static>>;
+
+/// One compiled script function.
+///
+/// Called by [`Op::Call`](crate::bytecode::Op::Call) directly, without going
+/// through rhai's dispatch: the name is already an index into the same pool the
+/// call site used, so matching one is two integer comparisons rather than a
+/// hash and a module walk.
+#[derive(Debug, Clone)]
+pub struct Function {
+    /// Index into the name pool.
+    pub name: u32,
+    /// Parameter names, in order, as name-pool indices. They become the
+    /// callee's first locals, which is what makes them slot 0 upwards.
+    pub params: Vec<u32>,
+    pub chunk: Chunk,
+}
 
 /// A compiled script, ready to run against an `Engine`.
 ///
@@ -34,22 +50,6 @@ pub type SharedProgram = Shared<Program<'static>>;
 /// `Expr` trees, which is precisely the allocation we are trying to remove. The
 /// artifact format refuses to write a `Program` that has any, so nothing
 /// reaching a device can depend on them.
-/// One compiled script function.
-///
-/// Called by [`Op::Call`](crate::bytecode::Op::Call) directly, without going
-/// through rhai's dispatch: the name is already an index into the same pool the
-/// call site used, so matching one is two integer comparisons rather than a
-/// hash and a module walk.
-#[derive(Debug, Clone)]
-pub struct Function {
-    /// Index into the name pool.
-    pub name: u32,
-    /// Parameter names, in order, as name-pool indices. They become the
-    /// callee's first locals, which is what makes them slot 0 upwards.
-    pub params: Vec<u32>,
-    pub chunk: Chunk,
-}
-
 pub struct Program<'a> {
     /// Every chunk's instructions, concatenated: main first, then each
     /// function. One buffer means one position table and one instruction
@@ -283,7 +283,7 @@ impl<'a> Program<'a> {
     /// Give up the artifact and share the program, so a native can be handed a
     /// way back into it.
     ///
-    /// What [`Vm::run_with_callbacks`](crate::Vm::run_with_callbacks) takes.
+    /// What [`Vm::run_with_callbacks`](crate::grain::Vm::run_with_callbacks) takes.
     /// Worth the copy only when [`makes_fn_pointers`](Self::makes_fn_pointers)
     /// says a pointer can escape.
     #[must_use]
@@ -340,11 +340,13 @@ impl<'a> Program<'a> {
         self.recompute_max_stack();
     }
 
+    /// Every chunk's instructions, concatenated.
     #[must_use]
     pub fn code(&self) -> &[u8] {
         &self.code
     }
 
+    /// The compiled script functions.
     #[must_use]
     pub fn functions(&self) -> &[Function] {
         &self.functions
@@ -439,7 +441,7 @@ impl<'a> Program<'a> {
         self.switches.get(index as usize)
     }
 
-    /// The dispatch tables [`Op::Switch`](crate::bytecode::Op::Switch) indexes.
+    /// The dispatch tables [`Op::Switch`](crate::grain::bytecode::Op::Switch) indexes.
     ///
     /// Public because a disassembly that leaves them out is misleading: a
     /// switch's arms are reached only from its table, so without it they read
@@ -456,6 +458,7 @@ impl<'a> Program<'a> {
         self.positions.get(pc)
     }
 
+    /// The whole position table, keyed on instruction address.
     #[must_use]
     pub fn positions(&self) -> &Positions {
         &self.positions
@@ -465,7 +468,7 @@ impl<'a> Program<'a> {
     ///
     /// This is the separation the debug layer exists for: ship the program to
     /// the device and keep what comes back here. Errors then arrive with no
-    /// position, and [`rhaigrain_pos::resolve`] turns the failing instruction
+    /// position, and [`pos::resolve`](crate::grain::pos::resolve) turns the failing instruction
     /// address back into one — see [`Program::attach_positions`] for the
     /// inverse.
     pub fn strip_positions(&mut self) -> Vec<u8> {
@@ -502,6 +505,7 @@ impl<'a> Program<'a> {
         &self.assign_ops
     }
 
+    /// The top-level chunk, where execution starts.
     #[must_use]
     pub fn main(&self) -> &Chunk {
         &self.main

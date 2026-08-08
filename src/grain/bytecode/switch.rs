@@ -34,8 +34,7 @@ pub struct Switch {
     ///
     /// Disjoint and in ascending order, which rhai's are not: the compiler
     /// splits overlapping arms apart so that the first entry containing a
-    /// value is the only one that can match it. See
-    /// [`crate::compile::cases`].
+    /// value is the only one that can match it. See `compile::cases`.
     pub ranges: Vec<SwitchRange>,
     /// Where to go when nothing matched. Always present: an absent `_` arm
     /// compiles to a jump past the statement.
@@ -45,23 +44,29 @@ pub struct Switch {
 /// One `value => ...` arm, keyed by rhai's hash of the value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchCase {
+    /// Rhai's hash of the case value.
     pub hash: u64,
+    /// Where to jump to.
     pub target: u32,
 }
 
 /// One `a..b => ...` arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchRange {
+    /// The lower bound
     pub from: INT,
+    /// The upper bound
     pub to: INT,
+    /// Whether the upper bound is included.
     pub inclusive: bool,
+    /// Where to jump to.
     pub target: u32,
 }
 
 impl SwitchRange {
     /// Whether a subject falls in this range.
     ///
-    /// Delegates to rhai's own [`RangeCase`] rather than comparing integers,
+    /// Delegates to rhai's own `RangeCase` rather than comparing integers,
     /// because a range arm matches more than integers: `switch 5.5 { 0..10 =>
     /// .. }` matches, and under the `decimal` feature so does a `Decimal`
     /// (`ast/stmt.rs:254`). Rebuilding the case is two moves and no

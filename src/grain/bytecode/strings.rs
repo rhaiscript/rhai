@@ -11,10 +11,10 @@ use std::borrow::Cow;
 /// name is a slice of it. Two allocations for the whole table, and neither
 /// scales with how many names there are: the spans, and nothing else.
 ///
-/// The exception is a name that becomes a scope entry. `Scope` stores its own
-/// names, so a `let` or a parameter needs a real string — see
-/// [`Program::ident`](crate::Program::ident), which is a separate and much
-/// shorter pool.
+/// A name that becomes a scope entry is copied rather than borrowed, because
+/// `Scope` stores its own. That is a copy into a `SmartString` and not an
+/// allocation, so it costs nothing for the short names a `let` or a parameter
+/// actually has.
 #[derive(Debug, Clone, Default)]
 pub struct Strings<'a> {
     blob: Cow<'a, [u8]>,
@@ -73,11 +73,13 @@ impl<'a> Strings<'a> {
         })
     }
 
+    /// How many names the table holds.
     #[must_use]
     pub fn len(&self) -> usize {
         self.starts.len().saturating_sub(1)
     }
 
+    /// Whether the table holds no names.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -94,20 +96,24 @@ impl<'a> Strings<'a> {
         core::str::from_utf8(self.blob.get(from..to)?).ok()
     }
 
+    /// The concatenated names, without their spans.
     #[must_use]
     pub fn blob(&self) -> &[u8] {
         &self.blob
     }
 
+    /// The span boundaries, one longer than [`Strings::len`].
     #[must_use]
     pub fn starts(&self) -> &[u32] {
         &self.starts
     }
 
+    /// Iterate the names in index order.
     pub fn iter(&self) -> impl Iterator<Item = &str> + '_ {
         (0..self.len() as u32).filter_map(|index| self.get(index))
     }
 
+    /// Take ownership of the blob, so the table outlives the artifact.
     #[must_use]
     pub fn into_owned(self) -> Strings<'static> {
         Strings {
@@ -123,9 +129,17 @@ pub enum BadTable {
     /// The spans are empty, or do not start at zero.
     NoTerminator,
     /// A span runs backwards or past the end of the blob.
-    SpanOutOfRange { from: usize, to: usize },
+    SpanOutOfRange {
+        /// Where the span starts
+        from: usize,
+        /// Where it ends
+        to: usize,
+    },
     /// A name is not UTF-8.
-    NotUtf8 { at: usize },
+    NotUtf8 {
+        /// Where the name starts
+        at: usize,
+    },
     /// The blob is longer than the last span accounts for.
     TrailingBytes,
 }

@@ -283,6 +283,7 @@ struct Handler {
 }
 
 impl<'e> Vm<'e> {
+    /// A VM that dispatches through `engine`.
     #[must_use]
     pub fn new(engine: &'e Engine) -> Self {
         Self {
@@ -312,8 +313,8 @@ impl<'e> Vm<'e> {
     /// exists to avoid. It cannot be helped: the outer `Vm` is borrowed by the
     /// frame still running beneath this one. Rhai pays the same on its own
     /// callbacks — but it also skips resolution entirely for a pointer that
-    /// carries its body, which is why a crossing measures 0.34x. See
-    /// [`callback`].
+    /// carries its body, which is why a crossing measures 0.34x. See the
+    /// `callback` module.
     ///
     /// Operation counting has the same shape and the same reason: increments
     /// inside the callback land on the clone and are lost when it drops, as
@@ -398,6 +399,7 @@ impl<'e> Vm<'e> {
         result
     }
 
+    /// Run a program's main chunk against `scope`, yielding its value.
     pub fn run(&mut self, program: &Program, scope: &mut Scope) -> VmResult {
         self.run_with(program, scope, None)
     }
@@ -407,7 +409,8 @@ impl<'e> Vm<'e> {
     /// The same run, plus one native wrapper per compiled function registered
     /// for its duration, so a pointer this program creates resolves when rhai
     /// dispatches it — `let a = [1, 2]; a.map(|x| x * 2)` is `map` calling us
-    /// back, and `map` looks the pointer up its own way. See [`callback`].
+    /// back, and `map` looks the pointer up its own way. See the `callback`
+    /// module.
     ///
     /// Only worth the owned program when [`Program::makes_fn_pointers`] says a
     /// pointer can escape; [`run`](Self::run) is otherwise identical and copies
@@ -415,7 +418,7 @@ impl<'e> Vm<'e> {
     /// pointer simply fails to resolve, as `ErrorFunctionNotFound`, at the
     /// point the native tries to call it.
     ///
-    /// Read [`callback`] before relying on it: a crossing is slower than the
+    /// Read the `callback` module before relying on it: a crossing is slower than the
     /// walker, and a *capturing* closure handed to a native that binds `this`
     /// arrives with its arguments rotated.
     pub fn run_with_callbacks(&mut self, program: &SharedProgram, scope: &mut Scope) -> VmResult {
