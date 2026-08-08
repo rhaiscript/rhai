@@ -155,6 +155,9 @@ impl Compiler {
                 name: f.name,
                 params: f.params,
                 this_type: f.this_type,
+                // Derived from the chunk by `Program::new`, which is the one
+                // place that can see the assembled bytes.
+                takes_this: false,
                 chunk: Chunk::new(
                     offsets[f.first_op],
                     offsets[f.first_op + f.op_count],
@@ -167,7 +170,19 @@ impl Compiler {
         // for them: a function this compiler skipped, or a fragment that could
         // call one. With neither, every call resolves in the table above and
         // the library — an `AST`'s whole function tree — can be dropped.
-        let needs_walker = skipped > 0 || !lowering.residuals.is_empty();
+        //
+        // The third case is a pointer to a `this`-taking chunk. Rhai reaches a
+        // compiled function through a registered wrapper, and a wrapper is
+        // registered at one arity — but a native calling a pointer against a
+        // receiver decides for itself how many arguments to append beside it,
+        // so no single arity is right. Rhai's own pointer carries the body and
+        // sizes the call from it, which is what its copy is kept here for. See
+        // `callback::wrappers`, which skips exactly these.
+        let escapes_as_pointer = crate::grain::program::makes_fn_pointers(&code)
+            && functions
+                .iter()
+                .any(|f| crate::grain::program::takes_this(&code, f.chunk, &lowering.chains));
+        let needs_walker = skipped > 0 || !lowering.residuals.is_empty() || escapes_as_pointer;
 
         let mut program = Program::new(
             code.into(),

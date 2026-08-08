@@ -7,7 +7,7 @@ use crate::module_resolvers::StaticModuleResolver;
 use crate::{ast::Expr, ast::Stmt, tokenizer::Token, Dynamic, ImmutableString, Module, Shared};
 
 use crate::grain::bytecode::{
-    AssignOp, Chain, Chunk, Code, Pools, Positions, Strings, Switch, TableError,
+    AssignOp, Chain, Chunk, Code, Op, Pools, Positions, Root, Strings, Switch, TableError,
 };
 
 /// rhai's own `SharedModule`, which it does not re-export.
@@ -45,6 +45,12 @@ pub struct Function {
     ///
     /// `None` for an ordinary function, which is nearly all of them.
     pub this_type: Option<u32>,
+    /// Whether the body reads or writes the frame's receiver.
+    ///
+    /// Derived from the chunk rather than encoded — see [`takes_this`]. It is
+    /// what keeps such a function reachable by rhai, which needs the body to
+    /// size a call a native makes through a pointer.
+    pub takes_this: bool,
     pub chunk: Chunk,
 }
 
@@ -220,11 +226,50 @@ fn node_position(node: &ASTNode) -> rhai::Position {
 /// directly. Narrowing it would mean deciding where a pointer *goes*, which is
 /// a dataflow question over values that outlive the instruction that made
 /// them. Being wrong the other way loses a call at run time.
-fn makes_fn_pointers(code: &[u8]) -> bool {
+pub(crate) fn makes_fn_pointers(code: &[u8]) -> bool {
     use crate::grain::bytecode::code::tag;
 
     crate::grain::bytecode::disassemble(code)
         .any(|(at, ..)| matches!(code[at], tag::MAKE_CLOSURE | tag::MAKE_FN_PTR | tag::CURRY))
+}
+
+/// Whether a chunk reads or writes the frame's receiver.
+///
+/// Read off the bytes for [`makes_fn_pointers`]'s reason: a program loaded from
+/// an artifact never saw the body it came from.
+///
+/// It decides whether rhai has to be able to reach the function itself. A
+/// pointer to a `this`-taking chunk cannot go through a native wrapper — the
+/// wrapper is registered at one arity, and how many arguments rhai will ask for
+/// depends on what the *native* appends, which the wrapper cannot know. So such
+/// a function is left to rhai, which has the body and can size the call itself.
+pub(crate) fn takes_this(code: &[u8], chunk: Chunk, chains: &[Chain]) -> bool {
+    use crate::grain::bytecode::code::tag;
+
+    let (entry, end) = (chunk.entry() as usize, chunk.end() as usize);
+    if end > code.len() || entry > end {
+        return false;
+    }
+
+    crate::grain::bytecode::disassemble(&code[entry..end]).any(|(at, op)| {
+        match code[entry + at] {
+            tag::LOAD_THIS
+            | tag::LOAD_THIS_SHARED
+            | tag::REQUIRE_THIS
+            | tag::ASSIGN_THIS
+            | tag::ASSIGN_THIS_OP
+            | tag::CALL_THIS_REF
+            | tag::CALL_FN_PTR_ON_THIS => true,
+            // A chain says where it is rooted in the pool, not in the code.
+            tag::CHAIN => match op {
+                Op::Chain(index) => chains
+                    .get(index as usize)
+                    .map_or(false, |chain| matches!(chain.root, Root::This { .. })),
+                _ => false,
+            },
+            _ => false,
+        }
+    })
 }
 
 /// Everything a program holds besides its code, gathered so the constructor
@@ -253,6 +298,14 @@ impl<'a> Program<'a> {
     ) -> Self {
         let makes_fn_pointers = makes_fn_pointers(&code);
         let has_typed_methods = functions.iter().any(|f| f.this_type.is_some());
+
+        // Derived here so a program means the same whether it was compiled or
+        // loaded, and so the flag cannot disagree with the bytes it describes.
+        let mut functions = functions;
+        for function in &mut functions {
+            function.takes_this = takes_this(&code, function.chunk, &parts.chains);
+        }
+
         let mut program = Self {
             code,
             main,
@@ -671,6 +724,7 @@ mod tests {
                 name,
                 params: vec![0; argc],
                 this_type,
+                takes_this: false,
                 chunk: whole,
             })
             .collect();

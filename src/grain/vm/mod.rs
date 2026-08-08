@@ -3531,6 +3531,7 @@ mod tests {
                 name: index as u32,
                 params: Vec::new(),
                 this_type: None,
+                takes_this: false,
                 chunk: Chunk::new(end_of(span.start), end_of(span.end), 8),
             })
             .collect();

@@ -198,6 +198,9 @@ pub(super) fn read(bytes: &[u8]) -> Result<Program<'_>, ReadError> {
             name,
             this_type,
             params,
+            // Not encoded: derived from the chunk by `Program::new`, so a loaded
+            // program and a compiled one cannot disagree about it.
+            takes_this: false,
             chunk: get_chunk(&mut cursor)?,
         });
     }

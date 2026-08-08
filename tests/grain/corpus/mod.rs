@@ -569,4 +569,13 @@ pub const CASES: &[Case] = &[
     // A temporary receiver has nowhere to write back to, and rhai mutates a
     // copy of it too.
     case("closure_call_on_a_temporary", "let r = 0; { let f = || { this *= 2; }; r = (20 + 1).call(f); } r"),
+    // A native calling a pointer back against a receiver. How many arguments it
+    // appends beside the receiver is the native's business — `map` adds an
+    // index, `reduce` the running result — so no single wrapper arity is right
+    // and these have to stay reachable by rhai itself.
+    case("closure_map_binds_this", "[1, 2, 3].map(|| this * 2)"),
+    case("closure_filter_binds_this", "[1, 2, 3].filter(|| this > 1)"),
+    case("closure_for_each_binds_this", "let t = 0; [1, 2, 3].for_each(|| t += this); t"),
+    // And the argument form, which takes the element as a parameter instead.
+    case("closure_map_takes_an_argument", "[1, 2, 3].map(|x| x * 2)"),
 ];

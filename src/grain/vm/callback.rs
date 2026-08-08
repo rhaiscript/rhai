@@ -75,6 +75,17 @@ pub(super) fn wrappers(program: &SharedProgram) -> Module {
         if arity > MAX_PARAMS {
             continue;
         }
+        // A `this`-taking chunk cannot be reached this way. A wrapper is
+        // registered at one arity, and how many arguments rhai asks for depends
+        // on what the *native* appends beside the receiver — `map` adds an
+        // index, `reduce` adds the running result — which the wrapper has no way
+        // to know. Rhai's own pointer carries the body and sizes the call from
+        // its declared arity (`types/fn_ptr.rs:501-535`); a name-only pointer,
+        // which is all a wrapper can be, cannot. So these are left to rhai,
+        // and `Program::needs_walker` is what keeps its copy alive for them.
+        if function.takes_this {
+            continue;
+        }
         let Some(name) = program.name(function.name) else {
             continue;
         };
