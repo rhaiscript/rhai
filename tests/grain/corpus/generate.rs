@@ -60,11 +60,7 @@ impl Rng {
         for byte in choices.iter().take(8) {
             seed = (seed << 8) | u64::from(*byte);
         }
-        Self {
-            choices: choices.to_vec(),
-            at: 0,
-            ..Self::new(seed)
-        }
+        Self { choices: choices.to_vec(), at: 0, ..Self::new(seed) }
     }
 
     pub fn next(&mut self) -> u64 {
@@ -126,9 +122,7 @@ const COMPARISONS: &[&str] = &["==", "!=", "<", "<=", ">", ">="];
 ///
 /// `&&` and `||` are not here — they demand boolean operands at parse time, so
 /// they belong to [`Generator::condition`] and nowhere else.
-const BINARY: &[&str] = &[
-    "+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&", "|",
-];
+const BINARY: &[&str] = &["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&", "|"];
 
 const METHODS: &[&str] = &["len", "to_string", "abs", "is_empty", "floor", "to_upper"];
 
@@ -142,20 +136,7 @@ const METHODS: &[&str] = &["len", "to_string", "abs", "is_empty", "floor", "to_u
 /// Nothing here can grow a value without bound: an argument reaching one of
 /// these is an arbitrary generated integer, and `pad` would turn that into an
 /// allocation rather than into a divergence.
-const NATIVES: &[(&str, usize)] = &[
-    ("push", 2),
-    ("insert", 3),
-    ("remove", 2),
-    ("truncate", 2),
-    ("reverse", 1),
-    ("clear", 1),
-    ("pop", 1),
-    ("shift", 1),
-    ("len", 1),
-    ("is_empty", 1),
-    ("abs", 1),
-    ("to_upper", 1),
-];
+const NATIVES: &[(&str, usize)] = &[("push", 2), ("insert", 3), ("remove", 2), ("truncate", 2), ("reverse", 1), ("clear", 1), ("pop", 1), ("shift", 1), ("len", 1), ("is_empty", 1), ("abs", 1), ("to_upper", 1)];
 
 pub struct Generator {
     rng: Rng,
@@ -198,10 +179,7 @@ impl Generator {
     /// `cargo fuzz`. See [`Rng::from_bytes`].
     #[must_use]
     pub fn from_bytes(choices: &[u8]) -> Self {
-        Self {
-            rng: Rng::from_bytes(choices),
-            ..Self::new(0)
-        }
+        Self { rng: Rng::from_bytes(choices), ..Self::new(0) }
     }
 
     fn name(&mut self, prefix: &str) -> String {
@@ -350,11 +328,7 @@ impl Generator {
 
     fn for_loop(&mut self) -> String {
         let item = self.name("it");
-        let iterable = if self.rng.chance(2) {
-            format!("0..{}", 1 + self.rng.below(4))
-        } else {
-            self.array()
-        };
+        let iterable = if self.rng.chance(2) { format!("0..{}", 1 + self.rng.below(4)) } else { self.array() };
 
         self.vars.push(item.clone());
         self.loops += 1;
@@ -413,9 +387,7 @@ impl Generator {
     }
 
     fn map(&mut self) -> String {
-        let entries: Vec<String> = (0..self.rng.below(4))
-            .map(|n| format!("k{n}: {}", self.element()))
-            .collect();
+        let entries: Vec<String> = (0..self.rng.below(4)).map(|n| format!("k{n}: {}", self.element())).collect();
         format!("#{{ {} }}", entries.join(", "))
     }
 
@@ -427,11 +399,7 @@ impl Generator {
     fn element(&mut self) -> String {
         if self.depth < MAX_DEPTH && self.rng.chance(4) {
             self.depth += 1;
-            let out = if self.rng.chance(2) {
-                self.array()
-            } else {
-                self.map()
-            };
+            let out = if self.rng.chance(2) { self.array() } else { self.map() };
             self.depth -= 1;
             return out;
         }

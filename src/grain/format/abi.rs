@@ -93,7 +93,11 @@ impl core::fmt::Display for AbiMismatch {
                 "artifact was written with a {artifact}-byte {what}, but this build has {host}"
             ),
             Self::Flag { flag, artifact } => {
-                let (writer, reader) = if *artifact { ("on", "off") } else { ("off", "on") };
+                let (writer, reader) = if *artifact {
+                    ("on", "off")
+                } else {
+                    ("off", "on")
+                };
                 write!(
                     f,
                     "artifact was written with `{flag}` {writer}, but this build has it {reader}"
@@ -152,7 +156,9 @@ impl Abi {
             let bit = differing.trailing_zeros() as usize;
             // A bit past the table means the writer knew a flag this build does
             // not. Reporting it as unknown beats indexing out of bounds.
-            let flag = FLAGS.get(bit).map_or("an unknown restriction", |(name, _)| *name);
+            let flag = FLAGS
+                .get(bit)
+                .map_or("an unknown restriction", |(name, _)| *name);
             return Some(AbiMismatch::Flag {
                 flag,
                 artifact: self.flags & (1 << bit) != 0,
@@ -178,10 +184,7 @@ mod tests {
         // Against the aliases rather than concrete types, so this holds under
         // only_i32 and f32_float as well — the point is that the fingerprint
         // reports the build it was taken on, whichever build that is.
-        assert_eq!(
-            abi.int_bytes as usize,
-            core::mem::size_of::<rhai::INT>(),
-        );
+        assert_eq!(abi.int_bytes as usize, core::mem::size_of::<rhai::INT>(),);
         #[cfg(not(feature = "no_float"))]
         assert_eq!(
             abi.float_bytes as usize,

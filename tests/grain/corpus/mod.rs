@@ -41,11 +41,7 @@ pub struct Holder {
 }
 
 fn out_of_range(index: i64, len: usize) -> Box<rhai::EvalAltResult> {
-    Box::new(rhai::EvalAltResult::ErrorArrayBounds(
-        len,
-        index,
-        rhai::Position::NONE,
-    ))
+    Box::new(rhai::EvalAltResult::ErrorArrayBounds(len, index, rhai::Position::NONE))
 }
 
 /// The engine both sides of the differential run against.
@@ -54,29 +50,15 @@ pub fn engine() -> rhai::Engine {
 
     engine
         .register_type_with_name::<Widget>("Widget")
-        .register_fn("widget", |level: i64| Widget {
-            level,
-            cells: vec![10, 20, 30],
-        })
-        .register_get_set(
-            "level",
-            |w: &mut Widget| w.level,
-            |w: &mut Widget, v: i64| w.level = v,
-        )
+        .register_fn("widget", |level: i64| Widget { level, cells: vec![10, 20, 30] })
+        .register_get_set("level", |w: &mut Widget| w.level, |w: &mut Widget, v: i64| w.level = v)
         // Returning an error rather than panicking, because a panic in a
         // registered function takes the test process with it.
         .register_indexer_get_set(
-            |w: &mut Widget, i: i64| -> Result<i64, Box<rhai::EvalAltResult>> {
-                w.cells
-                    .get(i as usize)
-                    .copied()
-                    .ok_or_else(|| out_of_range(i, w.cells.len()))
-            },
+            |w: &mut Widget, i: i64| -> Result<i64, Box<rhai::EvalAltResult>> { w.cells.get(i as usize).copied().ok_or_else(|| out_of_range(i, w.cells.len())) },
             |w: &mut Widget, i: i64, v: i64| -> Result<(), Box<rhai::EvalAltResult>> {
                 let len = w.cells.len();
-                *w.cells
-                    .get_mut(i as usize)
-                    .ok_or_else(|| out_of_range(i, len))? = v;
+                *w.cells.get_mut(i as usize).ok_or_else(|| out_of_range(i, len))? = v;
                 Ok(())
             },
         )
@@ -89,17 +71,8 @@ pub fn engine() -> rhai::Engine {
 
     engine
         .register_type_with_name::<Holder>("Holder")
-        .register_fn("holder", |level: i64| Holder {
-            inner: Widget {
-                level,
-                cells: vec![1, 2, 3],
-            },
-        })
-        .register_get_set(
-            "inner",
-            |h: &mut Holder| h.inner.clone(),
-            |h: &mut Holder, w: Widget| h.inner = w,
-        );
+        .register_fn("holder", |level: i64| Holder { inner: Widget { level, cells: vec![1, 2, 3] } })
+        .register_get_set("inner", |h: &mut Holder| h.inner.clone(), |h: &mut Holder, w: Widget| h.inner = w);
 
     engine
 }
@@ -120,20 +93,13 @@ pub const CASES: &[Case] = &[
     // Every segment type goes through a different arm of rhai's rendering:
     // strings skip dispatch entirely, unit renders empty, and a container
     // gets its debug-ish form.
-    case(
-        "interpolation_of_every_type",
-        r#"let s = "x"; let n = 1; let f = 1.5; let b = true; let u = (); `${s}|${n}|${f}|${b}|${u}|`"#,
-    ),
-    case(
-        "interpolation_of_containers",
-        r#"let a = [1, 2]; let m = #{ k: 1 }; `${a}|${m}`"#,
-    ),
+    case("interpolation_of_every_type", r#"let s = "x"; let n = 1; let f = 1.5; let b = true; let u = (); `${s}|${n}|${f}|${b}|${u}|`"#),
+    case("interpolation_of_containers", r#"let a = [1, 2]; let m = #{ k: 1 }; `${a}|${m}`"#),
     // A host type with no `to_string` registered falls back to the mapped
     // type name rather than to `Debug`.
     case("interpolation_of_host_type", r#"let w = widget(3); `w=${w}`"#),
     case("char_ops", r#"let c = 'a'; c.to_upper()"#),
     case("unit_value", "()"),
-
     // --- containers -------------------------------------------------------
     case("array_literal", "let a = [1, 2, 3]; a[0] + a[1] + a[2]"),
     case("array_methods", "let a = [3, 1, 2]; a.sort(); a"),
@@ -151,12 +117,8 @@ pub const CASES: &[Case] = &[
     case("empty_map_nested_in_a_computed_map", "let v = 7; #{ a: v, b: #{}, c: [] }"),
     // The value is a call, so the order it runs in relative to the rest of the
     // literal is observable.
-    case(
-        "map_computed_order",
-        r#"let log = ""; fn note(s, c) { s + c } let m = #{ a: note("", "x"), b: note("", "y") }; m.a + m.b"#,
-    ),
+    case("map_computed_order", r#"let log = ""; fn note(s, c) { s + c } let m = #{ a: note("", "x"), b: note("", "y") }; m.a + m.b"#),
     case("nested_containers", r#"let m = #{ xs: [1, 2, #{ y: 3 }] }; m.xs[2].y"#),
-
     // --- control flow -----------------------------------------------------
     case("if_else", "let a = 5; if a > 3 { \"big\" } else { \"small\" }"),
     case("while_loop", "let i = 0; let s = 0; while i < 5 { s += i; i += 1; } s"),
@@ -166,107 +128,61 @@ pub const CASES: &[Case] = &[
     case("continue_skips", "let s = 0; for i in 0..10 { if i % 2 == 0 { continue; } s += i; } s"),
     case("for_range", "let s = 0; for i in 0..5 { s += i; } s"),
     case("for_array", "let s = 0; for x in [10, 20, 30] { s += x; } s"),
-    case(
-        "for_with_counter",
-        "let s = 0; for (x, i) in [10, 20, 30] { s += x * i; } s",
-    ),
+    case("for_with_counter", "let s = 0; for (x, i) in [10, 20, 30] { s += x * i; } s"),
     // The loop variable is pushed once and mutated in place rather than
     // re-pushed each iteration (eval/stmt.rs:752); a VM that re-pushes would
     // leave the scope a different depth.
-    case(
-        "for_loop_var_not_leaked",
-        "let x = 99; for x in 0..3 { } x",
-    ),
+    case("for_loop_var_not_leaked", "let x = 99; for x in 0..3 { } x"),
     case("nested_loops_break", "let s = 0; for i in 0..3 { for j in 0..3 { if j == 2 { break; } s += 1; } } s"),
     // An empty body is a separate path in rhai that never touches the loop
     // variable or the counter (`eval/stmt.rs:719`).
     case("for_empty_body", "let s = 0; for i in 0..5 { } s"),
     // `return` out of a `for` skips the exhaustion path, so the iterator and
     // both loop variables have to go with the frame.
-    case(
-        "for_return_from_body",
-        "fn find(xs) { for (x, i) in xs { if x > 1 { return i; } } -1 } find([1, 2, 3])",
-    ),
+    case("for_return_from_body", "fn find(xs) { for (x, i) in xs { if x > 1 { return i; } } -1 } find([1, 2, 3])"),
     // A `break` out of a `while` nested in a `for` must drop nothing, and out
     // of the `for` must drop one — the two are easy to get the wrong way round.
-    case(
-        "for_around_while_break",
-        "let s = 0; for i in 0..3 { let j = 0; while true { j += 1; if j > 2 { break; } s += 1; } } s",
-    ),
+    case("for_around_while_break", "let s = 0; for i in 0..3 { let j = 0; while true { j += 1; if j > 2 { break; } s += 1; } } s"),
     // Iterating a shared cell walks a snapshot, because rhai flattens the
     // iterable before asking for an iterator (`eval/stmt.rs:677`).
-    case(
-        "for_over_captured_array",
-        "let a = [1, 2, 3]; { let f = || a; } let s = 0; for x in a { s += x; } s",
-    ),
-
+    case("for_over_captured_array", "let a = [1, 2, 3]; { let f = || a; } let s = 0; for x in a { s += x; } s"),
     // --- switch -----------------------------------------------------------
     case("switch_literal", "let x = 2; switch x { 1 => \"one\", 2 => \"two\", _ => \"other\" }"),
     case("switch_range", "let x = 42; switch x { 0..=9 => \"small\", 10..=99 => \"medium\", _ => \"large\" }"),
     // A failing guard must fall through to the next matching case, not to the
     // default, so both single-digit arms are needed to tell those apart.
-    case(
-        "switch_guard",
-        "let x = 5; switch x { 0..=9 if x % 2 == 1 => \"odd digit\", 0..=9 => \"even digit\", _ => \"big\" }",
-    ),
+    case("switch_guard", "let x = 5; switch x { 0..=9 if x % 2 == 1 => \"odd digit\", 0..=9 => \"even digit\", _ => \"big\" }"),
     case("switch_default_only", "switch 999 { 1 => \"a\", _ => \"fallback\" }"),
     // Two case values, one arm: the table has two entries pointing at one
     // body, which a compiler emitting a body per entry would duplicate.
-    case(
-        "switch_shared_body",
-        "let x = 2; switch x { 1 | 2 => \"low\", 3 => \"three\", _ => \"other\" }",
-    ),
+    case("switch_shared_body", "let x = 2; switch x { 1 | 2 => \"low\", 3 => \"three\", _ => \"other\" }"),
     // The rule that reads like a bug and is not: a case value that matched but
     // whose guard declined goes to the *default*, never on to the ranges
     // (eval/stmt.rs:544). Without the range arm here the two are the same
     // answer and the case proves nothing.
-    case(
-        "switch_declined_case_skips_ranges",
-        "let f = false; let x = 1; switch x { 1 if f => \"guarded\", 0..=5 => \"range\", _ => \"default\" }",
-    ),
+    case("switch_declined_case_skips_ranges", "let f = false; let x = 1; switch x { 1 if f => \"guarded\", 0..=5 => \"range\", _ => \"default\" }"),
     // No `_` arm at all, so the miss has to produce unit from nowhere.
     case("switch_no_default", "let x = 9; switch x { 1 => \"a\" }"),
-    case(
-        "switch_string",
-        "let s = \"b\"; switch s { \"a\" => 1, \"b\" => 2, _ => 0 }",
-    ),
+    case("switch_string", "let s = \"b\"; switch s { \"a\" => 1, \"b\" => 2, _ => 0 }"),
     // A range arm covers the reals between its bounds, so a float lands in one
     // even though the bounds are integers.
-    case(
-        "switch_float_in_range",
-        "let x = 5.5; switch x { 0..10 => \"in\", _ => \"out\" }",
-    ),
+    case("switch_float_in_range", "let x = 5.5; switch x { 0..10 => \"in\", _ => \"out\" }"),
     // Hashing a host type panics, so the subject has to be checked before it
     // reaches a hasher — and must still find the default.
-    case(
-        "switch_unhashable_subject",
-        "let w = widget(3); switch w { 1 => \"int\", _ => \"other\" }",
-    ),
+    case("switch_unhashable_subject", "let w = widget(3); switch w { 1 => \"int\", _ => \"other\" }"),
     // A shared value is not hashable either, so rhai skips the cases *and* the
     // ranges and goes straight to the default — however well the value would
     // otherwise have matched. Reading the subject through its cell would hide
     // that, which is why the subject is loaded unflattened.
-    case(
-        "switch_on_a_shared_subject_takes_the_default",
-        r#"let v = 0; { let f = || v; } switch v { 0 => "case", _ => "default" }"#,
-    ),
-    case(
-        "switch_range_on_a_shared_subject_takes_the_default",
-        r#"let v = 5; { let f = || v; } switch v { 0..=9 => "range", _ => "default" }"#,
-    ),
+    case("switch_on_a_shared_subject_takes_the_default", r#"let v = 0; { let f = || v; } switch v { 0 => "case", _ => "default" }"#),
+    case("switch_range_on_a_shared_subject_takes_the_default", r#"let v = 5; { let f = || v; } switch v { 0..=9 => "range", _ => "default" }"#),
     // The same shape before anything shares it, so the pair says the difference
     // is the sharing rather than the switch.
-    case(
-        "switch_on_an_unshared_subject_matches",
-        r#"let v = 0; switch v { 0 => "case", _ => "default" }"#,
-    ),
+    case("switch_on_an_unshared_subject_matches", r#"let v = 0; switch v { 0 => "case", _ => "default" }"#),
     // An arm body is a block: it declares, and it has to leave the scope the
     // depth it found it — which only shows up in something that reads a local
     // afterwards.
-    case(
-        "switch_block_body_scope",
-        "let x = 1; let y = 0; switch x { 1 => { let z = 5; y = z * 2 }, _ => () } y",
-    ),
+    case("switch_block_body_scope", "let x = 1; let y = 0; switch x { 1 => { let z = 5; y = z * 2 }, _ => () } y"),
     // A jump out of an arm and out of the switch, which is where the operand
     // stack most plausibly ends up a different depth on the two paths.
     // A range is a host type as far as `Dynamic` is concerned, and
@@ -274,41 +190,23 @@ pub const CASES: &[Case] = &[
     // fact hash a range (types/dynamic.rs:465). So rhai never matches a range
     // *subject* against anything, and neither may the VM: mirroring the gate
     // matters more than being clever about it.
-    case(
-        "switch_range_subject_never_matches",
-        "let r = 0..5; switch r { 0..5 => \"same\", _ => \"no\" }",
-    ),
-    case(
-        "switch_break_from_loop",
-        "let s = 0; let i = 0; while i < 10 { switch i { 3 => break, _ => () } s += 1; i += 1; } s",
-    ),
-
+    case("switch_range_subject_never_matches", "let r = 0..5; switch r { 0..5 => \"same\", _ => \"no\" }"),
+    case("switch_break_from_loop", "let s = 0; let i = 0; while i < 10 { switch i { 3 => break, _ => () } s += 1; i += 1; } s"),
     // --- blocks used for their value ---------------------------------------
     // Rhai wraps a block in `Expr::Stmt` wherever a value is wanted, so these
     // are one construct in three disguises. Each declares inside the block, so
     // a lowering that forgot to rewind would leave the scope a different depth
     // and every slot after it would name the wrong variable.
-    case(
-        "let_from_switch",
-        "let x = 2; let y = switch x { 1 => \"one\", 2 => \"two\", _ => \"other\" }; y",
-    ),
-    case(
-        "let_from_if",
-        "let c = true; let y = if c { let a = 1; a } else { let b = 2; b }; y + 10",
-    ),
+    case("let_from_switch", "let x = 2; let y = switch x { 1 => \"one\", 2 => \"two\", _ => \"other\" }; y"),
+    case("let_from_if", "let c = true; let y = if c { let a = 1; a } else { let b = 2; b }; y + 10"),
     case("let_from_block", "let a = 3; let y = { let z = a; z * 2 }; y"),
     // A block among a call's arguments, where the scope grows while operands
     // are already on the stack.
-    case(
-        "block_as_argument",
-        "fn add(a, b) { a + b } let n = 2; add({ let t = n; t + 1 }, 10)",
-    ),
-
+    case("block_as_argument", "fn add(a, b) { a + b } let n = 2; add({ let t = n; t + 1 }, 10)"),
     // --- scoping ----------------------------------------------------------
     case("shadowing_nested", "let x = 1; { let x = 2; { let x = 3; } } x"),
     case("block_scope_discarded", "let x = 1; { let y = 2; x += y; } x"),
     case("const_read", "const K = 10; K * 2"),
-
     // --- functions --------------------------------------------------------
     case("fn_call", "fn add(a, b) { a + b } add(2, 3)"),
     // Kept shallow deliberately: rhai's default call-depth limit is far lower
@@ -329,11 +227,7 @@ pub const CASES: &[Case] = &[
     //
     // `this` is what leaves the body unlowerable, and calling it by name
     // rather than as a method is what routes it through generic dispatch.
-    case(
-        "error_a_skipped_function_cannot_see_the_caller",
-        "fn peek(k) { let seen = secret; this } let secret = 42; peek(1)",
-    ),
-
+    case("error_a_skipped_function_cannot_see_the_caller", "fn peek(k) { let seen = secret; this } let secret = 42; peek(1)"),
     // --- a variable in first-argument position ------------------------------
     // Rhai rewrites `f(x, ..)` into `x.f(..)` so a `&mut` first parameter
     // mutates the variable (`func/call.rs:1434`). These are the same calls the
@@ -344,14 +238,8 @@ pub const CASES: &[Case] = &[
     // Rhai reads the variable *after* the other arguments, so an argument that
     // writes to it is seen. Two shapes of write, because one goes through the
     // rewrite itself and the other does not.
-    case(
-        "call_style_argument_writes_the_receiver",
-        "let a = [1]; push(a, { push(a, 9); 2 }); a",
-    ),
-    case(
-        "call_style_argument_replaces_the_receiver",
-        "let a = [1]; push(a, { a = [7]; 2 }); a",
-    ),
+    case("call_style_argument_writes_the_receiver", "let a = [1]; push(a, { push(a, 9); 2 }); a"),
+    case("call_style_argument_replaces_the_receiver", "let a = [1]; push(a, { a = [7]; 2 }); a"),
     // The receiver appearing again among the arguments, which is where a live
     // reference into the scope would be most likely to show. It does not: the
     // later argument was read and flattened before the reference was taken, so
@@ -364,10 +252,7 @@ pub const CASES: &[Case] = &[
     // The closure is made in a block so the scope the two sides are compared on
     // does not end up holding a pointer, which they render differently on
     // purpose — see `a_closure_pointer_is_late_bound` in `tests/scope.rs`.
-    case(
-        "call_style_shared_receiver",
-        "let a = [1]; { let f = || a.len(); } push(a, 2); a",
-    ),
+    case("call_style_shared_receiver", "let a = [1]; { let f = || a.len(); } push(a, 2); a"),
     // A script function copies its first argument whichever way it arrives, so
     // the rewrite is invisible here — which is the thing to pin.
     case("call_style_script_fn", "fn bump_it(x) { x += 1; x } let n = 3; bump_it(n); n"),
@@ -382,7 +267,6 @@ pub const CASES: &[Case] = &[
     // shapes, because one goes through the rewrite and the other does not.
     case("error_returned_by_a_native", r#"parse_int("zz")"#),
     case("error_returned_by_a_native_by_reference", r#"let s = "zz"; parse_int(s)"#),
-
     // --- closures ---------------------------------------------------------
     // Function pointers are invoked via `.call()`; `f(5)` would look for a
     // function literally named `f`.
@@ -392,37 +276,19 @@ pub const CASES: &[Case] = &[
     // difference is the price of not shipping an AST body, it is script-
     // visible, and `a_closure_pointer_is_late_bound` is where it is pinned —
     // so these cases test the capture rather than re-testing the rendering.
-    case(
-        "closure_capture_read",
-        "let n = 10; let r = 0; { let f = |x| x + n; r = f.call(5); } r",
-    ),
+    case("closure_capture_read", "let n = 10; let r = 0; { let f = |x| x + n; r = f.call(5); } r"),
     // Capture is by shared cell, so the mutation must be visible outside.
-    case(
-        "closure_capture_mutate",
-        "let n = 0; { let f = || n += 1; f.call(); f.call(); } n",
-    ),
+    case("closure_capture_mutate", "let n = 0; { let f = || n += 1; f.call(); f.call(); } n"),
     // In a block for the same reason the closure cases are: what the pointer
     // *does* matches, what it renders as does not.
-    case(
-        "fn_ptr_call",
-        "fn triple(x) { x * 3 } let r = 0; { let f = Fn(\"triple\"); r = f.call(4); } r",
-    ),
+    case("fn_ptr_call", "fn triple(x) { x * 3 } let r = 0; { let f = Fn(\"triple\"); r = f.call(4); } r"),
     // The same through a name that is not a constant, so rhai's optimizer
     // cannot fold it into a pointer carrying an environment.
-    case(
-        "fn_ptr_from_dynamic_name",
-        "fn triple(x) { x * 3 } let n = \"trip\" + \"le\"; let f = Fn(n); f.call(4)",
-    ),
-    case(
-        "fn_ptr_curried",
-        "fn add(a, b) { a + b } let n = \"a\" + \"dd\"; let f = Fn(n).curry(10); f.call(5)",
-    ),
+    case("fn_ptr_from_dynamic_name", "fn triple(x) { x * 3 } let n = \"trip\" + \"le\"; let f = Fn(n); f.call(4)"),
+    case("fn_ptr_curried", "fn add(a, b) { a + b } let n = \"a\" + \"dd\"; let f = Fn(n).curry(10); f.call(5)"),
     // A pointer to a native function goes to rhai's own dispatch rather than
     // to a chunk of ours.
-    case(
-        "fn_ptr_to_native",
-        "let n = \"ab\" + \"s\"; let f = Fn(n); f.call(-7)",
-    ),
+    case("fn_ptr_to_native", "let n = \"ab\" + \"s\"; let f = Fn(n); f.call(-7)"),
     // Deliberately absent: `let x = 1; x.call(2)`. That is not an error in
     // rhai — a non-pointer target means the *argument* is the pointer and the
     // target is `this` — and the VM reproduces the behaviour, but not the
@@ -431,10 +297,7 @@ pub const CASES: &[Case] = &[
     // was measured to move the divergence onto the common path instead of
     // removing it. A pool of positions would fix it and would not be
     // strippable.
-    case(
-        "error_fn_ptr_unknown_name",
-        "let n = \"no\" + \"pe\"; let f = Fn(n); f.call(1)",
-    ),
+    case("error_fn_ptr_unknown_name", "let n = \"no\" + \"pe\"; let f = Fn(n); f.call(1)"),
     // `Fn` and `curry` read their first argument and blame everything they can
     // then complain about on *it* rather than on the call — a name that is not
     // a string, a string that is not an identifier, a first argument that is
@@ -447,30 +310,17 @@ pub const CASES: &[Case] = &[
     // instead of writing *through* it severs the closure silently — the value
     // is right and the aliasing is dead — so this needs a write after the
     // capture to catch it.
-    case(
-        "closure_shared_write",
-        "let x = 1; let r = 0; { let f = || x; x = 42; r = f.call(); } r",
-    ),
-    case(
-        "closure_shared_op_assign",
-        "let x = 1; let r = 0; { let f = || x; x += 41; r = f.call(); } r",
-    ),
+    case("closure_shared_write", "let x = 1; let r = 0; { let f = || x; x = 42; r = f.call(); } r"),
+    case("closure_shared_op_assign", "let x = 1; let r = 0; { let f = || x; x += 41; r = f.call(); } r"),
     // The same cell as the root of a chain. `get_indexed_mut` refuses a shared
     // value outright, so walking one takes the host down rather than returning
     // an error (`eval/chaining.rs:461`).
-    case(
-        "closure_shared_chain_root",
-        "let a = [1, 2, 3]; { let f = || a[0]; } a[1] = 20; a[1]",
-    ),
+    case("closure_shared_chain_root", "let a = [1, 2, 3]; { let f = || a[0]; } a[1] = 20; a[1]"),
     // rhai answers this syntactically and registers no function for it, so a
     // lowered call would fail to resolve where the walker returns a bool.
-    case(
-        "is_shared_after_capture",
-        "let x = 1; let r = false; { let f = || x; r = is_shared(f); } [is_shared(x), r]",
-    ),
+    case("is_shared_after_capture", "let x = 1; let r = false; { let f = || x; r = is_shared(f); } [is_shared(x), r]"),
     case("closure_in_map", "[1, 2, 3].map(|x| x * 2)"),
     case("closure_in_filter", "[1, 2, 3, 4].filter(|x| x % 2 == 0)"),
-
     // --- chained lvalues --------------------------------------------------
     // Each of these needs a different `Target` variant and its write-back.
     case("index_assign_array", "let a = [1, 2, 3]; a[1] = 99; a"),
@@ -487,10 +337,7 @@ pub const CASES: &[Case] = &[
     case("error_map_write_through_an_absent_key", "let m = #{}; m.a.b = 1; m"),
     // A closure holds the same cell, so a key invented by a read would be
     // visible from outside the expression that invented it.
-    case(
-        "map_read_of_absent_key_is_not_visible_to_a_closure",
-        "let m = #{}; let r = 0; { let f = || m; r = m.zz; } [m, r]",
-    ),
+    case("map_read_of_absent_key_is_not_visible_to_a_closure", "let m = #{}; let r = 0; { let f = || m; r = m.zz; } [m, r]"),
     case("op_assign_indexed", "let a = [1, 2, 3]; a[0] += 10; a"),
     case("bitfield_assign", "let x = 0; x[2] = true; x"),
     case("string_char_assign", r#"let s = "hello"; s[0] = 'H'; s"#),
@@ -499,7 +346,6 @@ pub const CASES: &[Case] = &[
     // one does not cover the other. A string rather than an array, because
     // rhai indexes arrays with integers only and slices them with `extract`.
     case("string_slice_inclusive", r#"let s = "hello world"; s[6..=9]"#),
-
     // --- chains rooted at something that is not a variable ------------------
     // Rhai evaluates the root into a temporary and walks that
     // (`eval/chaining.rs:561-571`), so there is no scope entry behind it and
@@ -543,34 +389,23 @@ pub const CASES: &[Case] = &[
     // yields a bool, and rhai names the *second* `[`.
     case("error_index_into_an_unindexable_step", "let n = 0; n[0][5]"),
     case("error_index_into_an_unindexable_step_deep", "let m = #{ a: 1 }; m.a[0][5]"),
-
     // --- what an escaping error leaves in the scope -------------------------
     // Rhai rewinds a block whether it is left normally or by a throw, and
     // rewinds nothing at the top level. The comparison that matters in all of
     // these is the leftover scope rather than the error.
     case("throw_from_a_block_rewinds_it", "let a = 1; { let b = 2; throw 3; }"),
     case("throw_from_a_for_body_drops_the_loop_var", "let a = 1; for i in 0..3 { throw i; }"),
-    case(
-        "throw_from_a_while_body_drops_its_locals",
-        "let a = 1; let n = 0; while n < 3 { let b = n; throw b; }",
-    ),
+    case("throw_from_a_while_body_drops_its_locals", "let a = 1; let n = 0; while n < 3 { let b = n; throw b; }"),
     // A catch block is a block too, and its variable is the one rhai pushes
     // rather than the script.
     case("throw_from_a_catch_drops_the_catch_var", "let a = 1; try { throw 2; } catch (e) { throw e; }"),
-    case(
-        "throw_from_a_nested_block_drops_every_level",
-        "let a = 1; { let b = 2; { let c = 3; for i in 0..2 { throw i; } } }",
-    ),
+    case("throw_from_a_nested_block_drops_every_level", "let a = 1; { let b = 2; { let c = 3; for i in 0..2 { throw i; } } }"),
     // The frame boundary: a function's own locals go with its scope, and the
     // caller's top-level ones stay.
-    case(
-        "throw_from_a_function_leaves_the_caller_top_level_alone",
-        "fn boom() { let inner = 9; throw inner; } let a = 1; { let b = 2; boom(); }",
-    ),
+    case("throw_from_a_function_leaves_the_caller_top_level_alone", "fn boom() { let inner = 9; throw inner; } let a = 1; { let b = 2; boom(); }"),
     // Nothing to rewind, which is the case a floor set too low would break.
     case("throw_at_the_top_level_keeps_what_ran", "let a = 1; let b = 2; throw 3;"),
     case("error_temp_root_out_of_bounds", "[1, 2, 3][99]"),
-
     // --- errors -----------------------------------------------------------
     // Compared by variant and position, so a VM that reports the right failure
     // at the wrong place still fails the test.
@@ -587,20 +422,16 @@ pub const CASES: &[Case] = &[
     // it up.
     case("error_condition_is_a_range", "if 0..1 { 1 } else { 2 }"),
     case("error_condition_is_a_host_type", "let w = widget(1); while w { 1 }"),
-    case("error_type_mismatch",r#"let a = 1; a + "string" + [1]"#),
+    case("error_type_mismatch", r#"let a = 1; a + "string" + [1]"#),
     case("error_divide_by_zero", "let a = 1; a / 0"),
     case("throw_value", "throw 42"),
     case("throw_in_fn", "fn f() { throw \"boom\"; } f()"),
-
     // --- try / catch ------------------------------------------------------
     case("try_catch_value", "try { throw 7; } catch (e) { e * 2 }"),
     case("try_catch_native_error", "try { let a = [1]; a[9] } catch (e) { e.message != () }"),
     case("try_catch_rethrow", "try { try { throw 1; } catch { throw; } } catch (e) { e }"),
     // `return` unwinds as an error but must pass straight through a catch.
-    case(
-        "try_catch_does_not_swallow_return",
-        "fn f() { try { return 1; } catch { return 2; } } f()",
-    ),
+    case("try_catch_does_not_swallow_return", "fn f() { try { return 1; } catch { return 2; } } f()"),
     case("try_catch_no_error", "try { 5 } catch { 6 }"),
     // The catch block's value is discarded — the statement is unit on the
     // caught path and the try block's value otherwise (`eval/stmt.rs:863`).
@@ -608,31 +439,15 @@ pub const CASES: &[Case] = &[
     // A jump out of a `try` skips the `PopHandler` the straight-line path
     // would have run. Left armed, the next error is caught into a block that
     // has already been left — so the second failure here must not be caught.
-    case(
-        "break_out_of_try_disarms_it",
-        "let s = 0; while true { try { throw 1; } catch { break; } } try { throw 2; } catch (e) { s = e; } s",
-    ),
-    case(
-        "break_out_of_for_inside_try",
-        "let s = 0; for i in 0..5 { try { if i == 2 { break; } s += i; } catch { s = -1; } } s",
-    ),
-    case(
-        "continue_out_of_try_inside_for",
-        "let s = 0; for i in 0..5 { try { if i % 2 == 0 { continue; } s += i; } catch { s = -1; } } s",
-    ),
+    case("break_out_of_try_disarms_it", "let s = 0; while true { try { throw 1; } catch { break; } } try { throw 2; } catch (e) { s = e; } s"),
+    case("break_out_of_for_inside_try", "let s = 0; for i in 0..5 { try { if i == 2 { break; } s += i; } catch { s = -1; } } s"),
+    case("continue_out_of_try_inside_for", "let s = 0; for i in 0..5 { try { if i % 2 == 0 { continue; } s += i; } catch { s = -1; } } s"),
     // An error out of a called function arrives wrapped in
     // `ErrorInFunctionCall`, which is catchable, and `unwrap_inner` is what
     // still binds the bare thrown value.
-    case(
-        "try_around_a_compiled_call",
-        "fn boom() { throw 7; } try { boom(); } catch (e) { e }",
-    ),
+    case("try_around_a_compiled_call", "fn boom() { throw 7; } try { boom(); } catch (e) { e }"),
     // `return` is a pseudo error and must pass straight through a handler.
-    case(
-        "try_does_not_catch_return",
-        "fn f() { try { return 1; } catch { 2 } } f()",
-    ),
-
+    case("try_does_not_catch_return", "fn f() { try { return 1; } catch { 2 } } f()"),
     // --- host types -------------------------------------------------------
     //
     // The one part of the chain walker that approximates rather than
@@ -649,10 +464,7 @@ pub const CASES: &[Case] = &[
     case("host_method_pure", "let w = widget(4); w.doubled()"),
     // Two levels, so the middle one is a temporary.
     case("host_temp_set", "let h = holder(3); h.inner.level = 8; h.inner.level"),
-    case(
-        "host_temp_index_set",
-        "let h = holder(3); h.inner[0] = 7; h.inner[0]",
-    ),
+    case("host_temp_index_set", "let h = holder(3); h.inner[0] = 7; h.inner[0]"),
     // A mutating call on a temporary: rhai writes it back, so the change
     // survives.
     case("host_temp_mutates", "let h = holder(3); h.inner.bump(); h.inner.level"),

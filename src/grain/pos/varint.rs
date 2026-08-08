@@ -94,7 +94,11 @@ mod tests {
             put_u64(&mut buf, value);
             let mut at = 0;
             assert_eq!(u64(&buf, &mut at), Ok(value), "at {value}");
-            assert_eq!(at, buf.len(), "the reader must consume exactly what was written");
+            assert_eq!(
+                at,
+                buf.len(),
+                "the reader must consume exactly what was written"
+            );
         }
     }
 
@@ -141,7 +145,10 @@ mod tests {
         // The largest value there is: nine full groups and a final bit.
         ten[9] = 0x01;
         let mut at = 0;
-        assert_eq!(u64(&[[0xffu8; 9].as_slice(), &[0x01]].concat(), &mut at), Ok(u64::MAX));
+        assert_eq!(
+            u64(&[[0xffu8; 9].as_slice(), &[0x01]].concat(), &mut at),
+            Ok(u64::MAX)
+        );
 
         // One past it. Shifting would drop the payload and read this as zero.
         ten[9] = 0x02;

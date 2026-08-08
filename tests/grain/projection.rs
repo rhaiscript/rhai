@@ -164,12 +164,9 @@ fn interned_names(ast: &AST) -> BTreeSet<String> {
 #[test]
 fn projected_artifact_size() {
     let engine = Engine::new();
-    let ast = engine
-        .compile(SOURCE)
-        .expect("fixtures/follow.rhai must compile");
+    let ast = engine.compile(SOURCE).expect("fixtures/follow.rhai must compile");
 
-    let mut counts: std::collections::BTreeMap<&'static str, (usize, usize)> =
-        std::collections::BTreeMap::new();
+    let mut counts: std::collections::BTreeMap<&'static str, (usize, usize)> = std::collections::BTreeMap::new();
     let mut code_bytes = 0usize;
     let mut nodes = 0usize;
 
@@ -193,11 +190,7 @@ fn projected_artifact_size() {
     // A tag byte plus eight bytes of payload, for every node that referenced
     // the pool. Deduplication would shrink this; not modelling it keeps the
     // projection on the pessimistic side.
-    let pool_refs: usize = ["int", "float", "string", "char", "dynamic const"]
-        .iter()
-        .filter_map(|k| counts.get(k))
-        .map(|(n, _)| *n)
-        .sum();
+    let pool_refs: usize = ["int", "float", "string", "char", "dynamic const"].iter().filter_map(|k| counts.get(k)).map(|(n, _)| *n).sum();
     let const_pool = pool_refs * 9;
 
     // Header, ABI fingerprint, and section offsets.
@@ -213,26 +206,15 @@ fn projected_artifact_size() {
     }
 
     println!("\n{:<18} {:>9}", "code", code_bytes);
-    println!(
-        "{:<18} {:>9}   ({} distinct names)",
-        "string table",
-        string_table,
-        names.len()
-    );
+    println!("{:<18} {:>9}   ({} distinct names)", "string table", string_table, names.len());
     println!("{:<18} {:>9}   ({pool_refs} pool refs)", "constants", const_pool);
     println!("{:<18} {:>9}", "header", HEADER);
     println!("{:<18} {:>9}", "projected total", projected);
 
-    println!(
-        "\nprojected artifact / source   {:.2}x",
-        projected as f64 / source_bytes as f64
-    );
+    println!("\nprojected artifact / source   {:.2}x", projected as f64 / source_bytes as f64);
 
     assert!(nodes > 0, "the walk visited nothing");
-    assert!(
-        code_bytes > 0,
-        "every node priced at zero means the model is broken",
-    );
+    assert!(code_bytes > 0, "every node priced at zero means the model is broken",);
     assert!(
         !counts.contains_key(UNPRICED),
         "{} nodes have no cost in the model, so the projection understates: \
