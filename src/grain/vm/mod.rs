@@ -287,7 +287,54 @@ pub struct Vm<'e> {
     /// top-level statement of a chunk, saved and restored per frame. See
     /// [`Vm::execute`].
     unwind_floor: usize,
+    /// The receiver bound to the frame currently running.
+    ///
+    /// Owned rather than borrowed: the value a binder has to hand over always
+    /// lives in `stack` or in a caller's `Scope`, and neither can lend a `&mut`
+    /// across the `&mut self` call that runs the callee. So the binder moves it
+    /// in, the frame owns it, and [`Vm::call_compiled_with_this`] hands it back
+    /// for the binder to put where it came from.
+    ///
+    /// Saved and restored per *call* rather than per frame, which is what makes
+    /// `this` never inherited: a plain nested call passes `None` and gets the
+    /// caller's back on the way out, reproducing `func/call.rs:669` without a
+    /// conditional anywhere.
+    this: Option<Dynamic>,
     fault_pc: Option<usize>,
+}
+
+/// Take a receiver for a callee to own, and say whether it goes back.
+///
+/// The rule is `chain_root`'s `walkable` (see [`Vm::chain_root`]) plus the
+/// question of ownership. A read-only receiver is *cloned*, because `take`
+/// would leave `UNIT` behind and strip the constness the caller's slot is
+/// carrying; nothing is written back, since rhai refuses the mutation rather
+/// than making it. Anything else is taken, as `call_compiled_body` already
+/// takes a call's arguments — a receiver is not shared with anything the callee
+/// can reach, and taking it saves a deep clone of an array or a map per call.
+///
+/// A shared receiver is taken like any other: the taken value *is* the cell, so
+/// `is_shared(this)` stays true inside the body and a write lands where every
+/// other holder can see it. It still goes back, because taking it left `UNIT`
+/// where the cell was.
+fn bind_this(receiver: &mut Dynamic) -> (Dynamic, bool) {
+    if receiver.is_read_only() {
+        (receiver.clone().into_read_only(), false)
+    } else {
+        (mem::take(receiver), true)
+    }
+}
+
+/// Put a receiver back where [`bind_this`] took it from.
+///
+/// Unconditional on how the call ended. Rhai reaches `this` through a pointer
+/// into the caller's storage, so a body that mutates and then raises has
+/// already written; a binder that only restored on success would discard
+/// exactly that.
+fn unbind_this(receiver: &mut Dynamic, taken: Option<Dynamic>, write_back: bool) {
+    if let (true, Some(value)) = (write_back, taken) {
+        *receiver = value;
+    }
 }
 
 /// A `try` region.
@@ -320,6 +367,7 @@ impl<'e> Vm<'e> {
             handlers: Vec::new(),
             sizes: Vec::new(),
             unwind_floor: 0,
+            this: None,
             fault_pc: None,
         }
     }
@@ -355,6 +403,9 @@ impl<'e> Vm<'e> {
             handlers: Vec::new(),
             sizes: Vec::new(),
             unwind_floor: 0,
+            // A crossing carries no receiver: rhai binds one only where it
+            // dispatches a method, and this arrives through `call_fn_raw`.
+            this: None,
             fault_pc: None,
         }
     }
@@ -403,11 +454,31 @@ impl<'e> Vm<'e> {
         level: usize,
         pos: Position,
     ) -> VmResult {
+        self.call_function_with_this(program, name, args, level, pos, None)
+            .0
+    }
+
+    /// The same, against a receiver the callee owns for the duration.
+    ///
+    /// The receiver comes back however the call ended, for the caller to put
+    /// where it took it from — see [`bind_this`] and [`unbind_this`].
+    fn call_function_with_this(
+        &mut self,
+        program: &Program,
+        name: &str,
+        args: Vec<Dynamic>,
+        level: usize,
+        pos: Position,
+        this: Option<Dynamic>,
+    ) -> (VmResult, Option<Dynamic>) {
         let Some(function) = program.function_named(name, args.len()) else {
-            return Err(Box::new(EvalAltResult::ErrorFunctionNotFound(
-                format!("{name} ({} args)", args.len()),
-                pos,
-            )));
+            return (
+                Err(Box::new(EvalAltResult::ErrorFunctionNotFound(
+                    format!("{name} ({} args)", args.len()),
+                    pos,
+                ))),
+                this,
+            );
         };
         let (params, chunk) = (function.params.clone(), function.chunk);
 
@@ -417,11 +488,12 @@ impl<'e> Vm<'e> {
         self.stack.extend(args);
 
         let restore = mem::replace(&mut self.global.level, level);
-        let result = self.call_compiled(program, name, &params, chunk, first, pos);
+        let (result, this) =
+            self.call_compiled_with_this(program, name, &params, chunk, first, pos, this);
         self.global.level = restore;
 
         self.stack.truncate(first);
-        result
+        (result, this)
     }
 
     /// Call one compiled function by name, instead of running the whole
@@ -456,13 +528,13 @@ impl<'e> Vm<'e> {
     /// * `rewind_scope` truncates the scope back afterwards. On by default.
     /// * `tag` sets the evaluation's custom state.
     ///
-    /// `this_ptr` is accepted and ignored: a compiled function never reads
-    /// `this`, because the compiler refuses to lower a body that does
-    /// (`compile/mod.rs`), so a bound `this` could not be observed. A body
-    /// that uses `this` is still an AST in the program's library and reached
-    /// through [`Engine::call_fn`](crate::Engine::call_fn) instead.
-    /// `in_all_namespaces` is likewise ignored — this looks only in the
-    /// program's own compiled functions.
+    /// `this_ptr` binds the callee's receiver, as it does in rhai. A write
+    /// through `this` lands in the pointer's own `Dynamic` — including when the
+    /// call goes on to fail, because rhai reaches `this` through the caller's
+    /// storage and a body that mutates and then raises has already written.
+    ///
+    /// `in_all_namespaces` is ignored: this looks only in the program's own
+    /// compiled functions.
     ///
     /// # Errors
     ///
@@ -481,26 +553,40 @@ impl<'e> Vm<'e> {
         args.parse(&mut arg_values);
 
         let orig_scope_len = scope.len();
+        let mut this_ptr = options.this_ptr;
         if let Some(tag) = options.tag {
             self.global.tag = tag;
         }
+
+        // The pointer is the host's and outlives the call, so unlike every
+        // other binder this one can hold it across the whole thing.
+        let bound = this_ptr.as_deref_mut().map(bind_this);
+        let (this, write_back) = bound.map_or((None, false), |(v, w)| (Some(v), w));
 
         // The program's environment stays installed for the *call*, not only for
         // the main chunk that may precede it: the function being called can
         // reach whatever the compiler left rhai to interpret, and rhai looks for
         // it in `global.lib`.
         let mut evaluated = Ok(());
-        let result = self.with_environment(program, None, |vm| {
+        let (result, returned) = self.with_environment(program, None, |vm| {
             if options.eval_ast {
                 // Run for the scope it leaves behind; the body's own value is
-                // not what the caller asked for.
+                // not what the caller asked for. The main chunk gets no
+                // receiver, as `eval_global_statements` does not either.
                 evaluated = unwind_exit(vm.run_main(program, scope)).map(|_| ());
                 if evaluated.is_err() {
-                    return Ok(Dynamic::UNIT);
+                    return (Ok(Dynamic::UNIT), this);
                 }
             }
-            vm.call_function(program, name, arg_values, 0, Position::NONE)
+            vm.call_function_with_this(program, name, arg_values, 0, Position::NONE, this)
         });
+
+        // Before the errors below, both of them: rhai's mutation through `this`
+        // survives a failed call, and survives one whose result is the wrong
+        // type just as much.
+        if let Some(slot) = this_ptr {
+            unbind_this(slot, returned, write_back);
+        }
         evaluated?;
 
         if options.rewind_scope {
@@ -1913,10 +1999,6 @@ impl<'e> Vm<'e> {
         value
     }
 
-    /// Kept out of the dispatch loop. Inlined, it is enough extra code to
-    /// change register allocation across every other instruction — measured as
-    /// a uniform slowdown on benchmarks that call no functions at all.
-    #[inline(never)]
     fn call_compiled(
         &mut self,
         program: &Program,
@@ -1926,12 +2008,49 @@ impl<'e> Vm<'e> {
         first: usize,
         pos: Position,
     ) -> VmResult {
-        self.engine.track_operation(&mut self.global, pos)?;
+        self.call_compiled_with_this(program, name, params, chunk, first, pos, None)
+            .0
+    }
 
-        self.global.level += 1;
-        let result = self.call_compiled_body(program, name, params, chunk, first, pos);
-        self.global.level -= 1;
-        result
+    /// The same, against a receiver the callee owns for the duration.
+    ///
+    /// Hands the receiver back however the call ended, so a body that mutated
+    /// `this` and then raised still gives its binder something to write back —
+    /// which is what rhai's pointer into the caller's storage does for free.
+    ///
+    /// Every compiled call comes through here, and [`Vm::call_compiled`] is this
+    /// with no receiver. That is what makes `this` per-call rather than
+    /// inherited: an ordinary call installs `None` and gives the caller's back
+    /// on the way out, so a callee can never read the receiver of the frame that
+    /// called it (`func/call.rs:669`).
+    ///
+    /// Kept out of the dispatch loop. Inlined, it is enough extra code to change
+    /// register allocation across every other instruction — measured as a
+    /// uniform slowdown on benchmarks that call no functions at all.
+    #[inline(never)]
+    fn call_compiled_with_this(
+        &mut self,
+        program: &Program,
+        name: &str,
+        params: &[u32],
+        chunk: crate::grain::bytecode::Chunk,
+        first: usize,
+        pos: Position,
+        this: Option<Dynamic>,
+    ) -> (VmResult, Option<Dynamic>) {
+        let saved = mem::replace(&mut self.this, this);
+
+        let result = match self.engine.track_operation(&mut self.global, pos) {
+            Ok(()) => {
+                self.global.level += 1;
+                let result = self.call_compiled_body(program, name, params, chunk, first, pos);
+                self.global.level -= 1;
+                result
+            }
+            Err(err) => Err(err),
+        };
+
+        (result, mem::replace(&mut self.this, saved))
     }
 
     fn call_compiled_body(
@@ -2537,6 +2656,73 @@ impl<'e> Vm<'e> {
                     self.store(program, op, &mut target, rhs, pos())?;
                 }
 
+                code::tag::LOAD_THIS | code::tag::LOAD_THIS_SHARED => {
+                    let value = self
+                        .this
+                        .as_ref()
+                        .ok_or_else(|| Box::new(EvalAltResult::ErrorUnboundThis(pos())))?;
+                    // Rhai's read is `this_ptr.cloned()` and does not flatten
+                    // (`eval/expr.rs:272`); its consumers do. Which tag this is
+                    // is which consumer asked.
+                    self.stack.push(if tag == code::tag::LOAD_THIS {
+                        value.flatten_clone()
+                    } else {
+                        value.clone()
+                    });
+                }
+
+                code::tag::REQUIRE_THIS => {
+                    if self.this.is_none() {
+                        return Err(Box::new(EvalAltResult::ErrorUnboundThis(pos())));
+                    }
+                }
+
+                code::tag::ASSIGN_THIS | code::tag::ASSIGN_THIS_OP => {
+                    let op = if tag == code::tag::ASSIGN_THIS_OP {
+                        let index = u32::from(small(1)?);
+                        Some(
+                            program
+                                .assign_op(index)
+                                .ok_or_else(|| malformed(format!("no op-assignment {index}")))?,
+                        )
+                    } else {
+                        None
+                    };
+
+                    // Flattened before assigning, as everywhere else.
+                    let rhs = self.pop()?.flatten();
+
+                    // Taken out of the register rather than borrowed from it:
+                    // `store` wants the whole `Vm`, and a write lock into the
+                    // field could not outlive that borrow. Put back on both
+                    // paths — rhai's mutation survives an error, and a frame
+                    // that lost its receiver would answer `ErrorUnboundThis` to
+                    // every read after this one.
+                    let mut this = self
+                        .this
+                        .take()
+                        .ok_or_else(|| Box::new(EvalAltResult::ErrorUnboundThis(pos())))?;
+
+                    let outcome = if this.is_read_only() {
+                        // Named for an expression that has no name, which is
+                        // what rhai reports too (`eval/stmt.rs:118-122`).
+                        Err(Box::new(EvalAltResult::ErrorAssignmentToConstant(
+                            String::new(),
+                            pos(),
+                        )))
+                    } else {
+                        // Written through, not over: a shared receiver has to
+                        // keep its cell, as a captured local does.
+                        match place(&mut this, "", pos()) {
+                            Ok(mut target) => self.store(program, op, &mut target, rhs, pos()),
+                            Err(err) => Err(err),
+                        }
+                    };
+
+                    self.this = Some(this);
+                    outcome?;
+                }
+
                 code::tag::POP => {
                     let _ = self.pop()?;
                 }
@@ -3035,5 +3221,241 @@ impl<'e> Vm<'e> {
 
             pc += width;
         }
+    }
+}
+
+/// The `this` register, reached by hand-built chunks.
+///
+/// The compiler does not emit any of these yet — it still refuses a body that
+/// mentions `this` — so this is the only thing that executes them until it does.
+/// Worth having on its own account regardless: what a hand-made artifact can say
+/// is exactly what a verifier-plus-VM has to survive.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grain::bytecode::{assemble, Chunk, Op, Positions, Strings};
+    use crate::grain::program::{Function, Parts};
+    use crate::{CallFnOptions, Engine, Scope, INT};
+
+    /// A program of nullary functions, named `f` upwards in the order given.
+    ///
+    /// The main chunk does nothing: everything here is entered through
+    /// [`Vm::call_fn_with_options`], which is the only thing that can bind a
+    /// receiver.
+    fn program_of(bodies: &[&[Op]], consts: Vec<Dynamic>) -> Program<'static> {
+        const NAMES: [&str; 2] = ["f", "g"];
+
+        let mut all = vec![Op::Unit, Op::Return];
+        let mut spans = Vec::new();
+        for body in bodies {
+            let start = all.len();
+            all.extend_from_slice(body);
+            spans.push(start..all.len());
+        }
+
+        // Assembling a prefix gives the byte offset that prefix ends at, which
+        // is what a chunk is measured in.
+        let end_of = |ops: usize| {
+            assemble(&all[..ops])
+                .expect("the test ops must assemble")
+                .0
+                .len() as u32
+        };
+        let (code, _) = assemble(&all).expect("the test ops must assemble");
+
+        let functions = spans
+            .iter()
+            .enumerate()
+            .map(|(index, span)| Function {
+                name: index as u32,
+                params: Vec::new(),
+                chunk: Chunk::new(end_of(span.start), end_of(span.end), 8),
+            })
+            .collect();
+
+        Program::new(
+            code.into(),
+            Chunk::new(0, end_of(2), 8),
+            functions,
+            Parts {
+                positions: Positions::default(),
+                residuals: Vec::new(),
+                consts,
+                names: Strings::new(NAMES),
+                tokens: Vec::new(),
+                assign_ops: Vec::new(),
+                chains: Vec::new(),
+                switches: Vec::new(),
+                lib: None,
+                #[cfg(not(feature = "no_module"))]
+                resolver: None,
+                source: None,
+            },
+        )
+    }
+
+    /// The one function `f`, for the cases that need no callee.
+    fn one(ops: &[Op], consts: Vec<Dynamic>) -> Program<'static> {
+        program_of(&[ops], consts)
+    }
+
+    fn call(program: &Program, this: Option<&mut Dynamic>) -> Result<Dynamic, Box<EvalAltResult>> {
+        let engine = Engine::new();
+        let mut options = CallFnOptions::new().eval_ast(false);
+        options.this_ptr = this;
+        Vm::new(&engine).call_fn_with_options(options, &mut Scope::new(), program, "f", ())
+    }
+
+    #[test]
+    fn a_bound_receiver_is_what_load_this_pushes() {
+        let program = one(&[Op::LoadThis, Op::Return], Vec::new());
+        let mut this = Dynamic::from(7 as INT);
+        assert_eq!(call(&program, Some(&mut this)).unwrap().as_int(), Ok(7));
+    }
+
+    #[test]
+    fn reading_an_unbound_receiver_is_an_error() {
+        let program = one(&[Op::LoadThis, Op::Return], Vec::new());
+        let err = *call(&program, None).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                EvalAltResult::ErrorInFunctionCall(_, _, inner, _)
+                    if matches!(**inner, EvalAltResult::ErrorUnboundThis(..))
+            ),
+            "expected an unbound `this`, got {err:?}"
+        );
+    }
+
+    /// `this = v` checks boundness before evaluating `v`, which is the whole
+    /// reason [`Op::RequireThis`] is a separate instruction.
+    #[test]
+    fn assigning_to_an_unbound_receiver_is_caught_before_the_value_runs() {
+        let program = one(&[Op::RequireThis, Op::Unit, Op::Return], Vec::new());
+        let err = *call(&program, None).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                EvalAltResult::ErrorInFunctionCall(_, _, inner, _)
+                    if matches!(**inner, EvalAltResult::ErrorUnboundThis(..))
+            ),
+            "expected an unbound `this`, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn a_write_through_this_reaches_the_hosts_value() {
+        let program = one(
+            &[
+                Op::Const(0),
+                Op::AssignThis { op: None },
+                Op::Unit,
+                Op::Return,
+            ],
+            vec![Dynamic::from(9 as INT)],
+        );
+        let mut this = Dynamic::from(1 as INT);
+        assert!(call(&program, Some(&mut this)).is_ok());
+        assert_eq!(this.as_int(), Ok(9));
+    }
+
+    /// Rhai reaches `this` through the caller's storage, so a body that mutates
+    /// and then raises has already written.
+    #[test]
+    fn a_write_through_this_survives_a_failure_after_it() {
+        let program = one(
+            &[
+                Op::Const(0),
+                Op::AssignThis { op: None },
+                Op::Const(1),
+                Op::Throw,
+            ],
+            vec![Dynamic::from(9 as INT), Dynamic::from("boom")],
+        );
+        let mut this = Dynamic::from(1 as INT);
+        assert!(call(&program, Some(&mut this)).is_err());
+        assert_eq!(this.as_int(), Ok(9));
+    }
+
+    /// A callee gets `None`, whatever its caller was holding
+    /// (`func/call.rs:669`). No conditional makes that true — every ordinary
+    /// call goes through `call_compiled`, which installs `None`.
+    ///
+    /// Worth testing at all because the failure is invisible: a register that
+    /// leaked would only show up in a callee that reads `this`, and reading a
+    /// value that happens to be there looks like success.
+    #[test]
+    fn a_receiver_is_not_inherited_by_a_callee() {
+        // `f` has a receiver and calls `g`, which reads one it was never given.
+        let program = program_of(
+            &[
+                &[
+                    Op::Call {
+                        name: 1,
+                        argc: 0,
+                        op: None,
+                    },
+                    Op::Return,
+                ],
+                &[Op::LoadThis, Op::Return],
+            ],
+            Vec::new(),
+        );
+
+        let mut this = Dynamic::from(7 as INT);
+        let err = *call(&program, Some(&mut this)).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("ErrorUnboundThis"),
+            "expected `g` to have no receiver, got {err:?}"
+        );
+    }
+
+    /// And the caller still has its own afterwards.
+    #[test]
+    fn a_callees_frame_does_not_disturb_the_callers_receiver() {
+        let program = program_of(
+            &[
+                &[
+                    Op::Call {
+                        name: 1,
+                        argc: 0,
+                        op: None,
+                    },
+                    Op::Pop,
+                    Op::LoadThis,
+                    Op::Return,
+                ],
+                &[Op::Unit, Op::Return],
+            ],
+            Vec::new(),
+        );
+
+        let mut this = Dynamic::from(7 as INT);
+        assert_eq!(call(&program, Some(&mut this)).unwrap().as_int(), Ok(7));
+    }
+
+    #[test]
+    fn a_read_only_receiver_refuses_the_write_and_is_left_alone() {
+        let program = one(
+            &[
+                Op::Const(0),
+                Op::AssignThis { op: None },
+                Op::Unit,
+                Op::Return,
+            ],
+            vec![Dynamic::from(9 as INT)],
+        );
+        let mut this = Dynamic::from(1 as INT).into_read_only();
+        let err = *call(&program, Some(&mut this)).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                EvalAltResult::ErrorInFunctionCall(_, _, inner, _)
+                    // Named for an expression that has no name.
+                    if matches!(&**inner, EvalAltResult::ErrorAssignmentToConstant(name, ..) if name.is_empty())
+            ),
+            "expected a refused write to a constant, got {err:?}"
+        );
+        assert_eq!(this.as_int(), Ok(1));
     }
 }
