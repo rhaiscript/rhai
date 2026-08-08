@@ -39,7 +39,7 @@
 //!
 //! let program = Compiler::new().compile(&ast);
 //!
-//! // The `Scope` is the caller's: locals a script declares are left in it,
+//! // The `Scope` is the caller's locals: a script declares are left in it,
 //! // exactly as `Engine::eval_with_scope` would.
 //! let mut scope = Scope::new();
 //! let value = Vm::new(&engine).run(&program, &mut scope)?;
