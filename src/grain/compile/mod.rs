@@ -1164,6 +1164,17 @@ impl Lowering {
                 true
             }
 
+            // The one statement the fragment fallback below cannot hold.
+            //
+            // `import` declares into the imports stack rather than the scope,
+            // and a fragment that rewinds truncates that stack on the way out
+            // (`eval/stmt.rs:55`) — so the alias would be gone before the next
+            // statement could name it, and a qualified call is its own
+            // fragment. Refusing the lowering hands the body to the walker
+            // whole, which is where the alias lives long enough to be used.
+            #[cfg(not(feature = "no_module"))]
+            Stmt::Import(..) => false,
+
             // Not lowered yet. Safe as a fragment because every remaining
             // statement kind either declares nothing or rewinds what it
             // declares, so the scope is the same shape afterwards.

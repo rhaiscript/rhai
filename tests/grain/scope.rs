@@ -408,6 +408,44 @@ fn a_global_module_constant_resolves() {
     assert!(matches!(*err, rhai::EvalAltResult::ErrorAssignmentToConstant(..)), "got {err:?}",);
 }
 
+/// A script `import` costs the whole body its lowering, and must.
+///
+/// `import` declares into the imports stack, not the scope. A per-statement
+/// fragment rewinds that stack on the way out (`eval/stmt.rs:55`), so the alias
+/// would be dropped before the qualified call — itself a separate fragment —
+/// could name it, and the VM answered `Module not found` where the walker
+/// answered. That is a wrong result rather than a missing feature, which is the
+/// one thing the fragment fallback is not allowed to produce.
+///
+/// So the compiler refuses the lowering instead, and the walker takes the body
+/// as one block. These cases are here to keep it refusing: an `import` that
+/// started lowering again would put the divergence straight back.
+#[test]
+fn an_import_keeps_the_walkers_answer() {
+    let mut engine = corpus::engine();
+
+    let mut resolver = rhai::module_resolvers::StaticModuleResolver::new();
+    let module_ast = engine.compile("fn double(x) { x * 2 } export const LIMIT = 99;").expect("the module source must parse");
+    let module = Module::eval_ast_as_new(Scope::new(), &module_ast, &engine).expect("the module must build");
+    resolver.insert("kit", module);
+    engine.set_module_resolver(resolver);
+
+    // An `import` in the body costs the body its lowering, so the program is a
+    // fragment rhai's walker has to evaluate and cannot become an artifact.
+    for source in [
+        r#"import "kit" as k; k::double(21)"#,
+        r#"import "kit" as k; k::LIMIT"#,
+        r#"let r = 0; { import "kit" as k; r = k::double(4); } r"#,
+        r#"import "kit" as k; let t = 0; for i in 0..3 { t += k::double(i); } t"#,
+    ] {
+        agree_with(&engine, source, |_| {}, false);
+    }
+
+    // In a function body the fallback is per-function: that body stays an AST
+    // in the library and the top level still lowers whole.
+    agree_with(&engine, r#"fn via_kit() { import "kit" as k; k::double(3) } via_kit()"#, |_| {}, true);
+}
+
 /// The first of the three, and the one a VM would most plausibly skip: a
 /// resolver the host registered through `Engine::on_var` sees the name before
 /// the scope does.
