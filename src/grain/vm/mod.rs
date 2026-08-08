@@ -2828,20 +2828,28 @@ impl<'e> Vm<'e> {
                     // is the same two calls behind a shim that only exists
                     // under `custom_syntax`. Total language coverage rests on
                     // this, so it must not depend on a feature.
+                    //
+                    // The frame's receiver goes with it, by reference. A body
+                    // that uses `this` can still hold a fragment — `this?.x`,
+                    // or a `this` body containing an `import` — and the walker
+                    // has to read and write the same receiver the surrounding
+                    // instructions do. The engine is copied out first so the
+                    // four borrows below are of disjoint fields.
+                    let engine = self.engine;
                     let value = match expr {
-                        Expr::Stmt(block) => self.engine.eval_stmt_block(
+                        Expr::Stmt(block) => engine.eval_stmt_block(
                             &mut self.global,
                             &mut self.caches,
                             scope,
-                            None,
+                            self.this.as_mut(),
                             block.statements(),
                             rewind_scope,
                         ),
-                        expr => self.engine.eval_expr(
+                        expr => engine.eval_expr(
                             &mut self.global,
                             &mut self.caches,
                             scope,
-                            None,
+                            self.this.as_mut(),
                             expr,
                         ),
                     }?;
@@ -3336,15 +3344,25 @@ mod tests {
     /// [`Vm::call_fn_with_options`], which is the only thing that can bind a
     /// receiver.
     fn program_of(bodies: &[&[Op]], consts: Vec<Dynamic>) -> Program<'static> {
-        program_with_chains(bodies, consts, Vec::new())
+        program_with(bodies, consts, Vec::new(), Vec::new())
     }
 
     /// The same, for the chain instruction, whose record lives in a pool rather
-    /// than in the code. Name indices are positions in `NAMES`.
+    /// than in the code.
     fn program_with_chains(
         bodies: &[&[Op]],
         consts: Vec<Dynamic>,
         chains: Vec<Chain>,
+    ) -> Program<'static> {
+        program_with(bodies, consts, chains, Vec::new())
+    }
+
+    /// The general form. Name indices are positions in `NAMES`.
+    fn program_with(
+        bodies: &[&[Op]],
+        consts: Vec<Dynamic>,
+        chains: Vec<Chain>,
+        residuals: Vec<Expr>,
     ) -> Program<'static> {
         /// `f` and `g` are the functions; the rest are for chain steps to name.
         const NAMES: [&str; 4] = ["f", "g", "push", "len"];
@@ -3383,7 +3401,7 @@ mod tests {
             functions,
             Parts {
                 positions: Positions::default(),
-                residuals: Vec::new(),
+                residuals,
                 consts,
                 names: Strings::new(NAMES),
                 tokens: Vec::new(),
@@ -3532,6 +3550,28 @@ mod tests {
                 &[Op::Unit, Op::Return],
             ],
             Vec::new(),
+        );
+
+        let mut this = Dynamic::from(7 as INT);
+        assert_eq!(call(&program, Some(&mut this)).unwrap().as_int(), Ok(7));
+    }
+
+    /// A fragment the compiler could not lower still sees the receiver. Without
+    /// this the walker would be handed `None` and report `ErrorUnboundThis` for
+    /// a `this` the surrounding instructions can read perfectly well.
+    #[test]
+    fn a_residual_fragment_reads_the_frames_receiver() {
+        let program = program_with(
+            &[&[
+                Op::EvalAst {
+                    residual: 0,
+                    rewind_scope: false,
+                },
+                Op::Return,
+            ]],
+            Vec::new(),
+            Vec::new(),
+            vec![Expr::ThisPtr(Position::NONE)],
         );
 
         let mut this = Dynamic::from(7 as INT);
