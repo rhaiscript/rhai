@@ -7,7 +7,7 @@ use core::mem;
 use std::prelude::v1::*;
 
 use crate::ast::{
-    ASTFlags, ASTNode, Expr, FlowControl, FnCallExpr, OpAssignment, ScriptFuncDef, Stmt, StmtBlock,
+    ASTFlags, Expr, FlowControl, FnCallExpr, OpAssignment, ScriptFuncDef, Stmt, StmtBlock,
     SwitchCasesCollection,
 };
 use crate::tokenizer::Token;
@@ -347,9 +347,7 @@ impl Lowering {
         // `this` is deliberately not in the second class. Rhai reaches it
         // through the caller's `&mut` (`eval/chaining.rs:528`), so a method
         // step that mutates lands in the caller's value — walking a copy would
-        // drop the write silently, which is the one failure mode worth
-        // refusing outright. It is also unreachable: a body that mentions
-        // `this` is never compiled to a chunk at all.
+        // drop the write silently. It gets a root of its own instead.
         let root_spec = match root {
             Expr::Variable(v, ..) if !has_namespace!(v) => match self.slots.resolve(&v.1) {
                 Some(slot) => Root::Local {
@@ -370,9 +368,10 @@ impl Lowering {
                 },
                 None => return false,
             },
+            Expr::ThisPtr(pos) => Root::This { pos: *pos },
             // A qualified root resolves against imported modules, which need
             // `import` — the escape hatch's job.
-            Expr::Variable(..) | Expr::ThisPtr(..) => return false,
+            Expr::Variable(..) => return false,
             _ if matches!(tail, Tail::Read) => Root::Temporary,
             // Unreachable through the parser, which refuses `f().x = 1`
             // outright (`eval/chaining.rs:559`).
@@ -670,14 +669,6 @@ impl Lowering {
     /// The body runs in a fresh scope with the parameters already pushed
     /// (`func/script.rs:73`), so the parameters are exactly slots 0 upwards.
     fn function(&mut self, def: &ScriptFuncDef) -> Option<LoweredFn> {
-        // `this` is not a scope entry, so no slot addresses it. The declared
-        // type is not enough to go on: an untyped `fn double() { this * 2 }`
-        // leaves `this_type` empty and still needs one, so the body is what
-        // has to be checked.
-        if def.this_type.is_some() || uses_this(def.body.statements()) {
-            return None;
-        }
-
         let first_op = self.code.len();
         let saved_slots = mem::take(&mut self.slots);
         let saved_loops = mem::take(&mut self.loops);
@@ -782,6 +773,27 @@ impl Lowering {
             // not the `Expr::FnCall` one. See there for why it defeats the
             // lowering rather than becoming a fragment.
             Stmt::FnCall(call, ..) if call.name == crate::engine::KEYWORD_EVAL => false,
+
+            // `this` on the left. Ahead of the two variable arms because rhai's
+            // parser puts it there too (`parser.rs:2002`), and because the
+            // chain arm below would otherwise take `this.x = 1`'s sibling.
+            Stmt::Assignment(payload) if matches!(&payload.1.lhs, Expr::ThisPtr(..)) => {
+                let (op_info, binary) = &**payload;
+
+                // Before the right-hand side, not after. Rhai checks that
+                // `this` is bound and returns before it evaluates the value
+                // (`eval/stmt.rs:300-303`) — unlike the variable arm, which
+                // evaluates first — so an unbound `this = nosuch` is
+                // `ErrorUnboundThis` and not the value's own failure.
+                self.emit_at(Op::RequireThis, binary.lhs.position());
+
+                self.expression(&binary.rhs);
+                let op = self.op_assignment(op_info);
+
+                self.emit_at(Op::AssignThis { op }, op_info.position());
+                self.emit(Op::Unit);
+                true
+            }
 
             // A plain local on the left.
             Stmt::Assignment(payload)
@@ -1462,10 +1474,14 @@ impl Lowering {
             // guarded arms above fall through to here when their guard fails —
             // a pool-defeating constant, a literal too long for its operand, a
             // call rhai resolves syntactically.
+            // The frame's receiver, flattened as every consumer but three
+            // wants it — see [`Op::LoadThis`] and `unflattened` below. Its own
+            // position, because that is what `ErrorUnboundThis` carries.
+            Expr::ThisPtr(pos) => self.emit_at(Op::LoadThis, *pos),
+
             Expr::Coalesce(..)
             | Expr::MethodCall(..)
             | Expr::Property(..)
-            | Expr::ThisPtr(..)
             | Expr::DynamicConstant(..)
             | Expr::FnCall(..)
             | Expr::Array(..)
@@ -1481,6 +1497,17 @@ impl Lowering {
         // (`func/call.rs:1387` and `:1775`).
         if call.op_token.is_some() || call.capture_parent_scope {
             return None;
+        }
+
+        // `f(this, ..)` takes the same rewrite as a variable. Rhai also requires
+        // the receiver not to be shared and nothing to be curried
+        // (`func/call.rs:1417`), and neither is a question the compiler can
+        // answer: sharing is a run-time property, deferred to the VM as it
+        // already is for a read-only local, and a curried redirect can never
+        // reach this instruction because `call`/`curry` go through
+        // `Op::CallFnPtr` and `is_lowerable_call` refuses them here.
+        if let Some(Expr::ThisPtr(..)) = call.args.first() {
+            return Some(Receiver::This);
         }
 
         let Some(Expr::Variable(payload, ..)) = call.args.first() else {
@@ -1504,6 +1531,16 @@ impl Lowering {
         // `f(x, ..)` is `x.f(..)`, so the variable is read after the other
         // arguments and by reference. See [`Op::CallRef`].
         if let Some(receiver) = self.receiver(call) {
+            // `this` goes on *first*, unlike either of the others. Rhai's two
+            // arms disagree about when it is read: the by-reference one takes a
+            // pointer after the arguments (`func/call.rs:1417`), but the
+            // fallback a shared or unbound receiver lands in reads and flattens
+            // it before them (`:1462`). Reading first is what makes an unbound
+            // `f(this, nosuch)` report `ErrorUnboundThis`, and what stops an
+            // argument that writes to `this` being seen by the value passed.
+            if let Receiver::This = receiver {
+                self.emit_at(Op::LoadThis, call.args[0].position());
+            }
             for arg in call.args.iter().skip(1) {
                 self.expression(arg);
             }
@@ -1595,6 +1632,10 @@ impl Lowering {
                     None => self.expression(expr),
                 }
             }
+            // The receiver can be a shared cell too — a closure capturing the
+            // variable a method was called on — and the three readers that come
+            // through here have to see the cell rather than what it holds.
+            Expr::ThisPtr(pos) => self.emit_at(Op::LoadThisShared, *pos),
             other => self.expression(other),
         }
     }
@@ -2050,28 +2091,6 @@ fn flatten_chain(expr: &Expr) -> Option<(&Expr, Vec<ChainStep<'_>>)> {
     }
 
     Some((root, steps))
-}
-
-/// Whether a function body reaches for `this`.
-///
-/// Such a body can still be *called* — rhai keeps its own copy and the call
-/// goes through dispatch — it just cannot be a chunk, because a chunk's locals
-/// are scope slots and `this` is not in the scope.
-fn uses_this(statements: &[Stmt]) -> bool {
-    let mut found = false;
-    let path = &mut Vec::new();
-    for stmt in statements {
-        // `walk` hands over the path to the node it is visiting, so the node
-        // itself is the last entry.
-        stmt.walk(path, &mut |path| {
-            if matches!(path.last(), Some(ASTNode::Expr(Expr::ThisPtr(..)))) {
-                found = true;
-            }
-            // Stop descending once the answer is settled.
-            !found
-        });
-    }
-    found
 }
 
 /// Wrap statements as a block expression.

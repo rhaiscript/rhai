@@ -367,14 +367,29 @@ fn script_functions_survive_the_round_trip() {
 /// depends on rhai's copy cannot be written — silently dropping it would
 /// produce an artifact that loads and then cannot find its own function.
 #[test]
+#[cfg(not(feature = "no_module"))]
 fn a_function_the_compiler_cannot_lower_refuses_to_write() {
     let engine = corpus::engine();
-    // `this` is not a scope entry, so no slot addresses it.
-    let ast = engine.compile("fn double() { this * 2 } let x = 21; x.double()").expect("must compile");
+    // `import` declares into the caller's scope, which the slot model cannot
+    // account for. `this` used to be the example here, and is not one any more.
+    let ast = engine.compile(r#"fn m() { import "x" as y; 1 } m()"#).expect("must compile");
     let program = Compiler::new().compile(&ast);
 
-    assert!(program.functions().is_empty(), "a body using `this` must not become a chunk",);
+    assert!(program.functions().is_empty(), "a body the slot model cannot account for must not become a chunk",);
     assert!(matches!(program.write(), Err(WriteError::HasScriptFunctions | WriteError::HasResiduals { .. }),), "got {:?}", program.write(),);
+}
+
+/// The counterpart, and the milestone: a body that uses `this` is a chunk now,
+/// so a program full of them is an artifact rather than a tree.
+#[test]
+fn a_body_using_this_is_compiled_and_writable() {
+    let engine = corpus::engine();
+    let ast = engine.compile("fn bump(n) { this += n; this } let x = 21; x.bump(21); x").expect("must compile");
+    let program = Compiler::new().compile(&ast);
+
+    assert_eq!(program.residual_count(), 0, "{:?}", program.first_unsupported());
+    assert!(!program.functions().is_empty(), "a body using `this` must become a chunk");
+    assert!(program.write().is_ok(), "got {:?}", program.write());
 }
 
 /// A program with one of everything the corruption tests need to reach: a

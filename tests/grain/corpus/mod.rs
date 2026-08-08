@@ -523,4 +523,33 @@ pub const CASES: &[Case] = &[
     case("host_mutation_before_a_failure_survives", "let w = widget(1); try { w.bump_then_fail(); } catch(e) {} w.level"),
     case("host_mutation_before_a_failure_survives_in_a_map", "let m = #{ w: widget(1) }; try { m.w.bump_then_fail(); } catch(e) {} m.w.level"),
     case("host_mutation_before_a_failure_survives_in_an_array", "let a = [widget(1)]; try { a[0].bump_then_fail(); } catch(e) {} a[0].level"),
+    // `this`, which is a register rather than a scope entry and so is reached
+    // by instructions of its own.
+    case("this_read", "fn get() { this } let v = 7; v.get()"),
+    case("this_in_an_expression", "fn double() { this * 2 } let v = 21; v.double()"),
+    case("this_assign", "fn set() { this = 9; } let v = 1; v.set(); v"),
+    case("this_op_assign", "fn bump(n) { this += n; } let v = 1; v.bump(4); v"),
+    case("this_op_assign_on_a_string", "fn add(s) { this += s; } let v = \"a\"; v.add(\"b\"); v"),
+    case("this_is_the_bodys_value", "fn twice() { this + this } let v = 4; v.twice()"),
+    // Never inherited: a plain call from a bound body gets no receiver.
+    case("error_this_is_not_inherited", "fn outer() { inner() } fn inner() { this } let v = 1; v.outer()"),
+    case("error_this_unbound_in_call_style", "fn get() { this } get()"),
+    // The check precedes the right-hand side, unlike the variable arm.
+    case("error_this_assign_unbound_beats_a_bad_value", "fn set() { this = nosuch; } set()"),
+    // Chains rooted at `this`, which must write back into the caller's value.
+    case("this_property", "fn count() { this.n } let m = #{ n: 5 }; m.count()"),
+    case("this_property_assign", "fn set() { this.n = 9; } let m = #{ n: 1 }; m.set(); m.n"),
+    case("this_index", "fn first() { this[0] } let a = [3, 4]; a.first()"),
+    case("this_index_assign", "fn set() { this[0] = 9; } let a = [1, 2]; a.set(); a"),
+    case("this_method_step", "fn grow() { this.push(3); } let a = [1, 2]; a.grow(); a"),
+    case("this_host_method", "fn raise() { this.bump(); } let w = widget(4); w.raise(); w.level"),
+    case("this_host_property", "fn read() { this.level } let w = widget(4); w.read()"),
+    // A method on `this` that reaches another compiled function.
+    case("this_nested_method", "fn outer() { this.inner() } fn inner() { this * 2 } let v = 5; v.outer()"),
+    // `f(this, ..)`, which rhai rewrites to `this.f(..)` by reference.
+    case("this_as_first_argument", "fn grow() { push(this, 3); } let a = [1, 2]; a.grow(); a"),
+    case("this_as_first_argument_pure", "fn size() { len(this) } let a = [1, 2]; a.size()"),
+    case("this_as_a_later_argument", "fn plus(n) { n + this } let v = 1; v.plus(2)"),
+    // Arity excludes the receiver, so these are two different functions.
+    case("this_method_arity", "fn f() { 1 } fn f(x) { this + x } let v = 10; [v.f(), v.f(5)]"),
 ];
