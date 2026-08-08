@@ -21,7 +21,7 @@
 //! Host figures. They do not transfer to a device by halving: traffic-light
 //! measured the engine ratio at 0.71 rather than 0.5, and found the AST does
 //! not shrink on 32-bit at all, because `Dynamic`, `i64` and `f32` fields are
-//! the same width either way. Device numbers come from the device, in M6.
+//! the same width either way. Device numbers have to come from a device.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -119,10 +119,12 @@ fn measure<T>(f: impl FnOnce() -> T) -> Measured<T> {
     }
 }
 
-/// Stands in for a real control script until M1 wires in traffic-light's
-/// `scripts/follow.rhai`, which is what the 24 bytes/source-byte figure was
-/// measured against. Shaped like one: helper functions, integer and float
-/// arithmetic, arrays, and a loop driving them.
+/// A synthetic control, shaped like a real script: helper functions, integer
+/// and float arithmetic, arrays, and a loop driving them.
+///
+/// `FOLLOW` is the real one, and the figures that matter are measured against
+/// it. This is here so the per-source-byte and peak/retained ratios have a
+/// second shape to be read against.
 const SCRIPT: &str = r#"
 fn clamp(v, lo, hi) {
     if v < lo { lo } else if v > hi { hi } else { v }
@@ -200,10 +202,10 @@ fn allocation_footprint() {
     println!("{:<24} {:>10} {:>10} {:>10}", "engine.compile (AST)", ast.bytes, ast.count, ast.peak);
     println!("{:<24} {:>10} {:>10} {:>10}", "Compiler::compile", program.bytes, program.count, program.peak);
 
-    // Not yet comparable to traffic-light's 24.0: that is a 32-bit device
-    // figure measured against minified source, this is a host figure against
-    // unminified source. M1 makes them comparable by measuring follow.rhai,
-    // minified, the way the server actually ships it.
+    // Not comparable to traffic-light's 24.0: that is a 32-bit device figure
+    // measured against minified source, this is a host figure against
+    // unminified source. Comparing them needs follow.rhai measured minified,
+    // the way the server actually ships it.
     println!("\nAST bytes per source byte {per_source_byte:.1}  (host, unminified)");
     println!("AST parser peak / retained {:.2}x  (the peak is what has to fit)", ast.peak as f64 / ast.bytes as f64);
 
@@ -213,14 +215,14 @@ fn allocation_footprint() {
         println!("  {label:>6} {n:>8}");
     }
 
-    // The number M1 exists to produce: what the real script's tree costs, to
-    // set against what tests/projection.rs says a lowering of it would weigh.
+    // What the real script's tree costs, to set against what
+    // tests/grain/projection.rs says a lowering of it would weigh.
     //
     // Larger than traffic-light's own 77968 for the same script because this
     // builds rhai with default features. Theirs sets `no_module`, which drops
     // a `Namespace` (an inline `StaticVec<Ident>` plus a hash) from every
-    // `Expr::Variable` payload — and this script has 457 of them. Compare
-    // against 77968, not against this, until M6 builds the restricted set.
+    // `Expr::Variable` payload — and this script has 457 of them. A restricted
+    // build is what 77968 should be compared against, not this one.
     println!("\nfollow.rhai — {} source bytes", FOLLOW.len());
     println!("{:<24} {:>10} {:>10} {:>10}", "engine.compile (AST)", follow_ast.bytes, follow_ast.count, follow_ast.peak);
     println!("{:<24} {:>10.1}", "bytes per source byte", follow_ast.bytes as f64 / FOLLOW.len() as f64);
@@ -295,15 +297,15 @@ fn allocation_footprint() {
     // scaling with length.
     assert!(ratios[2] > ratios[1] && ratios[1] > ratios[0], "the saving must grow with the program, got {ratios:?}",);
 
-    // The instrument has to be working before any milestone can lean on it.
+    // The instrument has to be working before anything can lean on it.
     assert!(ast.count > 0 && ast.bytes > 0, "the counters saw nothing; the global allocator is not installed",);
     assert!(ast.peak >= ast.bytes, "peak ({}) below retained ({}) means peak tracking is broken", ast.peak, ast.bytes,);
 
-    // M0's compiler clones the whole statement list into one residual, so the
-    // Program is a second copy of the tree rather than a saving. Pinning that
-    // here means M1's first real lowering shows up as this assertion failing,
-    // which is the intended way to notice progress.
-    assert!(program.bytes > 0, "a whole-program residual should cost about what the tree costs",);
+    // A lowered program retains its pools rather than a node per node, so it
+    // costs a fraction of the tree it came from. A `Program` that cost about
+    // what the tree cost would mean the script fell back to fragments, which
+    // hold real `Expr` trees — the one case where compiling saves nothing.
+    assert!(program.bytes > 0 && program.bytes < ast.bytes, "a lowered program must retain less than its tree, got {} against {}", program.bytes, ast.bytes,);
 
     drop(program);
     drop(ast);

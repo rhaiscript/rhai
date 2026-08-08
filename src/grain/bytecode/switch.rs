@@ -144,6 +144,15 @@ fn case_hash(value: &Dynamic) -> Option<u64> {
 mod tests {
     use super::*;
 
+    /// A script integer, as a subject or a case.
+    ///
+    /// Spelled through `INT` rather than as an `i64` literal because `only_i32`
+    /// narrows it: a `Dynamic` built from the wider type there is a boxed host
+    /// value, which has no hash and so matches nothing.
+    fn int(value: INT) -> Dynamic {
+        Dynamic::from(value)
+    }
+
     /// A host type, which has no hash.
     #[derive(Debug, Clone)]
     struct Opaque;
@@ -166,21 +175,29 @@ mod tests {
 
     #[test]
     fn a_matching_case_wins() {
-        let (one, two) = (Dynamic::from(1_i64), Dynamic::from(2_i64));
+        let (one, two) = (int(1), int(2));
         let table = table(&[(&one, 10), (&two, 20)], Vec::new(), 99);
 
         assert_eq!(table.dispatch(&one), 10);
         assert_eq!(table.dispatch(&two), 20);
-        assert_eq!(table.dispatch(&Dynamic::from(3_i64)), 99);
+        assert_eq!(table.dispatch(&int(3)), 99);
     }
 
     /// The distinction that makes this hashing rather than `==`: rhai does not
     /// match an integer against a float case, even though `1 == 1.0`.
+    #[cfg(not(feature = "no_float"))]
     #[test]
     fn a_float_does_not_match_an_integer_case() {
-        let one = Dynamic::from(1_i64);
+        let one = int(1);
         let table = table(&[(&one, 10)], Vec::new(), 99);
-        assert_eq!(table.dispatch(&Dynamic::from(1.0_f64)), 99);
+
+        let float = Dynamic::from(1.0 as crate::FLOAT);
+        // The subject has to reach the hasher for this to say anything. Built
+        // from a literal `f64` it would not under `f32_float`; that is a boxed
+        // host value, and it would land on the default for having no hash at
+        // all rather than for hashing differently.
+        assert!(float.is_hashable(), "this test needs a hashable float");
+        assert_eq!(table.dispatch(&float), 99);
     }
 
     #[test]
@@ -229,7 +246,7 @@ mod tests {
     /// Ranges are consulted only after the cases miss.
     #[test]
     fn a_range_catches_what_no_case_did() {
-        let one = Dynamic::from(1_i64);
+        let one = int(1);
         let table = table(
             &[(&one, 10)],
             vec![
@@ -250,18 +267,18 @@ mod tests {
         );
 
         assert_eq!(table.dispatch(&one), 10, "a case still wins");
-        assert_eq!(table.dispatch(&Dynamic::from(5_i64)), 20);
-        assert_eq!(table.dispatch(&Dynamic::from(7_i64)), 20);
-        assert_eq!(table.dispatch(&Dynamic::from(8_i64)), 30, "exclusive end");
-        assert_eq!(table.dispatch(&Dynamic::from(10_i64)), 30, "inclusive end");
-        assert_eq!(table.dispatch(&Dynamic::from(11_i64)), 99);
+        assert_eq!(table.dispatch(&int(5)), 20);
+        assert_eq!(table.dispatch(&int(7)), 20);
+        assert_eq!(table.dispatch(&int(8)), 30, "exclusive end");
+        assert_eq!(table.dispatch(&int(10)), 30, "inclusive end");
+        assert_eq!(table.dispatch(&int(11)), 99);
     }
 
     /// Hashing one would panic, so it must never reach the hasher — and it
     /// must still be able to reach the default.
     #[test]
     fn an_unhashable_subject_falls_through_rather_than_panicking() {
-        let one = Dynamic::from(1_i64);
+        let one = int(1);
         let table = table(&[(&one, 10)], Vec::new(), 99);
 
         // A bare function pointer *is* hashable; only one carrying an
@@ -277,7 +294,7 @@ mod tests {
     #[test]
     fn an_unhashable_case_has_no_hash_to_key_on() {
         assert_eq!(case_hash(&Dynamic::from(Opaque)), None);
-        assert!(case_hash(&Dynamic::from(1_i64)).is_some());
+        assert!(case_hash(&int(1)).is_some());
     }
 
     /// The probe is only worth carrying if it actually depends on the seed.

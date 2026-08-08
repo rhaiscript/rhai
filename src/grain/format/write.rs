@@ -29,8 +29,8 @@ pub enum WriteError {
         /// Where it is in the source
         pos: rhai::Position,
     },
-    /// Script functions are still ASTs in the program's library. Compiling them
-    /// to chunks is M4.
+    /// The program still carries rhai's own function library rather than
+    /// chunks, so its functions are ASTs an artifact cannot hold.
     HasScriptFunctions,
     /// A pooled constant carries something that has no meaning in another
     /// process — a host type, a function pointer, a clock reading.

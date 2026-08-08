@@ -10,6 +10,8 @@
 //! runtime-state setup (function library, module resolver, source name,
 //! `return`/`exit` mapping) which is real code that can be wrong today.
 
+use rhai::INT;
+
 // Only `tests/fuzz.rs` and the `generated` fuzz target use this; the other
 // harnesses take the module for its cases.
 #[allow(dead_code)]
@@ -29,10 +31,13 @@ pub struct Case {
 /// and the setter is the only way home — and rhai decides whether to call it
 /// from `func.is_method()`, which the VM cannot see and therefore approximates.
 /// Without a host type in the engine, nothing here is ever exercised.
+/// Held as `INT` rather than `i64` throughout: `only_i32` narrows the script
+/// integer, and a host type registered against the wider one would take a type
+/// no script under that build can produce.
 #[derive(Debug, Clone, Default)]
 pub struct Widget {
-    pub level: i64,
-    pub cells: Vec<i64>,
+    pub level: INT,
+    pub cells: Vec<INT>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -40,7 +45,7 @@ pub struct Holder {
     pub inner: Widget,
 }
 
-fn out_of_range(index: i64, len: usize) -> Box<rhai::EvalAltResult> {
+fn out_of_range(index: INT, len: usize) -> Box<rhai::EvalAltResult> {
     Box::new(rhai::EvalAltResult::ErrorArrayBounds(len, index, rhai::Position::NONE))
 }
 
@@ -50,13 +55,13 @@ pub fn engine() -> rhai::Engine {
 
     engine
         .register_type_with_name::<Widget>("Widget")
-        .register_fn("widget", |level: i64| Widget { level, cells: vec![10, 20, 30] })
-        .register_get_set("level", |w: &mut Widget| w.level, |w: &mut Widget, v: i64| w.level = v)
+        .register_fn("widget", |level: INT| Widget { level, cells: vec![10, 20, 30] })
+        .register_get_set("level", |w: &mut Widget| w.level, |w: &mut Widget, v: INT| w.level = v)
         // Returning an error rather than panicking, because a panic in a
         // registered function takes the test process with it.
         .register_indexer_get_set(
-            |w: &mut Widget, i: i64| -> Result<i64, Box<rhai::EvalAltResult>> { w.cells.get(i as usize).copied().ok_or_else(|| out_of_range(i, w.cells.len())) },
-            |w: &mut Widget, i: i64, v: i64| -> Result<(), Box<rhai::EvalAltResult>> {
+            |w: &mut Widget, i: INT| -> Result<INT, Box<rhai::EvalAltResult>> { w.cells.get(i as usize).copied().ok_or_else(|| out_of_range(i, w.cells.len())) },
+            |w: &mut Widget, i: INT, v: INT| -> Result<(), Box<rhai::EvalAltResult>> {
                 let len = w.cells.len();
                 *w.cells.get_mut(i as usize).ok_or_else(|| out_of_range(i, len))? = v;
                 Ok(())
@@ -71,7 +76,7 @@ pub fn engine() -> rhai::Engine {
 
     engine
         .register_type_with_name::<Holder>("Holder")
-        .register_fn("holder", |level: i64| Holder { inner: Widget { level, cells: vec![1, 2, 3] } })
+        .register_fn("holder", |level: INT| Holder { inner: Widget { level, cells: vec![1, 2, 3] } })
         .register_get_set("inner", |h: &mut Holder| h.inner.clone(), |h: &mut Holder, w: Widget| h.inner = w);
 
     engine
@@ -416,7 +421,7 @@ pub const CASES: &[Case] = &[
     case("error_wrong_arity", "fn f(a, b) { a } f(1)"),
     case("error_array_bounds", "let a = [1, 2]; a[10]"),
     // Rhai maps the *expected* type through its registered names and leaves the
-    // *actual* one raw, so a range guard reports `core::ops::range::Range<i64>`
+    // *actual* one raw, so a range guard reports `core::ops::range::Range<INT>`
     // rather than the `range` the same engine prints everywhere else. Mapping
     // both is the obvious mistake, and only a type with a registered name shows
     // it up.

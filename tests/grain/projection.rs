@@ -1,11 +1,11 @@
 //! What would a lowering of this script actually weigh?
 //!
-//! M1's job is to test the premise before building an instruction set to serve
-//! it. `follow.rhai` turns out to use most of the language — nested index
-//! writes, property chains, method calls, script functions, `loop`/`while`/
-//! `if-else` — so lowering it for real is several milestones of work. Doing
-//! that first and *then* discovering the artifact is only marginally smaller
-//! than the tree would be the expensive way to learn it.
+//! This tests the premise before an instruction set is built to serve it.
+//! `follow.rhai` uses most of the language — nested index writes, property
+//! chains, method calls, script functions, `loop`/`while`/`if-else` — so
+//! lowering it for real is a lot of work. Doing that first and *then*
+//! discovering the artifact is only marginally smaller than the tree would be
+//! the expensive way to learn it.
 //!
 //! So this counts the real AST, node by node, and prices each node against the
 //! planned stack encoding. The per-node costs are stated in `encoded_size`
@@ -14,7 +14,8 @@
 //! **This is a projection, not a measurement.** It is a lower bound in one
 //! direction and optimistic in another: it assumes every node lowers to the
 //! ops listed, and it ignores the operand stack traffic a real lowering emits
-//! for temporaries. The measured number replaces it when M2-M4 land.
+//! for temporaries. `tests/grain/format.rs` measures the artifact that
+//! actually results, and that number is the one to trust.
 
 use std::collections::BTreeSet;
 

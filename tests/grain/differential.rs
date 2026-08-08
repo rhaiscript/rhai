@@ -224,7 +224,7 @@ fn every_compiled_chunk_declares_the_stack_it_uses() {
 
 /// Residuals are the work left to do, so the count is the progress metric.
 ///
-/// Prints the whole census so a milestone's effect is visible, and pins the
+/// Prints the whole census so a change in coverage is visible, and pins the
 /// cases that should already be at zero.
 #[test]
 fn residual_census() {

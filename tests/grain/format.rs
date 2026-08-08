@@ -12,7 +12,7 @@ use super::corpus;
 
 use rhai::grain::format::{ReadError, WriteError};
 use rhai::grain::{Compiler, Program, Vm};
-use rhai::{Dynamic, Engine, Scope};
+use rhai::{Dynamic, Engine, Scope, INT};
 
 /// What a run produced, in a form two runs can be compared on.
 #[derive(Debug, PartialEq, Eq)]
@@ -130,7 +130,7 @@ const GOLDEN_ARTIFACT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grain/
 /// with it rather than being invented at each use.
 fn golden_scope() -> Scope<'static> {
     let mut scope = Scope::new();
-    scope.push("supplied", vec![Dynamic::from(7_i64)]);
+    scope.push("supplied", vec![Dynamic::from(7 as INT)]);
     scope
 }
 
@@ -270,7 +270,7 @@ fn a_chain_rooted_at_a_name_survives_the_round_trip() {
     let reloaded = Program::read(&bytes).expect("what we wrote must read back");
 
     let seed = |scope: &mut Scope| {
-        scope.push("host", vec![Dynamic::from(1_i64)]);
+        scope.push("host", vec![Dynamic::from(1 as INT)]);
     };
 
     let mut walked = Scope::new();
@@ -405,9 +405,12 @@ fn a_different_value_representation_is_refused_by_name() {
     let engine = corpus::engine();
 
     let mut narrow = sample(&engine);
-    narrow[6] = 4; // INT width
+    // Halved rather than named: `only_i32` already makes 4 the host's own
+    // width, and an artifact agreeing with the host is not refused at all.
+    let half = narrow[6] / 2; // INT width
+    narrow[6] = half;
     let message = Program::read(&narrow).unwrap_err().to_string();
-    assert!(message.contains("INT") && message.contains('4'), "the message must name the width: {message}",);
+    assert!(message.contains("INT") && message.contains(&half.to_string()), "the message must name the width: {message}",);
 
     let mut restricted = sample(&engine);
     restricted[8] ^= 0b100; // the `no_index` bit
@@ -610,9 +613,9 @@ fn stripping_positions_shrinks_the_artifact() {
 /// The number this project exists to move: bytes retained per source byte,
 /// against the 24 a rhai `AST` costs on device.
 ///
-/// This is the host-side artifact size, not device heap — M6 measures that.
-/// What it establishes here is the encoding's own density, which is the part
-/// the format controls.
+/// This is the host-side artifact size, not device heap, which only a device
+/// can report. What it establishes is the encoding's own density, which is the
+/// part the format controls.
 #[test]
 fn artifact_size_census() {
     let engine = corpus::engine();

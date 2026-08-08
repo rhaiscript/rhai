@@ -712,8 +712,8 @@ impl Lowering {
         })
     }
 
-    /// The M0 fallback: one fragment holding everything, evaluated without
-    /// rewinding so top-level declarations still reach the caller.
+    /// The last-resort fallback: one fragment holding everything, evaluated
+    /// without rewinding so top-level declarations still reach the caller.
     fn whole_program_residual(&mut self, statements: &[Stmt]) {
         let body = wrap_statements(statements.to_vec());
         let residual = self.push_residual(body);
@@ -1185,6 +1185,9 @@ impl Lowering {
             Expr::IntegerConstant(value, ..) => self.constant(Dynamic::from(*value)),
             Expr::CharConstant(value, ..) => self.constant(Dynamic::from(*value)),
             Expr::StringConstant(value, ..) => self.constant(Dynamic::from(value.clone())),
+            // Rhai has no float literal to parse under `no_float`, so there is
+            // no variant to match.
+            #[cfg(not(feature = "no_float"))]
             Expr::FloatConstant(value, ..) => self.constant(Dynamic::from(**value)),
             // Folded by the optimizer, so it can hold anything a constant call
             // returned — including a function pointer, which must not be

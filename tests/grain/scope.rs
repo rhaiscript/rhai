@@ -20,7 +20,7 @@
 use super::corpus;
 
 use rhai::grain::{Compiler, Vm};
-use rhai::{Dynamic, Engine, Module, Scope};
+use rhai::{Dynamic, Engine, Module, Scope, INT};
 
 /// What a run produced, in a form two runs can be compared on.
 #[derive(Debug, PartialEq, Eq)]
@@ -75,7 +75,9 @@ fn agree_with(engine: &Engine, source: &str, build: impl Fn(&mut Scope), writabl
     assert_eq!(actual, expected, "{source:?}");
 }
 
-fn lit(value: i64) -> Dynamic {
+/// A script integer. Spelled through `INT` because `only_i32` narrows it, and
+/// a caller variable holding the wider type is a host value no operator takes.
+fn lit(value: INT) -> Dynamic {
     Dynamic::from(value)
 }
 
@@ -84,7 +86,7 @@ fn a_caller_variable_can_be_read() {
     agree(
         "brightness * 2",
         |s| {
-            s.push("brightness", 21_i64);
+            s.push("brightness", 21 as INT);
         },
         true,
     );
@@ -102,14 +104,14 @@ fn a_caller_variable_can_be_written() {
     agree(
         "brightness = 7; brightness",
         |s| {
-            s.push("brightness", 1_i64);
+            s.push("brightness", 1 as INT);
         },
         true,
     );
     agree(
         "brightness += 5; brightness",
         |s| {
-            s.push("brightness", 1_i64);
+            s.push("brightness", 1 as INT);
         },
         true,
     );
@@ -135,7 +137,7 @@ fn a_caller_variable_in_first_argument_position_is_taken_by_reference() {
     agree(
         "push(log, 2); log",
         |s| {
-            s.push("log", vec![Dynamic::from(1_i64)]);
+            s.push("log", vec![lit(1)]);
         },
         true,
     );
@@ -151,7 +153,7 @@ fn a_caller_variable_in_first_argument_position_is_taken_by_reference() {
     agree(
         "push(log, 2); log",
         |s| {
-            s.push_constant("log", vec![Dynamic::from(1_i64)]);
+            s.push_constant("log", vec![lit(1)]);
         },
         true,
     );
@@ -161,7 +163,7 @@ fn a_caller_variable_in_first_argument_position_is_taken_by_reference() {
     agree(
         "nosuch(gone, brightness)",
         |s| {
-            s.push("brightness", 1_i64);
+            s.push("brightness", 1 as INT);
         },
         true,
     );
@@ -177,7 +179,7 @@ fn a_caller_variable_in_first_argument_position_is_taken_by_reference() {
 /// that, because each fails differently.
 #[test]
 fn a_chain_can_be_rooted_at_a_caller_variable() {
-    let array = || vec![Dynamic::from(1_i64)];
+    let array = || vec![lit(1)];
 
     // A writable entry: read, mutate through a method, and assign through.
     agree(
@@ -265,13 +267,13 @@ fn a_chain_rooted_at_a_resolved_name_cannot_be_written_through() {
     let mut engine = corpus::engine();
     engine.on_var(|name, _, _| {
         Ok(match name {
-            "injected" => Some(Dynamic::from(vec![Dynamic::from(7_i64)])),
+            "injected" => Some(Dynamic::from(vec![lit(7)])),
             _ => None,
         })
     });
 
     let mut module = rhai::Module::new();
-    module.set_var("published", vec![Dynamic::from(5_i64)]);
+    module.set_var("published", vec![lit(5)]);
     engine.register_global_module(module.into());
 
     for source in [
@@ -305,8 +307,8 @@ fn a_closure_can_capture_a_caller_variable() {
     let seed = |scope: &mut Scope| {
         // Two of them, and the interesting one is not last: the index bug is
         // invisible with a single entry.
-        scope.push("first", vec![Dynamic::from(7_i64)]);
-        scope.push("second", vec![Dynamic::from(1_i64)]);
+        scope.push("first", vec![lit(7)]);
+        scope.push("second", vec![lit(1)]);
     };
 
     // The write happens after the closure is made, so a captured copy answers
@@ -325,7 +327,7 @@ fn a_local_shadows_the_caller_without_disturbing_it() {
     agree(
         "let brightness = 1; brightness += 1; brightness",
         |s| {
-            s.push("brightness", 100_i64);
+            s.push("brightness", 100 as INT);
         },
         true,
     );
@@ -334,7 +336,7 @@ fn a_local_shadows_the_caller_without_disturbing_it() {
     agree(
         "let first = brightness; let brightness = 1; [first, brightness]",
         |s| {
-            s.push("brightness", 100_i64);
+            s.push("brightness", 100 as INT);
         },
         true,
     );
@@ -389,7 +391,7 @@ fn a_script_function_name_is_not_a_variable() {
 fn a_global_module_constant_resolves() {
     let mut engine = corpus::engine();
     let mut module = Module::new();
-    module.set_var("CHANNELS", 512_i64);
+    module.set_var("CHANNELS", 512 as INT);
     engine.register_global_module(module.into());
 
     let ast = engine.compile("CHANNELS / 2").expect("must compile");
@@ -414,7 +416,7 @@ fn a_variable_resolver_is_consulted_first() {
     let mut engine = corpus::engine();
     engine.on_var(|name, _, _| {
         Ok(match name {
-            "injected" => Some(Dynamic::from(99_i64)),
+            "injected" => Some(lit(99)),
             // Declining must fall through to the scope rather than fail.
             _ => None,
         })
@@ -428,7 +430,7 @@ fn a_variable_resolver_is_consulted_first() {
     };
 
     let mut scope = Scope::new();
-    scope.push("ordinary", 5_i64);
+    scope.push("ordinary", 5 as INT);
 
     let program = compile(&engine, "injected + ordinary");
     let value = Vm::new(&engine).run(&program, &mut scope.clone()).expect("both must resolve");
@@ -453,8 +455,8 @@ fn a_resolver_that_grows_the_scope_forces_a_search() {
     let mut engine = corpus::engine();
     engine.on_var(|name, _, mut context| {
         if name == "grow" {
-            context.scope_mut().push("added", 1_i64);
-            return Ok(Some(Dynamic::from(1_i64)));
+            context.scope_mut().push("added", 1 as INT);
+            return Ok(Some(lit(1)));
         }
         Ok(None)
     });
@@ -487,7 +489,7 @@ fn a_resolved_receiver_is_not_the_scope_entry_it_shadows() {
     let mut engine = corpus::engine();
     engine.on_var(|name, _, _| {
         Ok(match name {
-            "shadowed" => Some(Dynamic::from(vec![Dynamic::from(9_i64)])),
+            "shadowed" => Some(Dynamic::from(vec![lit(9)])),
             _ => None,
         })
     });
@@ -498,7 +500,7 @@ fn a_resolved_receiver_is_not_the_scope_entry_it_shadows() {
     assert_eq!(program.residual_count(), 0, "the call must lower");
 
     let start = |scope: &mut Scope| {
-        scope.push("shadowed", vec![Dynamic::from(1_i64)]);
+        scope.push("shadowed", vec![lit(1)]);
     };
 
     let mut walked = Scope::new();
@@ -557,13 +559,13 @@ fn a_compiled_function_can_be_called_by_name() {
 
     let mut vm = Vm::new(&engine);
     let value = vm
-        .call_function(&program, "add", vec![Dynamic::from(2_i64), Dynamic::from(3_i64)], 0, rhai::Position::NONE)
+        .call_function(&program, "add", vec![lit(2), lit(3)], 0, rhai::Position::NONE)
         .expect("must call");
     assert_eq!(value.as_int().unwrap(), 5);
 
     // Wrong arity is a miss, not a crash — the table is keyed on both.
     let err = vm
-        .call_function(&program, "add", vec![Dynamic::from(1_i64)], 0, rhai::Position::NONE)
+        .call_function(&program, "add", vec![lit(1)], 0, rhai::Position::NONE)
         .expect_err("one argument is a different function");
     assert!(matches!(*err, rhai::EvalAltResult::ErrorFunctionNotFound(..)));
 
@@ -573,7 +575,7 @@ fn a_compiled_function_can_be_called_by_name() {
 
     // The operand stack is where it started, so a caller can keep using it.
     let value = vm
-        .call_function(&program, "add", vec![Dynamic::from(10_i64), Dynamic::from(1_i64)], 0, rhai::Position::NONE)
+        .call_function(&program, "add", vec![lit(10), lit(1)], 0, rhai::Position::NONE)
         .expect("must call again");
     assert_eq!(value.as_int().unwrap(), 11);
 }
@@ -625,7 +627,7 @@ fn a_program_reading_caller_state_can_be_written() {
     let reloaded = rhai::grain::Program::read(&bytes).expect("must load");
 
     let mut scope = Scope::new();
-    scope.push("brightness", 5_i64);
+    scope.push("brightness", 5 as INT);
     scope.push("mode", "chase".to_string());
     let value = Vm::new(&engine).run(&reloaded, &mut scope).expect("must run");
 

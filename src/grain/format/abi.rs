@@ -196,16 +196,19 @@ mod tests {
 
     #[test]
     fn a_narrower_int_is_refused_by_name() {
+        let host = Abi::host();
+        // Halved rather than named: `only_i32` makes 4 the host's own width,
+        // and an artifact agreeing with the host is not a mismatch to report.
         let narrow = Abi {
-            int_bytes: 4,
-            ..Abi::host()
+            int_bytes: host.int_bytes / 2,
+            ..host
         };
         assert_eq!(
-            narrow.incompatible_with(Abi::host()),
+            narrow.incompatible_with(host),
             Some(AbiMismatch::Width {
                 what: "INT",
-                artifact: 4,
-                host: 8,
+                artifact: host.int_bytes / 2,
+                host: host.int_bytes,
             }),
         );
     }

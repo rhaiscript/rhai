@@ -59,8 +59,8 @@ pub enum Receiver {
 /// A stack machine: operands are pushed and consumed on an operand stack, and
 /// locals live in slots addressed directly. `EvalAst` is the escape hatch that
 /// hands a fragment back to rhai's tree walker, so anything the compiler cannot
-/// yet lower still runs, and the whole language stays covered. Milestones
-/// convert residuals into instructions rather than adding coverage.
+/// yet lower still runs, and the whole language stays covered. Lowering more of
+/// it converts residuals into instructions rather than adding coverage.
 ///
 /// Instructions carry no source position. Several of them can fail against a
 /// place in the source, and the position for that comes from the program's

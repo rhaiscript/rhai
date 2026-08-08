@@ -109,7 +109,7 @@ fn a_capturing_closure_reaches_a_native_with_its_arguments_rotated() {
 #[test]
 fn stock_rhai_does_the_same_to_its_own_native_pointers() {
     let mut engine = corpus::engine();
-    engine.register_fn("nsub", |a: i64, b: i64| a - b);
+    engine.register_fn("nsub", |a: rhai::INT, b: rhai::INT| a - b);
 
     let curried = "let s = \"ns\" + \"ub\"; let f = Fn(s).curry(10);";
     assert_eq!(walk(&engine, &format!("{curried} [1, 2, 3].map(f)")), Ok("[-9, -8, -7]".to_string()), "rhai puts the element before the curried value",);

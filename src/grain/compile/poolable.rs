@@ -17,14 +17,14 @@ use rhai::{Array, Blob, Dynamic, Map, INT};
 /// created against. Keeping it out of the pool leaves it as a fragment, which
 /// evaluates through the path that does the attaching.
 pub(crate) fn is_poolable(value: &Dynamic) -> bool {
-    // `is_float` follows rhai's own `no_float`; the feature matrix for the
-    // device build is M6's problem, not this function's.
-    if value.is_unit()
-        || value.is_bool()
-        || value.is_int()
-        || value.is_char()
-        || value.is_string()
-        || value.is_float()
+    // Under `no_float` rhai has no float type and no `is_float` to ask, so
+    // there is nothing here for the question to be about.
+    #[cfg(not(feature = "no_float"))]
+    if value.is_float() {
+        return true;
+    }
+
+    if value.is_unit() || value.is_bool() || value.is_int() || value.is_char() || value.is_string()
     {
         return true;
     }
