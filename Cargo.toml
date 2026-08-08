@@ -152,7 +152,7 @@ required-features = ["metadata", "internals"]
 # The grain harnesses, as one binary. `tests/mod.rs` wraps them in an inline
 # `mod grain`, which is what puts their module paths inside `tests/grain/`.
 [[test]]
-name = "mod"
+name = "grain"
 path = "tests/mod.rs"
 required-features = ["grain"]
 
@@ -160,7 +160,7 @@ required-features = ["grain"]
 # and reads process-global counters as deltas around each call, so any test
 # allocating on another thread corrupts every number it reports.
 [[test]]
-name = "grain_allocation"
+name = "grain_allocation_efficiency"
 path = "tests/grain/allocation.rs"
 required-features = ["grain"]
 

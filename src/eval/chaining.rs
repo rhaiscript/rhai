@@ -6,8 +6,8 @@ use crate::ast::{ASTFlags, BinaryExpr, Expr, OpAssignment};
 use crate::engine::{FN_IDX_GET, FN_IDX_SET};
 use crate::types::dynamic::Union;
 use crate::{
-    calc_fn_hash, Dynamic, Engine, ExclusiveRange, FnArgsVec, InclusiveRange, OnceCell, Position,
-    RhaiResult, RhaiResultOf, Scope, ERR,
+    calc_fn_hash, Dynamic, Engine, FnArgsVec, OnceCell, Position, RhaiResult, RhaiResultOf, Scope,
+    ERR,
 };
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -354,8 +354,8 @@ impl Engine {
 
                     // Range index on empty string - empty slice
                     Err(typ)
-                        if (typ == std::any::type_name::<ExclusiveRange>()
-                            || typ == std::any::type_name::<InclusiveRange>())
+                        if (typ == std::any::type_name::<crate::ExclusiveRange>()
+                            || typ == std::any::type_name::<crate::InclusiveRange>())
                             && s.is_empty() =>
                     {
                         let value = s.clone().into();
@@ -369,9 +369,9 @@ impl Engine {
                     }
 
                     // Range index - slice
-                    Err(typ) if typ == std::any::type_name::<ExclusiveRange>() => {
+                    Err(typ) if typ == std::any::type_name::<crate::ExclusiveRange>() => {
                         // val_str[range]
-                        let range = idx.read_lock::<ExclusiveRange>().unwrap().clone();
+                        let range = idx.read_lock::<crate::ExclusiveRange>().unwrap().clone();
                         let chars_count = s.chars().count();
 
                         let start = if range.start >= 0 {
@@ -405,9 +405,9 @@ impl Engine {
                             exclusive: true,
                         })
                     }
-                    Err(typ) if typ == std::any::type_name::<InclusiveRange>() => {
+                    Err(typ) if typ == std::any::type_name::<crate::InclusiveRange>() => {
                         // val_str[range]
-                        let range = idx.read_lock::<InclusiveRange>().unwrap().clone();
+                        let range = idx.read_lock::<crate::InclusiveRange>().unwrap().clone();
                         let chars_count = s.chars().count();
 
                         let start = if *range.start() >= 0 {

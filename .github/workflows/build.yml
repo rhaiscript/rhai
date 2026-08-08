@@ -34,7 +34,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: check
-          args: "--features decimal,metadata,serde,debugging"
+          args: "--features decimal,metadata,serde,debugging,grain"
 
   # typical build with various feature combinations
   build:
@@ -46,6 +46,7 @@ jobs:
         os: [ubuntu-latest]
         flags:
           - ""
+          - "--features grain"
           - "--features testing-environ,debugging"
           - "--features testing-environ,metadata"
           - "--features testing-environ,serde"
@@ -62,6 +63,7 @@ jobs:
           - "--features testing-environ,f32_float,serde,metadata,internals,debugging"
           - "--features testing-environ,no_custom_syntax,serde,metadata,internals,debugging"
           - "--tests --features testing-environ,only_i32,serde,metadata,internals,debugging"
+          - "--tests --features testing-environ,only_i32,serde,metadata,internals,debugging,grain"
           - "--features testing-environ,only_i64,serde,metadata,internals,debugging"
           - "--features testing-environ,no_index,serde,metadata,internals,debugging"
           - "--features testing-environ,no_object,serde,metadata,internals,debugging"
