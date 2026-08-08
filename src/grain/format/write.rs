@@ -150,6 +150,11 @@ pub(super) fn write(program: &Program, positions: Positions) -> Result<Vec<u8>, 
     put_uvarint(&mut out, program.functions().len() as u64);
     for function in program.functions() {
         put_uvarint(&mut out, u64::from(function.name));
+        // Zero is "untyped", so an index arrives one higher. The field is why
+        // `VERSION` moved to 7: it sits inside a positional record, and a reader
+        // that did not expect it would take it for the parameter count and lose
+        // its place in every section that follows.
+        put_uvarint(&mut out, function.this_type.map_or(0, |t| u64::from(t) + 1));
         put_uvarint(&mut out, function.params.len() as u64);
         for param in &function.params {
             put_uvarint(&mut out, u64::from(*param));

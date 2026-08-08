@@ -185,12 +185,18 @@ pub(super) fn read(bytes: &[u8]) -> Result<Program<'_>, ReadError> {
     let mut functions = Vec::new();
     for _ in 0..cursor.uvarint()? {
         let name = cursor.index()?;
+        // Zero is "untyped"; anything else is an index one higher.
+        let this_type = match cursor.uvarint()? {
+            0 => None,
+            raw => Some(u32::try_from(raw - 1).map_err(|_| ReadError::Truncated)?),
+        };
         let mut params = Vec::new();
         for _ in 0..cursor.uvarint()? {
             params.push(cursor.index()?);
         }
         functions.push(Function {
             name,
+            this_type,
             params,
             chunk: get_chunk(&mut cursor)?,
         });

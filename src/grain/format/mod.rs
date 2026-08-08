@@ -60,7 +60,7 @@ const MAGIC: [u8; 4] = *b"RGRN";
 /// Bumped when an encoding changes in a way an older reader would misread.
 /// Additive changes that an older reader would reject anyway — a new op tag,
 /// a new constant tag — do not need it.
-const VERSION: u16 = 6;
+const VERSION: u16 = 7;
 
 /// Where a chain starts. Append only.
 mod root_tag {

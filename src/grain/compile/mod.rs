@@ -154,6 +154,7 @@ impl Compiler {
             .map(|f| Function {
                 name: f.name,
                 params: f.params,
+                this_type: f.this_type,
                 chunk: Chunk::new(
                     offsets[f.first_op],
                     offsets[f.first_op + f.op_count],
@@ -242,6 +243,9 @@ enum Entry {
 struct LoweredFn {
     name: u32,
     params: Vec<u32>,
+    /// The declared receiver type, as a name-pool index. See
+    /// [`Function::this_type`](crate::grain::program::Function::this_type).
+    this_type: Option<u32>,
     first_op: usize,
     op_count: usize,
 }
@@ -709,6 +713,10 @@ impl Lowering {
         Some(LoweredFn {
             name: self.push_name(def.name.clone()),
             params,
+            this_type: def
+                .this_type
+                .as_ref()
+                .map(|typed| self.push_name(typed.clone())),
             first_op,
             op_count: self.code.len() - first_op,
         })

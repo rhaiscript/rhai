@@ -34,6 +34,17 @@ pub struct Function {
     /// Parameter names, in order, as name-pool indices. They become the
     /// callee's first locals, which is what makes them slot 0 upwards.
     pub params: Vec<u32>,
+    /// The receiver type this function was declared for, as a name-pool index.
+    ///
+    /// `fn <Type>.name()`. Rhai folds it into the function's hash rather than
+    /// checking it (`func/hashing.rs:159`), and tries the typed hash before the
+    /// plain one on a method call (`func/call.rs:614-629`) — so a typed function
+    /// and an untyped one of the same name and arity can both exist, and which
+    /// runs depends on the receiver's runtime type name. The string is what the
+    /// parser interned, which is already `Engine::map_type_name`'s answer.
+    ///
+    /// `None` for an ordinary function, which is nearly all of them.
+    pub this_type: Option<u32>,
     pub chunk: Chunk,
 }
 
@@ -71,6 +82,13 @@ pub struct Program<'a> {
     /// Whether the program can hand a function pointer to something that
     /// might call it back. See [`Program::makes_fn_pointers`].
     makes_fn_pointers: bool,
+
+    /// Whether any function was declared for a receiver type.
+    ///
+    /// Derived, not stored: [`Program::method`] is a linear scan on every method
+    /// call, and typed-first selection would double it for the overwhelming
+    /// majority of programs that have nothing typed to find.
+    has_typed_methods: bool,
 
     /// Where each instruction came from, or [`Positions::Stripped`].
     ///
@@ -234,12 +252,14 @@ impl<'a> Program<'a> {
         parts: Parts<'a>,
     ) -> Self {
         let makes_fn_pointers = makes_fn_pointers(&code);
+        let has_typed_methods = functions.iter().any(|f| f.this_type.is_some());
         let mut program = Self {
             code,
             main,
             functions,
             max_stack: 0,
             makes_fn_pointers,
+            has_typed_methods,
             positions: parts.positions,
             residuals: parts.residuals,
             consts: parts.consts,
@@ -269,6 +289,7 @@ impl<'a> Program<'a> {
             functions: self.functions,
             max_stack: self.max_stack,
             makes_fn_pointers: self.makes_fn_pointers,
+            has_typed_methods: self.has_typed_methods,
             positions: self.positions,
             residuals: self.residuals,
             consts: self.consts,
@@ -361,10 +382,46 @@ impl<'a> Program<'a> {
     /// Name and arity only, matching how rhai keys script functions. The name
     /// is an index into the pool the call site also indexes, so equal names
     /// have equal indices and this is two integer comparisons.
+    ///
+    /// Typed methods are invisible here. Rhai only ever tries a typed hash on a
+    /// *method* call (`func/call.rs:614`), so `fn <int>.foo()` cannot be reached
+    /// as `foo()` — see [`Program::method`], which is the other door.
     pub(crate) fn function(&self, name: u32, argc: usize) -> Option<&Function> {
         self.functions
             .iter()
-            .find(|f| f.name == name && f.params.len() == argc)
+            .find(|f| f.name == name && f.params.len() == argc && f.this_type.is_none())
+    }
+
+    /// The compiled function a *method* call resolves to.
+    ///
+    /// `argc` excludes the receiver: `x.foo(1)` looks for the script function
+    /// `foo` of arity **one** and binds `this` to `x`, which is what the parser
+    /// hashes (`parser.rs:2128-2145`). That is the whole difference from
+    /// [`Program::function`], whose `argc` counts the receiver because the
+    /// rewrite it serves is function-call style.
+    ///
+    /// `typed` is the receiver's mapped type name. A function declared for it
+    /// wins, and an untyped one of the same name and arity is the fallback —
+    /// rhai's order, minus the hashing (`func/call.rs:614-629`).
+    pub(crate) fn method(&self, name: u32, argc: usize, typed: &str) -> Option<&Function> {
+        let matching = |f: &&Function| f.name == name && f.params.len() == argc;
+
+        // Nearly every program has no typed method at all, and this is a linear
+        // scan on every method call — so the extra pass is bought only where
+        // there is something for it to find.
+        if self.has_typed_methods {
+            let found = self
+                .functions
+                .iter()
+                .find(|f| matching(f) && f.this_type.and_then(|t| self.name(t)) == Some(typed));
+            if found.is_some() {
+                return found;
+            }
+        }
+
+        self.functions
+            .iter()
+            .find(|f| matching(f) && f.this_type.is_none())
     }
 
     /// The compiled function a *pointer* resolves to.
@@ -373,9 +430,9 @@ impl<'a> Program<'a> {
     /// it may have been built from one at run time. A linear scan, which at
     /// these sizes beats a map and keeps the common indexed lookup untouched.
     pub(crate) fn function_named(&self, name: &str, argc: usize) -> Option<&Function> {
-        self.functions
-            .iter()
-            .find(|f| f.params.len() == argc && self.name(f.name) == Some(name))
+        self.functions.iter().find(|f| {
+            f.params.len() == argc && f.this_type.is_none() && self.name(f.name) == Some(name)
+        })
     }
 
     /// Whether this program can hand a function pointer to something that
@@ -594,5 +651,91 @@ impl<'a> Program<'a> {
 
     pub(crate) fn source(&self) -> Option<&ImmutableString> {
         self.source.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grain::bytecode::{assemble, Op, Positions, Strings};
+
+    /// Names: 0 `f`, 1 `i64`, 2 `string`.
+    fn program_of(functions: &[(u32, Option<u32>, usize)]) -> Program<'static> {
+        // Every chunk is the same two instructions; only the table matters here.
+        let (code, _) = assemble(&[Op::Unit, Op::Return]).expect("must assemble");
+        let whole = Chunk::new(0, code.len() as u32, 8);
+
+        let functions = functions
+            .iter()
+            .map(|&(name, this_type, argc)| Function {
+                name,
+                params: vec![0; argc],
+                this_type,
+                chunk: whole,
+            })
+            .collect();
+
+        Program::new(
+            code.into(),
+            whole,
+            functions,
+            Parts {
+                positions: Positions::default(),
+                residuals: Vec::new(),
+                consts: Vec::new(),
+                names: Strings::new(["f", "i64", "string"]),
+                tokens: Vec::new(),
+                assign_ops: Vec::new(),
+                chains: Vec::new(),
+                switches: Vec::new(),
+                lib: None,
+                #[cfg(not(feature = "no_module"))]
+                resolver: None,
+                source: None,
+            },
+        )
+    }
+
+    /// Rhai tries the receiver's type first and falls back to the untyped
+    /// function of the same name and arity (`func/call.rs:614-629`).
+    #[test]
+    fn a_typed_method_wins_over_an_untyped_one_of_the_same_arity() {
+        let program = program_of(&[(0, Some(1), 0), (0, None, 0)]);
+
+        assert_eq!(program.method(0, 0, "i64").unwrap().this_type, Some(1));
+        // No function declared for a string, so the untyped one answers.
+        assert_eq!(program.method(0, 0, "string").unwrap().this_type, None);
+    }
+
+    /// A typed method is only ever reached through a method call: rhai computes
+    /// the typed hash nowhere else, so `foo()` cannot find `fn <int>.foo()`.
+    #[test]
+    fn a_typed_method_is_unreachable_in_call_style() {
+        let program = program_of(&[(0, Some(1), 0)]);
+
+        assert!(program.function(0, 0).is_none());
+        assert!(program.function_named("f", 0).is_none());
+        assert!(program.method(0, 0, "i64").is_some());
+    }
+
+    #[test]
+    fn arity_is_matched_before_the_receiver_type() {
+        let program = program_of(&[(0, Some(1), 1), (0, None, 0)]);
+
+        // The typed one takes an argument, so a no-argument call is the untyped.
+        assert_eq!(program.method(0, 0, "i64").unwrap().this_type, None);
+        assert_eq!(program.method(0, 1, "i64").unwrap().this_type, Some(1));
+    }
+
+    #[test]
+    fn a_receiver_type_survives_the_round_trip() {
+        let program = program_of(&[(0, Some(1), 0), (0, None, 0)]);
+
+        let bytes = program.write().expect("must be writable");
+        let reloaded = Program::read(&bytes).expect("must load");
+
+        let typed: Vec<_> = reloaded.functions().iter().map(|f| f.this_type).collect();
+        assert_eq!(typed, vec![Some(1), None]);
+        assert_eq!(reloaded.method(0, 0, "i64").unwrap().this_type, Some(1));
     }
 }

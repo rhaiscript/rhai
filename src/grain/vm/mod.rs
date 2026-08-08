@@ -1085,17 +1085,56 @@ impl<'e> Vm<'e> {
                 pos: step_pos,
             } => {
                 let step_pos = *step_pos;
+                let name_index = *name;
                 let name = program
-                    .name(*name)
-                    .ok_or_else(|| malformed(format!("no name {name}")))?;
+                    .name(name_index)
+                    .ok_or_else(|| malformed(format!("no name {name_index}")))?;
                 let first = *operand as usize;
                 let argc = *argc as usize;
                 if first + argc > operands.len() {
                     return Err(malformed("chain method arguments missing".to_string()));
                 }
 
+                // A method call is where rhai tries the receiver's type before
+                // the plain name (`func/call.rs:614-629`), and the only place it
+                // does. `argc` already excludes the receiver, which is the arity
+                // the script side is keyed on (`parser.rs:2128-2145`).
+                //
+                // Consulting our own table first is safe because nothing can get
+                // between: `import` pushes onto `global.modules`, not
+                // `global.lib` (`eval/stmt.rs:947`), and `global.lib` is only
+                // ever pushed where an AST is being run.
+                let type_name = target.type_name();
+                let compiled = {
+                    let typed = self.engine.map_type_name(type_name);
+                    program
+                        .method(name_index, argc, typed)
+                        .map(|f| (f.params.clone(), f.chunk))
+                };
+
                 let mut args: Vec<Dynamic> = operands[first..first + argc].to_vec();
-                let out = {
+                let out = if let Some((params, chunk)) = compiled {
+                    // The receiver is moved into the frame and moved back, so a
+                    // write through `this` lands here and the chain's own
+                    // write-back carries it the rest of the way.
+                    let (bound, write_back) = bind_this(target);
+                    let at = self.stack.len();
+                    self.stack.extend(args);
+                    let (result, returned) = self.call_compiled_with_this(
+                        program,
+                        name,
+                        &params,
+                        chunk,
+                        at,
+                        step_pos,
+                        Some(bound),
+                    );
+                    self.stack.truncate(at);
+                    // Before `?`: a body that mutated and then raised has
+                    // already written, as it would through rhai's pointer.
+                    unbind_this(target, returned, write_back);
+                    result?
+                } else {
                     let mut call_args: Vec<&mut Dynamic> = core::iter::once(&mut *target)
                         .chain(args.iter_mut())
                         .collect();
@@ -3391,6 +3430,7 @@ mod tests {
             .map(|(index, span)| Function {
                 name: index as u32,
                 params: Vec::new(),
+                this_type: None,
                 chunk: Chunk::new(end_of(span.start), end_of(span.end), 8),
             })
             .collect();
@@ -3554,6 +3594,71 @@ mod tests {
 
         let mut this = Dynamic::from(7 as INT);
         assert_eq!(call(&program, Some(&mut this)).unwrap().as_int(), Ok(7));
+    }
+
+    /// A chain rooted at `this` whose method is a chunk of ours: the receiver
+    /// becomes the callee's `this`, which is the binding rhai does at
+    /// `func/call.rs:649-655` and the only place a method call differs from a
+    /// plain one.
+    #[test]
+    fn a_method_step_reaching_a_chunk_binds_the_receiver() {
+        let program = program_with_chains(
+            // `f` is `this.g()`; `g` is `this`.
+            &[&[Op::Chain(0), Op::Return], &[Op::LoadThis, Op::Return]],
+            Vec::new(),
+            vec![Chain {
+                root: Root::This {
+                    pos: Position::NONE,
+                },
+                steps: vec![Step::Method {
+                    name: 1, // `g`
+                    argc: 0,
+                    operand: 0,
+                    pos: Position::NONE,
+                }],
+                tail: Tail::Read,
+                operands: 0,
+            }],
+        );
+
+        let mut this = Dynamic::from(7 as INT);
+        assert_eq!(call(&program, Some(&mut this)).unwrap().as_int(), Ok(7));
+    }
+
+    /// And a write inside that callee travels back out through both frames: the
+    /// callee's register, the chain's root write-back, then the host's pointer.
+    #[test]
+    fn a_write_inside_a_method_step_reaches_the_host() {
+        let program = program_with_chains(
+            // `f` is `this.g()`; `g` is `this = 9`.
+            &[
+                &[Op::Chain(0), Op::Return],
+                &[
+                    Op::Const(0),
+                    Op::AssignThis { op: None },
+                    Op::Unit,
+                    Op::Return,
+                ],
+            ],
+            vec![Dynamic::from(9 as INT)],
+            vec![Chain {
+                root: Root::This {
+                    pos: Position::NONE,
+                },
+                steps: vec![Step::Method {
+                    name: 1, // `g`
+                    argc: 0,
+                    operand: 0,
+                    pos: Position::NONE,
+                }],
+                tail: Tail::Read,
+                operands: 0,
+            }],
+        );
+
+        let mut this = Dynamic::from(1 as INT);
+        assert!(call(&program, Some(&mut this)).is_ok());
+        assert_eq!(this.as_int(), Ok(9));
     }
 
     /// A fragment the compiler could not lower still sees the receiver. Without
