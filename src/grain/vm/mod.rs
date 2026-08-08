@@ -130,6 +130,9 @@ enum RootAt<'a> {
     /// A value with a name but no entry behind it — a resolver's answer, or a
     /// module's constant.
     Constant,
+    /// The frame's receiver, which is a register rather than a scope entry but
+    /// writes back for the same reason a [`RootAt::Place`] does.
+    This,
     /// A value with no name either: `[1, 2].len()`, `f().x`. Nothing can be
     /// assigned to one, because rhai's parser refuses it outright.
     Temporary,
@@ -885,6 +888,14 @@ impl<'e> Vm<'e> {
                         .ok_or_else(|| malformed(format!("`{name}` stopped being writable")))?;
                     *entry = root;
                 }
+                // The register, for the same reason and under the same rule:
+                // `this.push(1)` has to reach the caller's value, and the
+                // binder that owns it is what carries it back out of the frame.
+                RootAt::This => {
+                    if let Some(entry) = self.this.as_mut() {
+                        *entry = root;
+                    }
+                }
                 RootAt::Constant | RootAt::Temporary => {}
             }
         }
@@ -939,12 +950,20 @@ impl<'e> Vm<'e> {
                 })
             }
 
-            // The frame's receiver. Encodable and verifiable ahead of the
-            // register that holds it, so an artifact carrying one is refused
-            // rather than misread.
-            Root::This { .. } => Err(malformed(
-                "a chain rooted at `this` needs a bound receiver".to_string(),
-            )),
+            // The `this` position wins over the chain's for the same reason a
+            // name's does: this lookup can fail, and rhai blames the `this`
+            // rather than the `.` after it (`eval/chaining.rs:519-527`).
+            Root::This { pos: this_pos } => {
+                let value = self
+                    .this
+                    .as_ref()
+                    .ok_or_else(|| Box::new(EvalAltResult::ErrorUnboundThis(this_pos)))?;
+                Ok(ChainRoot {
+                    at: RootAt::This,
+                    value: walkable(value),
+                    pos: this_pos,
+                })
+            }
 
             // A name has a position of its own, and it wins: the lookup below
             // can fail, and rhai blames the variable rather than the chain.
@@ -3233,7 +3252,7 @@ impl<'e> Vm<'e> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grain::bytecode::{assemble, Chunk, Op, Positions, Strings};
+    use crate::grain::bytecode::{assemble, Chain, Chunk, Op, Positions, Step, Strings, Tail};
     use crate::grain::program::{Function, Parts};
     use crate::{CallFnOptions, Engine, Scope, INT};
 
@@ -3243,7 +3262,18 @@ mod tests {
     /// [`Vm::call_fn_with_options`], which is the only thing that can bind a
     /// receiver.
     fn program_of(bodies: &[&[Op]], consts: Vec<Dynamic>) -> Program<'static> {
-        const NAMES: [&str; 2] = ["f", "g"];
+        program_with_chains(bodies, consts, Vec::new())
+    }
+
+    /// The same, for the chain instruction, whose record lives in a pool rather
+    /// than in the code. Name indices are positions in `NAMES`.
+    fn program_with_chains(
+        bodies: &[&[Op]],
+        consts: Vec<Dynamic>,
+        chains: Vec<Chain>,
+    ) -> Program<'static> {
+        /// `f` and `g` are the functions; the rest are for chain steps to name.
+        const NAMES: [&str; 4] = ["f", "g", "push", "len"];
 
         let mut all = vec![Op::Unit, Op::Return];
         let mut spans = Vec::new();
@@ -3284,7 +3314,7 @@ mod tests {
                 names: Strings::new(NAMES),
                 tokens: Vec::new(),
                 assign_ops: Vec::new(),
-                chains: Vec::new(),
+                chains,
                 switches: Vec::new(),
                 lib: None,
                 #[cfg(not(feature = "no_module"))]
@@ -3432,6 +3462,63 @@ mod tests {
 
         let mut this = Dynamic::from(7 as INT);
         assert_eq!(call(&program, Some(&mut this)).unwrap().as_int(), Ok(7));
+    }
+
+    /// A chain rooted at `this` mutates the caller's value rather than a copy.
+    /// That is the whole reason `Root::This` is not `Root::Temporary`.
+    #[test]
+    fn a_chain_rooted_at_this_mutates_the_hosts_value() {
+        let program = program_with_chains(
+            &[&[Op::Const(0), Op::Chain(0), Op::Return]],
+            vec![Dynamic::from(2 as INT)],
+            vec![Chain {
+                root: Root::This {
+                    pos: Position::NONE,
+                },
+                steps: vec![Step::Method {
+                    name: 2, // `push`
+                    argc: 1,
+                    operand: 0,
+                    pos: Position::NONE,
+                }],
+                tail: Tail::Read,
+                operands: 1,
+            }],
+        );
+
+        let mut this = Dynamic::from(vec![Dynamic::from(1 as INT)]);
+        assert!(call(&program, Some(&mut this)).is_ok());
+
+        let array = this.into_array().expect("still an array");
+        let items: Vec<INT> = array.iter().map(|v| v.as_int().unwrap()).collect();
+        assert_eq!(items, vec![1, 2]);
+    }
+
+    #[test]
+    fn a_chain_rooted_at_an_unbound_this_is_an_error() {
+        let program = program_with_chains(
+            &[&[Op::Chain(0), Op::Return]],
+            Vec::new(),
+            vec![Chain {
+                root: Root::This {
+                    pos: Position::NONE,
+                },
+                steps: vec![Step::Method {
+                    name: 3, // `len`
+                    argc: 0,
+                    operand: 0,
+                    pos: Position::NONE,
+                }],
+                tail: Tail::Read,
+                operands: 0,
+            }],
+        );
+
+        let err = *call(&program, None).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("ErrorUnboundThis"),
+            "expected an unbound `this`, got {err:?}"
+        );
     }
 
     #[test]
