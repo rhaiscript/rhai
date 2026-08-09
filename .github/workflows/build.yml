@@ -46,7 +46,6 @@ jobs:
         os: [ubuntu-latest]
         flags:
           - ""
-          - "--features grain"
           - "--features testing-environ,grain"
           - "--features testing-environ,debugging"
           - "--features testing-environ,metadata"
@@ -63,7 +62,6 @@ jobs:
           - "--features testing-environ,no_float,serde,metadata,internals,debugging,grain"
           - "--features testing-environ,f32_float,serde,metadata,internals,debugging,grain"
           - "--features testing-environ,no_custom_syntax,serde,metadata,internals,debugging,grain"
-          - "--tests --features testing-environ,only_i32,serde,metadata,internals,debugging"
           - "--tests --features testing-environ,only_i32,serde,metadata,internals,debugging,grain"
           - "--features testing-environ,only_i64,serde,metadata,internals,debugging,grain"
           - "--features testing-environ,no_index,serde,metadata,internals,debugging,grain"
