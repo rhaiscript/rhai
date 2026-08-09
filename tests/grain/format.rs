@@ -129,12 +129,16 @@ fn the_round_trip_covers_something_worth_covering() {
 }
 
 /// Where the golden pair lives. The source is checked in beside the artifact so
-/// a regeneration is a visible two-file change.
+/// a regeneration is a visible two-file change. Only a build that can parse the
+/// source has anything to point them at.
+#[cfg(not(any(feature = "no_float", feature = "no_function")))]
 const GOLDEN_SOURCE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grain/fixtures/golden.rhai");
+#[cfg(not(any(feature = "no_float", feature = "no_function")))]
 const GOLDEN_ARTIFACT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grain/fixtures/golden.rgrn");
 
 /// The caller state `golden.rhai` expects. Part of the fixture, so it lives
 /// with it rather than being invented at each use.
+#[cfg(not(any(feature = "no_float", feature = "no_function")))]
 fn golden_scope() -> Scope<'static> {
     let mut scope = Scope::new();
     scope.push("supplied", vec![Dynamic::from(7 as INT)]);
@@ -165,15 +169,16 @@ fn golden_scope() -> Scope<'static> {
 #[test]
 fn a_golden_artifact_written_by_an_older_build_still_runs() {
     // The fixture is one build's bytes and its source is that build's source,
-    // which uses floats. `no_float` cannot parse it, so there is nothing here
-    // to check — the same reason the ABI guard skips below, reached earlier.
-    #[cfg(feature = "no_float")]
+    // which uses floats and script functions. A build without the syntax for
+    // either cannot parse it, so there is nothing here to check — the same
+    // reason the ABI guard skips below, reached earlier.
+    #[cfg(any(feature = "no_float", feature = "no_function"))]
     {
-        println!("skipped: the golden source uses floats, which this build has no syntax for");
+        println!("skipped: the golden source uses syntax this build does not have");
         return;
     }
 
-    #[cfg(not(feature = "no_float"))]
+    #[cfg(not(any(feature = "no_float", feature = "no_function")))]
     {
         let engine = corpus::engine();
         let source = std::fs::read_to_string(GOLDEN_SOURCE).expect("the golden source is checked in");
@@ -350,6 +355,7 @@ fn refusing_to_write_names_the_construct_responsible() {
 /// A script function is a chunk like any other, so it crosses the wire with
 /// the rest of the program.
 #[test]
+#[cfg(not(feature = "no_function"))]
 fn script_functions_survive_the_round_trip() {
     let engine = corpus::engine();
 
@@ -379,6 +385,7 @@ fn script_functions_survive_the_round_trip() {
 /// produce an artifact that loads and then cannot find its own function.
 #[test]
 #[cfg(not(feature = "no_module"))]
+#[cfg(not(feature = "no_function"))]
 fn a_function_the_compiler_cannot_lower_refuses_to_write() {
     let engine = corpus::engine();
     // `import` declares into the caller's scope, which the slot model cannot
@@ -393,6 +400,7 @@ fn a_function_the_compiler_cannot_lower_refuses_to_write() {
 /// The counterpart, and the milestone: a body that uses `this` is a chunk now,
 /// so a program full of them is an artifact rather than a tree.
 #[test]
+#[cfg(not(feature = "no_function"))]
 fn a_body_using_this_is_compiled_and_writable() {
     let engine = corpus::engine();
     let ast = engine.compile("fn bump(n) { this += n; this } let x = 21; x.bump(21); x").expect("must compile");

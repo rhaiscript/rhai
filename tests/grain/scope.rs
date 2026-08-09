@@ -248,6 +248,7 @@ fn a_chain_can_be_rooted_at_a_caller_variable() {
     // where every holder of the cell can see it. The closure is made in a
     // block so the compared scope does not end up holding a pointer, which the
     // two sides render differently on purpose.
+    #[cfg(not(feature = "no_function"))]
     agree(
         "{ let keep = || host.len(); } host.push(2); host",
         |s| {
@@ -303,6 +304,7 @@ fn a_chain_rooted_at_a_resolved_name_cannot_be_written_through() {
 /// through the flattening one, so even the right variable was captured by
 /// value: a write afterwards was invisible to the closure.
 #[test]
+#[cfg(not(feature = "no_function"))]
 fn a_closure_can_capture_a_caller_variable() {
     let seed = |scope: &mut Scope| {
         // Two of them, and the interesting one is not last: the index bug is
@@ -372,6 +374,7 @@ fn a_name_that_is_nowhere_is_reported_the_same_way() {
 /// (`eval/expr.rs:62`). Reported separately — it predates named variables, and
 /// the fix is about residuals rather than about this.
 #[test]
+#[cfg(not(feature = "no_function"))]
 fn a_script_function_name_is_not_a_variable() {
     let engine = corpus::engine();
     let ast = engine.compile("fn helper() { 1 } let f = helper; f.call()").expect("must compile");
@@ -422,6 +425,8 @@ fn a_global_module_constant_resolves() {
 /// started lowering again would put the divergence straight back.
 #[test]
 #[cfg(not(feature = "no_module"))]
+// The module the `import` resolves to is itself a script function.
+#[cfg(not(feature = "no_function"))]
 fn an_import_keeps_the_walkers_answer() {
     let mut engine = corpus::engine();
 
@@ -612,6 +617,7 @@ fn a_resolved_receiver_is_not_the_scope_entry_it_shadows() {
 /// late-bound, which rhai renders. Pinned here rather than left to be
 /// discovered, because it is visible to a script that prints one.
 #[test]
+#[cfg(not(feature = "no_function"))]
 fn a_closure_pointer_is_late_bound() {
     let engine = corpus::engine();
     let source = "let n = 1; let f = |x| x + n; f";
@@ -635,6 +641,7 @@ fn a_closure_pointer_is_late_bound() {
 /// Calling a compiled function from outside, which is what a native wrapper
 /// will do once compiled chunks are registered for callbacks.
 #[test]
+#[cfg(not(feature = "no_function"))]
 fn a_compiled_function_can_be_called_by_name() {
     let engine = corpus::engine();
     let ast = engine.compile("fn add(a, b) { a + b } fn boom() { throw 7; } 0").expect("must compile");
@@ -666,6 +673,7 @@ fn a_compiled_function_can_be_called_by_name() {
 /// arguments as a tuple rather than a `Vec<Dynamic>`, a typed result, and the
 /// program's body run first — which is what sets up anything the call needs.
 #[test]
+#[cfg(not(feature = "no_function"))]
 fn call_fn_mirrors_the_engines() {
     let engine = corpus::engine();
     let ast = engine.compile("fn add(a, b) { a + b } let marker = 10; 0").expect("must compile");
@@ -712,6 +720,7 @@ fn call_fn_mirrors_the_engines() {
 /// compiled program and for the same program read back, or one of the two
 /// paths quietly loses its callbacks.
 #[test]
+#[cfg(not(feature = "no_function"))]
 fn the_compiler_says_whether_a_program_makes_function_pointers() {
     let engine = corpus::engine();
 

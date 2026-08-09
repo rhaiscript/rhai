@@ -129,6 +129,37 @@ pub fn applies_to_this_build(name: &str) -> bool {
     ) {
         return false;
     }
+    // `no_function` removes `fn` and the anonymous form with it, so a case that
+    // declares one, points at one, or has a `this` to be a method of does not
+    // parse. The prefixes carry the families; the rest reach for a function
+    // incidentally, as the subject of a `switch`, a `for` or a `try`.
+    #[cfg(feature = "no_function")]
+    if name.starts_with("this_")
+        || name.starts_with("error_this_")
+        || name.starts_with("fn_")
+        || name.starts_with("call_style_")
+        || matches!(
+            name,
+            "block_as_argument"
+                | "error_a_skipped_function_cannot_see_the_caller"
+                | "error_wrong_arity"
+                | "for_over_captured_array"
+                | "for_return_from_body"
+                | "map_computed_order"
+                | "map_read_of_absent_key_is_not_visible_to_a_closure"
+                | "switch_on_a_shared_subject_takes_the_default"
+                | "switch_range_on_a_shared_subject_takes_the_default"
+                | "temp_root_call"
+                | "throw_from_a_function_leaves_the_caller_top_level_alone"
+                | "throw_in_fn"
+                | "try_around_a_compiled_call"
+                | "try_catch_does_not_swallow_return"
+                | "try_does_not_catch_return"
+                | "type_of_a_pointer"
+        )
+    {
+        return false;
+    }
     let _ = name;
     true
 }

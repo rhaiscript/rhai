@@ -321,7 +321,12 @@ fn generated_scripts_agree_with_the_walker() {
     // `cargo test --release` parse different halves of the same seeded corpus
     // and compare different scripts, which is not a thing a differential
     // harness may do. The release numbers, because they admit more.
-    engine.set_max_expr_depths(64, 64);
+    engine.set_max_expr_depths(
+        64,
+        #[cfg(not(feature = "no_function"))]
+        64,
+    );
+    #[cfg(not(feature = "no_function"))]
     engine.set_max_call_levels(64);
 
     const SEED: u64 = 0x5eed_9a11_0000_0001;

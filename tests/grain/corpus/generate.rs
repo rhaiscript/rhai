@@ -191,6 +191,9 @@ impl Generator {
     pub fn script(&mut self) -> String {
         let mut out = String::new();
 
+        // `no_function` has no syntax for one, so a script carrying any would
+        // not parse and the run would compare nothing.
+        #[cfg(not(feature = "no_function"))]
         for _ in 0..self.rng.below(3) {
             out.push_str(&self.function());
             out.push(' ');
@@ -495,15 +498,19 @@ impl Generator {
             }
             11 => self.atom(),
             12 => self.call(),
+            // A closure, called directly. Handing one to a native is the shape
+            // with the known divergence, so it is not generated. The anonymous
+            // form is `fn` in disguise, so `no_function` takes it too.
+            #[cfg(not(feature = "no_function"))]
             _ => {
-                // A closure, called directly. Handing one to a native is the
-                // shape with the known divergence, so it is not generated.
                 let param = self.name("c");
                 self.vars.push(param.clone());
                 let body = self.expression();
                 self.vars.pop();
                 format!("(|{param}| {body}).call({})", self.atom())
             }
+            #[cfg(feature = "no_function")]
+            _ => self.atom(),
         }
     }
 

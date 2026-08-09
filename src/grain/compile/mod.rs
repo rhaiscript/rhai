@@ -2,13 +2,15 @@ mod cases;
 mod poolable;
 mod slots;
 
+#[cfg(not(feature = "no_function"))]
 use core::mem;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
+#[cfg(not(feature = "no_function"))]
+use crate::ast::ScriptFuncDef;
 use crate::ast::{
-    ASTFlags, Expr, FlowControl, FnCallExpr, OpAssignment, ScriptFuncDef, Stmt, StmtBlock,
-    SwitchCasesCollection,
+    ASTFlags, Expr, FlowControl, FnCallExpr, OpAssignment, Stmt, StmtBlock, SwitchCasesCollection,
 };
 use crate::tokenizer::Token;
 use crate::types::Span;
@@ -82,12 +84,16 @@ impl Compiler {
         // at all — rhai turns it into a function pointer with the calling
         // environment attached (`eval/expr.rs:71-99`) — so those names must
         // not become `LoadNamed`. Carried across every restart below, because
-        // function bodies are lowered after one.
+        // function bodies are lowered after one. Under `no_function` an `AST`
+        // declares none, so there is nothing to hold back.
+        #[cfg(not(feature = "no_function"))]
         let script_fns: Vec<ImmutableString> = ast
             .shared_lib()
             .iter_script_fn_info()
             .map(|(.., def)| def.name.clone())
             .collect();
+        #[cfg(feature = "no_function")]
+        let script_fns: Vec<ImmutableString> = Vec::new();
         let fresh = || Lowering {
             script_fns: script_fns.clone(),
             ..Lowering::default()
@@ -108,14 +114,10 @@ impl Compiler {
         // whole program assembles as one address space. A function the slot
         // model cannot handle is simply left out, and rhai's own copy of it
         // stays reachable through the library below.
-        let mut functions = Vec::new();
-        let mut skipped = 0usize;
-        for (.., def) in ast.shared_lib().iter_script_fn_info() {
-            match lowering.function(def) {
-                Some(function) => functions.push(function),
-                None => skipped += 1,
-            }
-        }
+        #[cfg(not(feature = "no_function"))]
+        let (functions, skipped) = lowering.functions(ast);
+        #[cfg(feature = "no_function")]
+        let (functions, skipped): (Vec<LoweredFn>, usize) = (Vec::new(), 0);
 
         // Assembly can fail the same way the slot model can, for a script with
         // more distinct names or constants than a `u16` operand can index — so
@@ -178,11 +180,22 @@ impl Compiler {
         // so no single arity is right. Rhai's own pointer carries the body and
         // sizes the call from it, which is what its copy is kept here for. See
         // `callback::wrappers`, which skips exactly these.
-        let escapes_as_pointer = crate::grain::program::makes_fn_pointers(&code)
-            && functions
-                .iter()
-                .any(|f| crate::grain::program::takes_this(&code, f.chunk, &lowering.chains));
-        let needs_walker = skipped > 0 || !lowering.residuals.is_empty() || escapes_as_pointer;
+        #[cfg(not(feature = "no_function"))]
+        let lib = {
+            let escapes_as_pointer = crate::grain::program::makes_fn_pointers(&code)
+                && functions
+                    .iter()
+                    .any(|f| crate::grain::program::takes_this(&code, f.chunk, &lowering.chains));
+            let needs_walker = skipped > 0 || !lowering.residuals.is_empty() || escapes_as_pointer;
+            (needs_walker && !ast.shared_lib().is_empty()).then(|| ast.shared_lib().clone())
+        };
+        // Under `no_function` there is no function tree to carry, whichever way
+        // the fallbacks above went.
+        #[cfg(feature = "no_function")]
+        let lib = {
+            let _ = skipped;
+            None
+        };
 
         let mut program = Program::new(
             code.into(),
@@ -197,8 +210,7 @@ impl Compiler {
                 assign_ops: lowering.assign_ops,
                 chains: lowering.chains,
                 switches: lowering.switches,
-                lib: (needs_walker && !ast.shared_lib().is_empty())
-                    .then(|| ast.shared_lib().clone()),
+                lib,
                 #[cfg(not(feature = "no_module"))]
                 resolver: ast.resolver.clone(),
                 source: ast.source().map(Into::into),
@@ -674,6 +686,21 @@ impl Lowering {
         (self.chains.len() - 1) as u32
     }
 
+    /// Lower every script function the `AST` declares, and count the ones the
+    /// slot model turned down.
+    #[cfg(not(feature = "no_function"))]
+    fn functions(&mut self, ast: &AST) -> (Vec<LoweredFn>, usize) {
+        let mut functions = Vec::new();
+        let mut skipped = 0;
+        for (.., def) in ast.shared_lib().iter_script_fn_info() {
+            match self.function(def) {
+                Some(function) => functions.push(function),
+                None => skipped += 1,
+            }
+        }
+        (functions, skipped)
+    }
+
     /// Lower one script function's body into the same instruction list.
     ///
     /// Returns `None` if the slot model cannot account for it, in which case
@@ -683,6 +710,7 @@ impl Lowering {
     ///
     /// The body runs in a fresh scope with the parameters already pushed
     /// (`func/script.rs:73`), so the parameters are exactly slots 0 upwards.
+    #[cfg(not(feature = "no_function"))]
     fn function(&mut self, def: &ScriptFuncDef) -> Option<LoweredFn> {
         let first_op = self.code.len();
         let saved_slots = mem::take(&mut self.slots);

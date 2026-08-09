@@ -12,10 +12,12 @@ use crate::types::fn_ptr::FnPtrType;
 // `Variant` is only re-exported from the crate root under `internals`, so it
 // comes from where it is defined.
 use crate::ast::Expr;
+#[cfg(not(feature = "no_function"))]
 use crate::types::dynamic::Variant;
+#[cfg(not(feature = "no_function"))]
+use crate::CallFnOptions;
 use crate::{
-    eval::Caches, eval::GlobalRuntimeState, CallFnOptions, Dynamic, Engine, EvalAltResult,
-    EvalContext, Scope,
+    eval::Caches, eval::GlobalRuntimeState, Dynamic, Engine, EvalAltResult, EvalContext, Scope,
 };
 use crate::{
     Array, FnPtr, ImmutableString, Map, NativeCallContext, Position, ThinVec, FUNC_TO_STRING, INT,
@@ -508,11 +510,14 @@ impl<'e> Vm<'e> {
     /// declared. [`call_fn_with_options`](Self::call_fn_with_options) turns
     /// that off.
     ///
+    /// Not available under `no_function`.
+    ///
     /// # Errors
     ///
     /// `ErrorFunctionNotFound` if no compiled function has that name and
     /// arity, `ErrorMismatchOutputType` if the result is not a `T`, and
     /// whatever the function itself raises.
+    #[cfg(not(feature = "no_function"))]
     pub fn call_fn<T: Variant + Clone>(
         &mut self,
         scope: &mut Scope,
@@ -540,9 +545,12 @@ impl<'e> Vm<'e> {
     /// `in_all_namespaces` is ignored: this looks only in the program's own
     /// compiled functions.
     ///
+    /// Not available under `no_function`.
+    ///
     /// # Errors
     ///
     /// As [`call_fn`](Self::call_fn).
+    #[cfg(not(feature = "no_function"))]
     pub fn call_fn_with_options<T: Variant + Clone>(
         &mut self,
         options: CallFnOptions,
@@ -707,15 +715,23 @@ impl<'e> Vm<'e> {
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
         let orig_source = mem::replace(&mut self.global.source, program.source().cloned());
+        #[cfg(not(feature = "no_function"))]
         let orig_lib_len = self.global.lib.len();
-        if let Some(lib) = program.lib() {
-            self.global.lib.push(lib.clone());
+        #[cfg(not(feature = "no_function"))]
+        {
+            if let Some(lib) = program.lib() {
+                self.global.lib.push(lib.clone());
+            }
+            // Last, so the search — which runs in reverse — reaches a compiled
+            // function before whatever the compiler left rhai to interpret.
+            if let Some(wrappers) = wrappers {
+                self.global.lib.push(wrappers);
+            }
         }
-        // Last, so the search — which runs in reverse — reaches a compiled
-        // function before whatever the compiler left rhai to interpret.
-        if let Some(wrappers) = wrappers {
-            self.global.lib.push(wrappers);
-        }
+        // Without script functions there is no library to stack them in, and
+        // `wrappers` is `None` for want of anything to wrap.
+        #[cfg(feature = "no_function")]
+        let _ = wrappers;
         #[cfg(not(feature = "no_module"))]
         let orig_resolver = mem::replace(
             &mut self.global.embedded_module_resolver,
@@ -728,6 +744,7 @@ impl<'e> Vm<'e> {
         {
             self.global.embedded_module_resolver = orig_resolver;
         }
+        #[cfg(not(feature = "no_function"))]
         self.global.lib.truncate(orig_lib_len);
         self.global.source = orig_source;
 
@@ -2290,6 +2307,9 @@ impl<'e> Vm<'e> {
     ) -> VmResult {
         #[cfg(not(feature = "unchecked"))]
         {
+            // The limit exists only where recursion does — `no_function` leaves
+            // nothing to call, so rhai drops the setting with the functions.
+            #[cfg(not(feature = "no_function"))]
             if self.global.level > self.engine.max_call_levels() {
                 return Err(Box::new(EvalAltResult::ErrorStackOverflow(pos)));
             }
@@ -3498,7 +3518,12 @@ impl<'e> Vm<'e> {
 /// mentions `this` — so this is the only thing that executes them until it does.
 /// Worth having on its own account regardless: what a hand-made artifact can say
 /// is exactly what a verifier-plus-VM has to survive.
+///
+/// Every case enters through [`Vm::call_fn_with_options`], which is the only
+/// way to bind a receiver from outside — and which `no_function` takes away
+/// along with rhai's `CallFnOptions`.
 #[cfg(test)]
+#[cfg(not(feature = "no_function"))]
 mod tests {
     use super::*;
     use crate::grain::bytecode::{assemble, Chain, Chunk, Op, Positions, Step, Strings, Tail};
