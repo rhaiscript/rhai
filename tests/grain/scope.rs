@@ -297,6 +297,43 @@ fn a_chain_rooted_at_a_resolved_name_cannot_be_written_through() {
     }
 }
 
+/// A closure body the optimizer folded, which rhai then does not run.
+///
+/// Rhai keeps two copies of a closure's body: the one in the `AST`'s function
+/// library, which the optimizer rewrites, and the one the `FnPtr` carries,
+/// which it does not — they are separate `ScriptFuncDef`s from the moment the
+/// optimizer runs, on every build. Dispatch through a pointer runs the
+/// pointer's copy. We compile the library's.
+///
+/// So a fold that drops work is a fold we keep and the walker does not:
+/// `[nope, 'c', 28][1]` becomes `'c'`, and `nope` is never looked up. Every
+/// other build hides this, because there a capture evaluates `nope` where the
+/// closure is *made* and raises before any of it matters. `no_closure` has no
+/// capture, so this is the one build the difference reaches.
+///
+/// Pinned rather than fixed. The fold is rhai's own, and reaching it takes a
+/// discarded element that fails — which is a shape no working script has, and
+/// which `corpus::generate` therefore keeps off.
+/// `no_function` turns `no_closure` on and takes the syntax with it, and the
+/// fold needs an array literal to happen to.
+#[test]
+#[cfg(feature = "no_closure")]
+#[cfg(not(any(feature = "no_function", feature = "no_index")))]
+fn a_folded_closure_body_keeps_the_optimizers_answer() {
+    let engine = corpus::engine();
+    let source = "call(|c| [nope, 'c', 28][1], 4)";
+    let ast = engine.compile(source).expect("must compile");
+    let program = Compiler::new().compile(&ast);
+
+    // The walker runs the pointer's copy, which still has the lookup in it.
+    let walked = engine.eval_ast::<Dynamic>(&ast);
+    assert!(walked.is_err(), "the walker must still look `nope` up, got {walked:?}",);
+
+    // We run the library's, which has nothing left to look up.
+    let ours = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).expect("the folded body cannot fail");
+    assert_eq!(ours.as_char(), Ok('c'));
+}
+
 /// A closure can capture a variable the caller supplied, and capturing it means
 /// binding the cell rather than a copy of what is in it.
 ///

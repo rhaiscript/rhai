@@ -542,9 +542,20 @@ impl Generator {
             #[cfg(not(feature = "no_function"))]
             _ => {
                 let param = self.name("c");
+                // Without capture, a body may name nothing but its own
+                // parameter. An enclosing name raises `ErrorVariableNotFound`
+                // on the walker, and the optimizer can fold that raise away
+                // where it is a discarded element — the divergence pinned in
+                // `a_folded_closure_body_keeps_the_optimizers_answer`.
+                #[cfg(feature = "no_closure")]
+                let outer = std::mem::take(&mut self.vars);
                 self.vars.push(param.clone());
                 let body = self.expression();
                 self.vars.pop();
+                #[cfg(feature = "no_closure")]
+                {
+                    self.vars = outer;
+                }
                 // `.call` is method syntax; `no_object` leaves the function-call
                 // form of the same native, which is what it rewrites to anyway.
                 #[cfg(not(feature = "no_object"))]
