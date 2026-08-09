@@ -307,7 +307,11 @@ fn a_chain_rooted_at_a_resolved_name_cannot_be_written_through() {
 /// through the flattening one, so even the right variable was captured by
 /// value: a write afterwards was invisible to the closure.
 #[test]
-#[cfg(not(any(feature = "no_function", feature = "no_object")))]
+#[cfg(not(any(
+    feature = "no_function",
+    feature = "no_object",
+    feature = "no_closure"
+)))]
 fn a_closure_can_capture_a_caller_variable() {
     let seed = |scope: &mut Scope| {
         // Two of them, and the interesting one is not last: the index bug is
