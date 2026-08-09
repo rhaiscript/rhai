@@ -199,9 +199,11 @@ pub fn applies_to_this_build(name: &str) -> bool {
             | "closure_map_binds_this"
             | "closure_map_takes_an_argument"
             | "closure_shared_chain_root"
+            | "const_root_index_read"
             | "empty_literals_nested_in_computed_ones"
             | "empty_map_nested_in_a_computed_map"
             | "error_array_bounds"
+            | "error_const_root_method_step"
             | "error_host_index_bounds"
             | "error_index_into_an_unindexable_step"
             | "error_index_into_an_unindexable_step_deep"
@@ -220,6 +222,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
             | "host_temp_index_set"
             | "index_assign_array"
             | "index_assign_nested"
+            | "index_expression_reads_the_root"
             | "interpolation_of_containers"
             | "is_shared_after_capture"
             | "map_computed_in_array"
@@ -242,6 +245,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
             | "this_index_assign"
             | "this_method_arity"
             | "this_method_step"
+            | "this_survives_a_failed_chain"
             | "try_catch_native_error"
             | "type_of_a_container"
     ) {
@@ -279,6 +283,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
                 | "closure_shared_write"
                 | "empty_literals_nested_in_computed_ones"
                 | "empty_map_nested_in_a_computed_map"
+                | "error_const_root_method_step"
                 | "error_fn_ptr_unknown_name"
                 | "error_index_into_an_unindexable_step_deep"
                 | "error_map_write_through_an_absent_key"
@@ -295,6 +300,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
                 | "fn_ptr_from_dynamic_name"
                 | "fn_ptr_to_native"
                 | "index_assign_nested"
+                | "index_expression_reads_the_root"
                 | "interpolation_of_containers"
                 | "nested_containers"
                 | "property_assign_deep"
@@ -567,6 +573,19 @@ pub const CASES: &[Case] = &[
     // visible from outside the expression that invented it.
     case("map_read_of_absent_key_is_not_visible_to_a_closure", "let m = #{}; let r = 0; { let f = || m; r = m.zz; } [m, r]"),
     case("op_assign_indexed", "let a = [1, 2, 3]; a[0] += 10; a"),
+    // A chain is walked where its root lives rather than in a copy of it, so
+    // the access mode of the entry is what refuses a write — not the fact that
+    // the walk was handed something detached. All three have to agree with
+    // rhai, which reaches the same entry through a `Target`.
+    // No `A[0] = 9` case: rhai blames `ErrorAssignmentToConstant` on the
+    // variable and the VM blames it on the `[`, because `Root::Local` carries
+    // no position of its own the way `Root::Named` and `Root::This` do. That
+    // predates the borrow and needs a field in the chain pool to fix.
+    case("const_root_index_read", "const A = [1, 2, 3]; A[1]"),
+    case("error_const_root_method_step", "const A = [1, 2]; A.push(3); A"),
+    // The index is evaluated before the root is reached, so a method call in it
+    // sees the root as it was — and cannot be holding it when the walk starts.
+    case("index_expression_reads_the_root", "let a = [1, 2, 3]; a[a.len() - 1] = 9; a"),
     case("bitfield_assign", "let x = 0; x[2] = true; x"),
     case("string_char_assign", r#"let s = "hello"; s[0] = 'H'; s"#),
     case("string_slice_read", r#"let s = "hello world"; s[0..5]"#),
@@ -725,6 +744,10 @@ pub const CASES: &[Case] = &[
     case("this_index", "fn first() { this[0] } let a = [3, 4]; a.first()"),
     case("this_index_assign", "fn set() { this[0] = 9; } let a = [1, 2]; a.set(); a"),
     case("this_method_step", "fn grow() { this.push(3); } let a = [1, 2]; a.grow(); a"),
+    // The receiver is moved out of the register for the walk, so a chain that
+    // fails partway has to put it back — otherwise the next `this` in the same
+    // body is unbound.
+    case("this_survives_a_failed_chain", "fn f() { try { this[9] } catch(e) { this[0] } } let a = [1, 2]; a.f()"),
     case("this_host_method", "fn raise() { this.bump(); } let w = widget(4); w.raise(); w.level"),
     case("this_host_property", "fn read() { this.level } let w = widget(4); w.read()"),
     // A method on `this` that reaches another compiled function.

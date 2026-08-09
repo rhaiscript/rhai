@@ -120,13 +120,17 @@ const CASES: &[Case] = &[
     // of the VM, through rhai's dispatch and back into a second `Vm` with an
     // empty resolution cache — where the walker stays inside itself and reaches
     // the closure body directly. 1000 crossings per iteration.
+    //
+    // Also the only case here that indexes: the `a.push(i)` loop is a chain
+    // rooted at a local, so it is what says the root is still being walked
+    // where it lives rather than copied out and put back.
     Case {
         name: "native callbacks",
         source: "let a = []; let i = 0; while i < 500 { a.push(i); i += 1; } \
                  let b = a.map(|x| x * 2); b.filter(|x| x % 3 == 0).len()",
         iterations: 20,
         callbacks: true,
-        floor: 0.25,
+        floor: 0.64,
     },
 ];
 

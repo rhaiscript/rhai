@@ -30,7 +30,9 @@ use crate::Map;
 use crate::{
     eval::Caches, eval::GlobalRuntimeState, Dynamic, Engine, EvalAltResult, EvalContext, Scope,
 };
-use crate::{FnPtr, ImmutableString, NativeCallContext, Position, ThinVec, FUNC_TO_STRING, INT};
+use crate::{
+    FnArgsVec, FnPtr, ImmutableString, NativeCallContext, Position, ThinVec, FUNC_TO_STRING, INT,
+};
 
 mod callback;
 
@@ -129,39 +131,57 @@ enum Site<'a> {
     Name(&'a str),
 }
 
-/// What a chain turned out to be rooted at.
+/// What a chain turned out to be rooted at, and the value to walk.
 ///
 /// Rhai draws this line in `search_namespace`, which hands back a `Target`: a
 /// scope entry becomes a reference to write through, and a resolver's answer or
 /// a module's constant becomes a read-only temporary (`eval/expr.rs:120-155`).
 /// Which one a [`Root::Named`] is cannot be known until it is looked up.
-enum RootAt<'a> {
-    /// A scope entry. The only root a chain writes back into, and only when it
-    /// is not a constant.
-    Place(Site<'a>),
+///
+/// Whichever it is, the value keeps the access mode it was found with, and that
+/// is not decoration: it is the only thing standing between a `const` and a
+/// method that mutates it — `exec_native_fn_call` refuses a non-pure function
+/// whose first argument is read-only (`func/call.rs:405`).
+enum RootValue<'s> {
+    /// A scope entry, walked where it lives.
+    ///
+    /// Nothing is written back afterwards because nothing was copied: a
+    /// mutation partway down the chain landed in the entry itself, which is
+    /// what rhai's `Target::RefMut` does (`eval/chaining.rs:517-563`).
+    Entry(&'s mut Dynamic),
+
     /// A value with a name but no entry behind it — a resolver's answer, or a
-    /// module's constant.
-    Constant,
-    /// The frame's receiver, which is a register rather than a scope entry but
-    /// writes back for the same reason a [`RootAt::Place`] does.
-    This,
-    /// A value with no name either: `[1, 2].len()`, `f().x`. Nothing can be
-    /// assigned to one, because rhai's parser refuses it outright.
-    Temporary,
+    /// module's constant. Nowhere to write back to.
+    Detached(Dynamic),
+
+    /// The frame's receiver, moved out of the register for the walk.
+    ///
+    /// A register cannot lend a `&mut` across the `&mut self` the walk needs,
+    /// so this is the one root that still travels: moved out here and moved
+    /// back by [`Vm::run_chain`], the same trade [`bind_this`] makes.
+    This(Dynamic),
+
+    /// A value taken off the operand stack: `[1, 2].len()`, `f().x`.
+    ///
+    /// Nothing can be assigned to one, because rhai's parser refuses it
+    /// outright. Moved rather than borrowed for the same reason [`Self::This`]
+    /// is — the stack is part of `self`.
+    Temporary(Dynamic),
+}
+
+impl RootValue<'_> {
+    /// The value to walk.
+    fn as_mut(&mut self) -> &mut Dynamic {
+        match self {
+            Self::Entry(value) => value,
+            Self::Detached(value) | Self::This(value) | Self::Temporary(value) => value,
+        }
+    }
 }
 
 /// A chain's root, looked up.
-struct ChainRoot<'a> {
-    at: RootAt<'a>,
-    /// The value to walk.
-    ///
-    /// **Read-only if rhai's `Target` would have been**, which is not
-    /// decoration: cloning a `Dynamic` marks the copy read-write however the
-    /// original was (`types/dynamic.rs:822`), and the access mode is the only
-    /// thing standing between a `const` and a method that mutates it —
-    /// `exec_native_fn_call` refuses a non-pure function whose first argument
-    /// is read-only (`func/call.rs:405`).
-    value: Dynamic,
+struct ChainRoot<'s> {
+    value: RootValue<'s>,
     /// Where to blame a refusal: the variable for a name, the chain otherwise.
     pos: Position,
 }
@@ -800,6 +820,16 @@ impl<'e> Vm<'e> {
     /// the whole story — the mutation lands in the container and no write-back
     /// is needed. Doing it on the operand stack instead would mutate a copy.
     ///
+    /// That starts at the root: a scope entry is walked where it lives, not
+    /// copied out and put back. Copying it would make a chain cost the size of
+    /// what it is rooted at rather than the length of the chain, which for
+    /// `a[i] = x` in a loop is the difference between linear and quadratic.
+    ///
+    /// The exceptions are the two roots a `&mut` cannot be had for, because
+    /// they live in `self` and the walk needs `&mut self`: the `this` register
+    /// and the operand stack. Both are *moved* rather than cloned, and `this`
+    /// is moved back.
+    ///
     /// Write-back is only for the levels where a borrow was not possible:
     /// a getter on a host type hands back a value, and rhai calls the setter
     /// afterwards if the sub-chain was a method call. `changed` reproduces
@@ -824,10 +854,14 @@ impl<'e> Vm<'e> {
             .ok_or_else(|| malformed("chain with too few operands".to_string()))?;
 
         let ChainRoot {
-            at,
             value: mut root,
             pos: root_pos,
         } = self.chain_root(program, chain, scope, base, operands_at, pos)?;
+
+        // Nothing between here and the restore below may use `?`: a `this` root
+        // was moved out of the register, and an early return would drop it on
+        // the floor. Everything that can fail travels in `result` instead.
+        let read_only = root.as_mut().is_read_only();
 
         // Read-only is what refuses an assignment, not the absence of a place:
         // a module's constant is neither, so rhai assigns into the copy and
@@ -837,95 +871,70 @@ impl<'e> Vm<'e> {
         // A temporary is separate again — rhai's parser refuses `f().x = 1`
         // outright, so one reaches here only from a chunk this compiler did
         // not build.
-        let value = match (chain.assigns(), &at) {
-            (false, _) => None,
-            (true, RootAt::Temporary) => {
-                return Err(malformed("chain assigns through a temporary root".into()))
+        let value = match (chain.assigns(), &root) {
+            (false, _) => Ok(None),
+            (true, RootValue::Temporary(..)) => {
+                Err(malformed("chain assigns through a temporary root".into()))
             }
-            (true, _) if root.is_read_only() => {
-                let name = root_name(program, chain)
-                    .ok_or_else(|| malformed("no chain root name".to_string()))?;
-                return Err(Box::new(EvalAltResult::ErrorAssignmentToConstant(
+            (true, _) if read_only => Err(match root_name(program, chain) {
+                Some(name) => Box::new(EvalAltResult::ErrorAssignmentToConstant(
                     name.to_string(),
                     root_pos,
-                )));
-            }
+                )),
+                None => malformed("no chain root name".to_string()),
+            }),
             // Rhai flattens the right-hand side before assigning, so a shared
             // cell is copied out rather than aliased in.
-            (true, _) => Some(self.stack[self.stack.len() - 1].clone().flatten()),
+            (true, _) => Ok(Some(self.stack[self.stack.len() - 1].clone().flatten())),
         };
 
-        let mut operands: Vec<Dynamic> =
-            self.stack[operands_at..operands_at + chain.operands as usize].to_vec();
+        let result = value.and_then(|value| {
+            let mut operands: FnArgsVec<Dynamic> = self.stack
+                [operands_at..operands_at + chain.operands as usize]
+                .iter()
+                .cloned()
+                .collect();
 
-        // A shared cell cannot be walked directly. `get_indexed_mut` refuses
-        // one outright — `unreachable!("cannot handle shared values")`,
-        // `eval/chaining.rs:461` — because rhai always reaches a root through
-        // a `Target`, whose shared arm hands over the guard rather than the
-        // cell. Walking the cell would take the host down, so this is a
-        // panic-safety fix and not only a correctness one.
-        //
-        // Nothing is written back for a shared root: cloning a shared
-        // `Dynamic` clones the `Rc`, so a mutation through the guard already
-        // landed in the cell every other holder can see.
-        let shared = is_shared!(root);
-        let result = if shared {
-            let mut guard = root.write_lock::<Dynamic>().ok_or_else(|| {
-                let name = root_name(program, chain).unwrap_or_default();
-                Box::new(EvalAltResult::ErrorDataRace(name.to_string(), pos))
-            })?;
-            self.walk_chain(
-                program,
-                chain,
-                &chain.steps,
-                &mut guard,
-                &mut operands,
-                value,
-                pos,
-            )
-        } else {
-            self.walk_chain(
-                program,
-                chain,
-                &chain.steps,
-                &mut root,
-                &mut operands,
-                value,
-                pos,
-            )
-        };
-
-        // A place is the one root left that writes back — the entry cannot be
-        // held across the walk without borrowing the scope for its whole
-        // duration, so the walk gets a copy and this puts it back.
-        //
-        // Not a constant, which could not have been changed anyway: the walk
-        // was handed a read-only value, so anything that would have mutated it
-        // refused rather than mutating the copy.
-        //
-        // Whether the walk *failed* is not part of it. Rhai reaches the entry
-        // through a live `&mut`, so a step that mutates and then raises has
-        // already written — `a.push_then_fail()` inside a `try` leaves the
-        // push. Gating this on success would discard exactly that.
-        if chain.mutates() && !shared && !root.is_read_only() {
-            match at {
-                RootAt::Place(Site::Slot(index)) => *scope.get_mut_by_index(index) = root,
-                RootAt::Place(Site::Name(name)) => {
-                    let entry = scope
-                        .get_mut(name)
-                        .ok_or_else(|| malformed(format!("`{name}` stopped being writable")))?;
-                    *entry = root;
-                }
-                // The register, for the same reason and under the same rule:
-                // `this.push(1)` has to reach the caller's value, and the
-                // binder that owns it is what carries it back out of the frame.
-                RootAt::This => {
-                    if let Some(entry) = self.this.as_mut() {
-                        *entry = root;
-                    }
-                }
-                RootAt::Constant | RootAt::Temporary => {}
+            // A shared cell cannot be walked directly. `get_indexed_mut`
+            // refuses one outright — `unreachable!("cannot handle shared
+            // values")`, `eval/chaining.rs:461` — because rhai always reaches a
+            // root through a `Target`, whose shared arm hands over the guard
+            // rather than the cell. Walking the cell would take the host down,
+            // so this is a panic-safety fix and not only a correctness one.
+            if is_shared!(*root.as_mut()) {
+                let mut guard = root.as_mut().write_lock::<Dynamic>().ok_or_else(|| {
+                    let name = root_name(program, chain).unwrap_or_default();
+                    Box::new(EvalAltResult::ErrorDataRace(name.to_string(), pos))
+                })?;
+                self.walk_chain(
+                    program,
+                    chain,
+                    &chain.steps,
+                    &mut guard,
+                    &mut operands,
+                    value,
+                    pos,
+                )
+            } else {
+                self.walk_chain(
+                    program,
+                    chain,
+                    &chain.steps,
+                    root.as_mut(),
+                    &mut operands,
+                    value,
+                    pos,
+                )
             }
+        });
+
+        // The receiver is the one root that travels rather than being walked
+        // where it lives, so it goes back — and it goes back however the walk
+        // ended. Rhai reaches `this` through a pointer into the caller's
+        // storage, so a body that mutated and then raised has already written;
+        // restoring only on success would discard exactly that.
+        if let RootValue::This(value) = root {
+            self.this = Some(value);
         }
 
         let (out, _) = result?;
@@ -943,26 +952,15 @@ impl<'e> Vm<'e> {
     ///
     /// `ErrorVariableNotFound` is reported against the *variable*, which is why
     /// [`Root::Named`] carries a position of its own.
-    fn chain_root<'p>(
+    fn chain_root<'s>(
         &mut self,
-        program: &'p Program,
+        program: &Program,
         chain: &Chain,
-        scope: &mut Scope,
+        scope: &'s mut Scope,
         base: usize,
         operands_at: usize,
         pos: Position,
-    ) -> Result<ChainRoot<'p>, Box<EvalAltResult>> {
-        // The walk gets a copy of the entry, and cloning a `Dynamic` marks the
-        // copy read-write however the original was — so a constant has to be
-        // told it came from one. See [`ChainRoot::value`].
-        let walkable = |value: &Dynamic| {
-            if value.is_read_only() {
-                value.clone().into_read_only()
-            } else {
-                value.clone()
-            }
-        };
-
+    ) -> Result<ChainRoot<'s>, Box<EvalAltResult>> {
         match chain.root {
             Root::Local { slot, .. } => {
                 let index = base + slot as usize;
@@ -972,8 +970,7 @@ impl<'e> Vm<'e> {
                     )));
                 }
                 Ok(ChainRoot {
-                    at: RootAt::Place(Site::Slot(index)),
-                    value: walkable(scope.get_mut_by_index(index)),
+                    value: RootValue::Entry(scope.get_mut_by_index(index)),
                     pos,
                 })
             }
@@ -984,11 +981,10 @@ impl<'e> Vm<'e> {
             Root::This { pos: this_pos } => {
                 let value = self
                     .this
-                    .as_ref()
+                    .take()
                     .ok_or_else(|| Box::new(EvalAltResult::ErrorUnboundThis(this_pos)))?;
                 Ok(ChainRoot {
-                    at: RootAt::This,
-                    value: walkable(value),
+                    value: RootValue::This(value),
                     pos: this_pos,
                 })
             }
@@ -1004,15 +1000,18 @@ impl<'e> Vm<'e> {
                 // what makes writing through it an error.
                 if let Some(value) = self.resolve_var(name, scope, var_pos)? {
                     return Ok(ChainRoot {
-                        at: RootAt::Constant,
-                        value: value.into_read_only(),
+                        value: RootValue::Detached(value.into_read_only()),
                         pos: var_pos,
                     });
                 }
-                if let Some(value) = scope.get(name) {
+                // By index rather than through `Scope::get_mut`, which refuses
+                // a constant outright. A constant is walked here rather than
+                // refused: the read-only mode the entry carries is what turns
+                // away an assignment or a non-pure method, and it is the same
+                // mode rhai's `Target` into the entry would have carried.
+                if let Some(index) = scope.search(name) {
                     return Ok(ChainRoot {
-                        at: RootAt::Place(Site::Name(name)),
-                        value: walkable(value),
+                        value: RootValue::Entry(scope.get_mut_by_index(index)),
                         pos: var_pos,
                     });
                 }
@@ -1026,18 +1025,20 @@ impl<'e> Vm<'e> {
                     .iter()
                     .find_map(|module| module.get_var(name))
                     .map(|value| ChainRoot {
-                        at: RootAt::Constant,
-                        value,
+                        value: RootValue::Detached(value),
                         pos: var_pos,
                     })
                     .ok_or_else(|| missing(name, var_pos))
             }
 
+            // Moved off the operand stack rather than copied. The slot it
+            // leaves behind is unit, and nothing reads it again: `run_chain`
+            // truncates past it, and an error unwinds the stack to the frame
+            // floor.
             Root::Temporary => Ok(ChainRoot {
-                at: RootAt::Temporary,
-                value: self.stack[operands_at + chain.operands as usize]
-                    .clone()
-                    .flatten(),
+                value: RootValue::Temporary(
+                    mem::take(&mut self.stack[operands_at + chain.operands as usize]).flatten(),
+                ),
                 pos,
             }),
         }
@@ -1148,11 +1149,12 @@ impl<'e> Vm<'e> {
                         .map(|f| (f.params.clone(), f.chunk))
                 };
 
-                let mut args: Vec<Dynamic> = operands[first..first + argc].to_vec();
+                let mut args: FnArgsVec<Dynamic> =
+                    operands[first..first + argc].iter().cloned().collect();
                 let out = if let Some((params, chunk)) = compiled {
                     // The receiver is moved into the frame and moved back, so a
-                    // write through `this` lands here and the chain's own
-                    // write-back carries it the rest of the way.
+                    // write through `this` lands in the level above — which for
+                    // a chain rooted at a local is the scope entry itself.
                     let (bound, write_back) = bind_this(target);
                     let at = self.stack.len();
                     self.stack.extend(args);
@@ -1171,7 +1173,7 @@ impl<'e> Vm<'e> {
                     unbind_this(target, returned, write_back);
                     result?
                 } else {
-                    let mut call_args: Vec<&mut Dynamic> = core::iter::once(&mut *target)
+                    let mut call_args: FnArgsVec<&mut Dynamic> = core::iter::once(&mut *target)
                         .chain(args.iter_mut())
                         .collect();
                     let mut detached = Scope::new();
