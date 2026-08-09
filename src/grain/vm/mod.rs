@@ -2,8 +2,15 @@ use core::mem;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
+// Indexing survives either feature alone — a map is indexed by string, an
+// array by number — and only goes when both do. `eval/chaining.rs` is gated on
+// exactly this, and takes the getter and setter names with it.
+#[cfg(not(all(feature = "no_index", feature = "no_object")))]
 use crate::engine::{FN_IDX_GET, FN_IDX_SET};
+// Measuring a value is measuring what an array, a map or a string holds, so
+// the same pair of features takes it away — see the note above.
 #[cfg(not(feature = "unchecked"))]
+#[cfg(not(all(feature = "no_index", feature = "no_object")))]
 use crate::eval::calc_data_sizes;
 use crate::func::{get_builtin_binary_op_fn, get_builtin_op_assignment_fn};
 use crate::packages::string_basic::print_with_func;
@@ -160,6 +167,7 @@ struct ChainRoot<'a> {
 }
 
 /// What one indexing step managed.
+#[cfg(not(all(feature = "no_index", feature = "no_object")))]
 enum Indexed {
     /// Taken through a reference: the value, and whether anything wrote.
     Done(Dynamic, bool),
@@ -1056,6 +1064,14 @@ impl<'e> Vm<'e> {
         let last = rest.is_empty();
 
         match step {
+            // Without indexing of either kind there is no `[..]` to compile,
+            // so a step that says otherwise came from a corrupted artifact.
+            #[cfg(all(feature = "no_index", feature = "no_object"))]
+            Step::Index { .. } => Err(malformed(
+                "an index step, in a build with no indexing".to_string(),
+            )),
+
+            #[cfg(not(all(feature = "no_index", feature = "no_object")))]
             Step::Index {
                 operand,
                 pos: idx_pos,
@@ -1195,6 +1211,7 @@ impl<'e> Vm<'e> {
     /// a custom indexer being assigned through — handing the value back so the
     /// caller can take the long way round once this borrow has ended.
     #[allow(clippy::too_many_arguments)]
+    #[cfg(not(all(feature = "no_index", feature = "no_object")))]
     fn index_by_reference(
         &mut self,
         program: &Program,
@@ -1281,6 +1298,7 @@ impl<'e> Vm<'e> {
     /// An op-assignment has to read the current value back through the getter
     /// first, and rhai *ignores* a getter that fails here — a write-only
     /// indexer takes the new value as-is (`eval/chaining.rs:812`).
+    #[cfg(not(all(feature = "no_index", feature = "no_object")))]
     fn assign_through_indexer(
         &mut self,
         program: &Program,
@@ -1310,6 +1328,7 @@ impl<'e> Vm<'e> {
     }
 
     /// Call the index getter, which unlike the setter is allowed to fail.
+    #[cfg(not(all(feature = "no_index", feature = "no_object")))]
     fn call_indexer(
         &mut self,
         name: &str,
@@ -1340,6 +1359,7 @@ impl<'e> Vm<'e> {
     /// A custom indexer returns a value, so a mutation below it landed in a
     /// temporary; this is the replay rhai does at `eval/chaining.rs:744`,
     /// including swallowing "this type cannot be indexed" the way it does.
+    #[cfg(not(all(feature = "no_index", feature = "no_object")))]
     fn call_indexer_set(
         &mut self,
         target: &mut Dynamic,
@@ -2494,13 +2514,23 @@ impl<'e> Vm<'e> {
         // running total is never read and measuring it is pure cost. The push
         // above still happens: the stack is frame-floored either way, and the
         // instruction that drops it does not know which build it is in.
-        #[cfg(feature = "unchecked")]
+        //
+        // Losing both `no_index` and `no_object` is the other way to get here:
+        // with no literal to build there is nothing to measure, and the
+        // measurement itself goes with the containers.
+        #[cfg(any(
+            feature = "unchecked",
+            all(feature = "no_index", feature = "no_object")
+        ))]
         {
             let _ = (map, pos);
             Ok(())
         }
 
-        #[cfg(not(feature = "unchecked"))]
+        #[cfg(not(any(
+            feature = "unchecked",
+            all(feature = "no_index", feature = "no_object")
+        )))]
         {
             // Rhai skips the whole measurement when no limit could reject it,
             // and measuring is a walk of the value — so this is the difference
