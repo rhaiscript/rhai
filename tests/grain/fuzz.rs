@@ -98,6 +98,7 @@ fn mutated_artifacts_load_or_fail_but_never_misbehave() {
     let mut engine = corpus::engine();
     engine.set_max_operations(10_000);
     engine.set_max_string_size(4096);
+    #[cfg(not(feature = "no_index"))]
     engine.set_max_array_size(1024);
 
     const SEED: u64 = 0x5eed_1234_abcd_0001;
@@ -313,6 +314,7 @@ fn generated_scripts_agree_with_the_walker() {
     // a way no corpus case is, and there is no reason to wait for it.
     let mut engine = corpus::engine();
     engine.set_max_operations(200_000);
+    #[cfg(not(feature = "no_index"))]
     engine.set_max_array_size(2048);
     engine.set_max_string_size(8192);
     // Pinned, because rhai's defaults for these are `debug_assertions`-gated —

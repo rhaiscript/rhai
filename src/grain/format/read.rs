@@ -442,6 +442,9 @@ fn get_constant(cursor: &mut Cursor, depth: usize) -> Result<Dynamic, ReadError>
 
         constant::STRING => Dynamic::from(ImmutableString::from(cursor.str()?)),
 
+        // A build with no type for one cannot decode it into anything; the tag
+        // falls through to the unknown-tag arm, which is the truthful answer.
+        #[cfg(not(feature = "no_index"))]
         constant::ARRAY => {
             // The declared length is untrusted, so nothing is reserved from it;
             // a short file runs out of bytes instead of out of memory.
@@ -453,6 +456,7 @@ fn get_constant(cursor: &mut Cursor, depth: usize) -> Result<Dynamic, ReadError>
             Dynamic::from(array)
         }
 
+        #[cfg(not(feature = "no_object"))]
         constant::MAP => {
             let count = cursor.uvarint()?;
             let mut map = rhai::Map::new();
@@ -473,6 +477,7 @@ fn get_constant(cursor: &mut Cursor, depth: usize) -> Result<Dynamic, ReadError>
             Dynamic::from(start..=bounded_int(cursor.ivarint()?)?)
         }
 
+        #[cfg(not(feature = "no_index"))]
         constant::BLOB => {
             let len = usize::try_from(cursor.uvarint()?).map_err(|_| ReadError::Truncated)?;
             Dynamic::from(cursor.take(len)?.to_vec())

@@ -747,10 +747,15 @@ impl Lowering {
         Some(LoweredFn {
             name: self.push_name(def.name.clone()),
             params,
+            // A typed `this` is a method on a custom type, which is exactly
+            // what `no_object` removes — rhai drops the field with it.
+            #[cfg(not(feature = "no_object"))]
             this_type: def
                 .this_type
                 .as_ref()
                 .map(|typed| self.push_name(typed.clone())),
+            #[cfg(feature = "no_object")]
+            this_type: None,
             first_op,
             op_count: self.code.len() - first_op,
         })
@@ -1402,6 +1407,7 @@ impl Lowering {
             // entries still to evaluate (`ast/expr.rs:283`). An all-constant
             // map is folded into a `DynamicConstant` and never arrives here;
             // one with a single computed value does, and used to fragment.
+            #[cfg(not(feature = "no_object"))]
             Expr::Map(entries, ..) if entries.0.len() <= u16::MAX as usize => {
                 let (computed, template) = &**entries;
                 let template = Dynamic::from_map(template.clone());

@@ -141,6 +141,7 @@ fn a_caller_variable_in_first_argument_position_is_taken_by_reference() {
         },
         true,
     );
+    #[cfg(not(feature = "no_object"))]
     agree(
         "bump(w); w.level",
         |s| {
@@ -178,6 +179,7 @@ fn a_caller_variable_in_first_argument_position_is_taken_by_reference() {
 /// else becomes a read-only value (`eval/expr.rs:120-155`). One case per arm of
 /// that, because each fails differently.
 #[test]
+#[cfg(not(any(feature = "no_index", feature = "no_object")))]
 fn a_chain_can_be_rooted_at_a_caller_variable() {
     let array = || vec![lit(1)];
 
@@ -264,6 +266,7 @@ fn a_chain_can_be_rooted_at_a_caller_variable() {
 
 /// The other two things a name can resolve to, neither of which is a place.
 #[test]
+#[cfg(not(any(feature = "no_index", feature = "no_object")))]
 fn a_chain_rooted_at_a_resolved_name_cannot_be_written_through() {
     let mut engine = corpus::engine();
     engine.on_var(|name, _, _| {
@@ -304,7 +307,7 @@ fn a_chain_rooted_at_a_resolved_name_cannot_be_written_through() {
 /// through the flattening one, so even the right variable was captured by
 /// value: a write afterwards was invisible to the closure.
 #[test]
-#[cfg(not(feature = "no_function"))]
+#[cfg(not(any(feature = "no_function", feature = "no_object")))]
 fn a_closure_can_capture_a_caller_variable() {
     let seed = |scope: &mut Scope| {
         // Two of them, and the interesting one is not last: the index bug is
@@ -335,6 +338,7 @@ fn a_local_shadows_the_caller_without_disturbing_it() {
     );
     // And the other order: read before the local exists, so the same name is
     // two different variables in one script.
+    #[cfg(not(feature = "no_index"))]
     agree(
         "let first = brightness; let brightness = 1; [first, brightness]",
         |s| {
@@ -374,7 +378,7 @@ fn a_name_that_is_nowhere_is_reported_the_same_way() {
 /// (`eval/expr.rs:62`). Reported separately — it predates named variables, and
 /// the fix is about residuals rather than about this.
 #[test]
-#[cfg(not(feature = "no_function"))]
+#[cfg(not(any(feature = "no_function", feature = "no_object")))]
 fn a_script_function_name_is_not_a_variable() {
     let engine = corpus::engine();
     let ast = engine.compile("fn helper() { 1 } let f = helper; f.call()").expect("must compile");
@@ -573,6 +577,7 @@ fn a_resolver_that_grows_the_scope_forces_a_search() {
 /// which is how `load_named` marks a resolver's answer. The alternative would
 /// be running the resolver a second time, and a host can see that.
 #[test]
+#[cfg(not(feature = "no_index"))]
 fn a_resolved_receiver_is_not_the_scope_entry_it_shadows() {
     let mut engine = corpus::engine();
     engine.on_var(|name, _, _| {
@@ -720,7 +725,7 @@ fn call_fn_mirrors_the_engines() {
 /// compiled program and for the same program read back, or one of the two
 /// paths quietly loses its callbacks.
 #[test]
-#[cfg(not(feature = "no_function"))]
+#[cfg(not(any(feature = "no_function", feature = "no_object")))]
 fn the_compiler_says_whether_a_program_makes_function_pointers() {
     let engine = corpus::engine();
 

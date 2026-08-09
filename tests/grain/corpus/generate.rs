@@ -331,7 +331,12 @@ impl Generator {
 
     fn for_loop(&mut self) -> String {
         let item = self.name("it");
+        // A range is the one iterable every build has; an array literal is not
+        // syntax under `no_index`.
+        #[cfg(not(feature = "no_index"))]
         let iterable = if self.rng.chance(2) { format!("0..{}", 1 + self.rng.below(4)) } else { self.array() };
+        #[cfg(feature = "no_index")]
+        let iterable = format!("0..{}", 1 + self.rng.below(4));
 
         self.vars.push(item.clone());
         self.loops += 1;
@@ -384,14 +389,29 @@ impl Generator {
     /// Empty matters on its own: it contributes no size check, so nesting one
     /// inside a literal that does is what catches a running total being popped
     /// by the wrong literal.
+    #[cfg(not(feature = "no_index"))]
     fn array(&mut self) -> String {
         let items: Vec<String> = (0..self.rng.below(4)).map(|_| self.element()).collect();
         format!("[{}]", items.join(", "))
     }
 
+    #[cfg(not(feature = "no_object"))]
     fn map(&mut self) -> String {
         let entries: Vec<String> = (0..self.rng.below(4)).map(|n| format!("k{n}: {}", self.element())).collect();
         format!("#{{ {} }}", entries.join(", "))
+    }
+
+    /// An array or a map, whichever kind of literal this build has syntax for.
+    #[cfg(not(all(feature = "no_index", feature = "no_object")))]
+    fn container(&mut self) -> String {
+        #[cfg(not(any(feature = "no_index", feature = "no_object")))]
+        if self.rng.chance(2) {
+            return self.array();
+        }
+        #[cfg(not(feature = "no_object"))]
+        return self.map();
+        #[cfg(feature = "no_object")]
+        return self.array();
     }
 
     /// What goes inside a literal.
@@ -399,10 +419,11 @@ impl Generator {
     /// Sometimes another literal, so nesting is reached — an all-constant one
     /// is folded away by the optimizer before the compiler sees it, and only a
     /// computed element keeps the literal alive to run time.
+    #[cfg(not(all(feature = "no_index", feature = "no_object")))]
     fn element(&mut self) -> String {
         if self.depth < MAX_DEPTH && self.rng.chance(4) {
             self.depth += 1;
-            let out = if self.rng.chance(2) { self.array() } else { self.map() };
+            let out = self.container();
             self.depth -= 1;
             return out;
         }
@@ -472,22 +493,39 @@ impl Generator {
             // `!` takes a condition rather than any expression: rhai rejects
             // `!9` at parse time the same way it rejects `if 9`.
             7 => format!("(!{})", self.condition()),
+            // A literal is not syntax without the type behind it, and the arm
+            // falls through to the last one, as the float atom does.
+            #[cfg(not(feature = "no_index"))]
             8 => self.array(),
+            #[cfg(not(feature = "no_object"))]
             9 => self.map(),
+            // A chain over each of the three `Root` variants: a declared
+            // variable, a name that is declared nowhere — which is what a
+            // caller would have supplied, and here resolves to nothing — and a
+            // literal. Between them `no_index` and `no_object` remove every
+            // step a chain can take, so there is no chain left to generate.
+            #[cfg(not(all(feature = "no_index", feature = "no_object")))]
             10 => {
-                // A chain over each of the three `Root` variants: a declared
-                // variable, a name that is declared nowhere — which is what a
-                // caller would have supplied, and here resolves to nothing —
-                // and a literal.
+                // An array root, because the index step below needs one — a map
+                // refuses a numeric index at parse time. Where there is no
+                // array, there is no index step either.
                 let root = match self.variable() {
                     _ if self.rng.chance(6) => "absent".to_string(),
                     Some(var) if self.rng.chance(2) => var,
+                    #[cfg(not(feature = "no_index"))]
                     _ => self.array(),
+                    #[cfg(feature = "no_index")]
+                    _ => self.map(),
                 };
                 match self.rng.below(3) {
+                    #[cfg(not(feature = "no_index"))]
                     0 => format!("{root}[{}]", self.rng.below(4)),
+                    #[cfg(not(feature = "no_object"))]
                     1 => format!("{root}.{}()", self.rng.one_of(METHODS)),
+                    #[cfg(not(feature = "no_object"))]
                     _ => format!("{root}.a"),
+                    #[cfg(feature = "no_object")]
+                    _ => format!("{root}[{}]", self.rng.below(4)),
                 }
             }
             11 if !self.interpolating => {
@@ -507,7 +545,16 @@ impl Generator {
                 self.vars.push(param.clone());
                 let body = self.expression();
                 self.vars.pop();
-                format!("(|{param}| {body}).call({})", self.atom())
+                // `.call` is method syntax; `no_object` leaves the function-call
+                // form of the same native, which is what it rewrites to anyway.
+                #[cfg(not(feature = "no_object"))]
+                {
+                    format!("(|{param}| {body}).call({})", self.atom())
+                }
+                #[cfg(feature = "no_object")]
+                {
+                    format!("call(|{param}| {body}, {})", self.atom())
+                }
             }
             #[cfg(feature = "no_function")]
             _ => self.atom(),
@@ -530,7 +577,13 @@ impl Generator {
     /// wherever there is one to use — see [`NATIVES`].
     fn native_call(&mut self) -> String {
         let (name, arity) = NATIVES[self.rng.below(NATIVES.len())];
+        // Falling back to an atom rather than a literal where there is no
+        // variable: most of `NATIVES` will not resolve against one, and a
+        // native that is not found is an error both sides give alike.
+        #[cfg(not(feature = "no_index"))]
         let receiver = self.variable().unwrap_or_else(|| self.array());
+        #[cfg(feature = "no_index")]
+        let receiver = self.variable().unwrap_or_else(|| self.atom());
         let rest: Vec<String> = (1..arity).map(|_| self.atom()).collect();
 
         if rest.is_empty() {

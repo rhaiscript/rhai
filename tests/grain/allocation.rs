@@ -26,7 +26,7 @@
 //! The fixtures are one build's source, checked in byte-identical to the script
 //! the published figures came from, so the whole binary is a default-build
 //! measurement — see the note above `allocation_footprint`.
-#![cfg(not(any(feature = "no_float", feature = "no_function")))]
+#![cfg(not(any(feature = "no_float", feature = "no_function", feature = "no_index", feature = "no_object")))]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicIsize, Ordering};

@@ -40,6 +40,9 @@ pub struct Widget {
     pub cells: Vec<INT>,
 }
 
+/// A `Widget` behind a getter that hands back a *value*, which is the whole
+/// point of it — and so only exists where a property does.
+#[cfg(not(feature = "no_object"))]
 #[derive(Debug, Clone, Default)]
 pub struct Holder {
     pub inner: Widget,
@@ -56,17 +59,6 @@ pub fn engine() -> rhai::Engine {
     engine
         .register_type_with_name::<Widget>("Widget")
         .register_fn("widget", |level: INT| Widget { level, cells: vec![10, 20, 30] })
-        .register_get_set("level", |w: &mut Widget| w.level, |w: &mut Widget, v: INT| w.level = v)
-        // Returning an error rather than panicking, because a panic in a
-        // registered function takes the test process with it.
-        .register_indexer_get_set(
-            |w: &mut Widget, i: INT| -> Result<INT, Box<rhai::EvalAltResult>> { w.cells.get(i as usize).copied().ok_or_else(|| out_of_range(i, w.cells.len())) },
-            |w: &mut Widget, i: INT, v: INT| -> Result<(), Box<rhai::EvalAltResult>> {
-                let len = w.cells.len();
-                *w.cells.get_mut(i as usize).ok_or_else(|| out_of_range(i, len))? = v;
-                Ok(())
-            },
-        )
         // Takes the receiver by reference, so rhai counts it as a method and
         // writes a temporary back afterwards.
         .register_fn("bump", |w: &mut Widget| w.level += 1)
@@ -82,10 +74,30 @@ pub fn engine() -> rhai::Engine {
             Err("bump_then_fail".into())
         });
 
-    engine
-        .register_type_with_name::<Holder>("Holder")
-        .register_fn("holder", |level: INT| Holder { inner: Widget { level, cells: vec![1, 2, 3] } })
-        .register_get_set("inner", |h: &mut Holder| h.inner.clone(), |h: &mut Holder, w: Widget| h.inner = w);
+    // A property is reached with `.`, which `no_object` removes; an indexer
+    // with `[..]`, which `no_index` does. Registered apart from the chain
+    // above so each can go with the feature that takes its syntax away.
+    #[cfg(not(feature = "no_object"))]
+    engine.register_get_set("level", |w: &mut Widget| w.level, |w: &mut Widget, v: INT| w.level = v);
+    // Returning an error rather than panicking, because a panic in a
+    // registered function takes the test process with it.
+    #[cfg(not(all(feature = "no_index", feature = "no_object")))]
+    engine.register_indexer_get_set(
+        |w: &mut Widget, i: INT| -> Result<INT, Box<rhai::EvalAltResult>> { w.cells.get(i as usize).copied().ok_or_else(|| out_of_range(i, w.cells.len())) },
+        |w: &mut Widget, i: INT, v: INT| -> Result<(), Box<rhai::EvalAltResult>> {
+            let len = w.cells.len();
+            *w.cells.get_mut(i as usize).ok_or_else(|| out_of_range(i, len))? = v;
+            Ok(())
+        },
+    );
+
+    #[cfg(not(feature = "no_object"))]
+    {
+        engine
+            .register_type_with_name::<Holder>("Holder")
+            .register_fn("holder", |level: INT| Holder { inner: Widget { level, cells: vec![1, 2, 3] } })
+            .register_get_set("inner", |h: &mut Holder| h.inner.clone(), |h: &mut Holder, w: Widget| h.inner = w);
+    }
 
     engine
 }
@@ -156,6 +168,139 @@ pub fn applies_to_this_build(name: &str) -> bool {
                 | "try_catch_does_not_swallow_return"
                 | "try_does_not_catch_return"
                 | "type_of_a_pointer"
+        )
+    {
+        return false;
+    }
+    // `no_index` removes the `[..]` operator outright — array and blob
+    // literals, indexing, slicing a string, and every native that hands one
+    // back or takes one. There is no prefix that separates them: an array is
+    // incidental to most of these, which are about receivers, temporaries and
+    // chain roots.
+    #[cfg(feature = "no_index")]
+    if matches!(
+        name,
+        "array_literal"
+            | "array_methods"
+            | "bitfield_assign"
+            | "call_style_argument_replaces_the_receiver"
+            | "call_style_argument_writes_the_receiver"
+            | "call_style_constant_receiver"
+            | "call_style_mutating_native"
+            | "call_style_pure_native"
+            | "call_style_receiver_is_also_an_argument"
+            | "call_style_receiver_twice_over"
+            | "call_style_shared_receiver"
+            | "closure_call_mutates_an_array"
+            | "closure_filter_binds_this"
+            | "closure_for_each_binds_this"
+            | "closure_in_filter"
+            | "closure_in_map"
+            | "closure_map_binds_this"
+            | "closure_map_takes_an_argument"
+            | "closure_shared_chain_root"
+            | "empty_literals_nested_in_computed_ones"
+            | "empty_map_nested_in_a_computed_map"
+            | "error_array_bounds"
+            | "error_host_index_bounds"
+            | "error_index_into_an_unindexable_step"
+            | "error_index_into_an_unindexable_step_deep"
+            | "error_no_function_for_the_receiver"
+            | "error_property_on_a_temporary"
+            | "error_temp_root_index_runs_first"
+            | "error_temp_root_out_of_bounds"
+            | "error_type_mismatch"
+            | "for_array"
+            | "for_over_captured_array"
+            | "for_return_from_body"
+            | "for_with_counter"
+            | "host_index_get"
+            | "host_index_set"
+            | "host_mutation_before_a_failure_survives_in_an_array"
+            | "host_temp_index_set"
+            | "index_assign_array"
+            | "index_assign_nested"
+            | "interpolation_of_containers"
+            | "is_shared_after_capture"
+            | "map_computed_in_array"
+            | "map_read_absent_through_a_chain"
+            | "map_read_of_absent_key_does_not_create_it"
+            | "map_read_of_absent_key_is_not_visible_to_a_closure"
+            | "nested_containers"
+            | "op_assign_indexed"
+            | "string_char_assign"
+            | "string_slice_inclusive"
+            | "string_slice_read"
+            | "temp_root_array_index"
+            | "temp_root_array_method"
+            | "temp_root_call"
+            | "temp_root_mutating_method"
+            | "temp_root_nested"
+            | "this_as_first_argument"
+            | "this_as_first_argument_pure"
+            | "this_index"
+            | "this_index_assign"
+            | "this_method_arity"
+            | "this_method_step"
+            | "try_catch_native_error"
+            | "type_of_a_container"
+    ) {
+        return false;
+    }
+    // `no_object` removes the `.` operator, so a map literal, a property, a
+    // method call and everything reached through one all go with it — which is
+    // most of what a chain is for.
+    #[cfg(feature = "no_object")]
+    if name.starts_with("this_")
+        || name.starts_with("host_")
+        || name.starts_with("map_")
+        || name.starts_with("temp_root_")
+        || matches!(
+            name,
+            "array_methods"
+                | "call_style_mutating_host_type"
+                | "call_style_shared_receiver"
+                | "char_ops"
+                | "closure_call_mutates_an_array"
+                | "closure_call_on_a_local_inline"
+                | "closure_call_on_a_local_reads"
+                | "closure_call_on_a_local_writes_back"
+                | "closure_call_on_a_temporary"
+                | "closure_call_on_this"
+                | "closure_capture_mutate"
+                | "closure_capture_read"
+                | "closure_filter_binds_this"
+                | "closure_for_each_binds_this"
+                | "closure_in_filter"
+                | "closure_in_map"
+                | "closure_map_binds_this"
+                | "closure_map_takes_an_argument"
+                | "closure_shared_op_assign"
+                | "closure_shared_write"
+                | "empty_literals_nested_in_computed_ones"
+                | "empty_map_nested_in_a_computed_map"
+                | "error_fn_ptr_unknown_name"
+                | "error_index_into_an_unindexable_step_deep"
+                | "error_map_write_through_an_absent_key"
+                | "error_method_on_a_variable"
+                | "error_op_assign_undefined_for_types"
+                | "error_operator_undefined_for_types"
+                | "error_property_deep_in_a_chain"
+                | "error_property_on_a_temporary"
+                | "error_property_on_a_variable"
+                | "error_this_is_not_inherited"
+                | "fn_mutating_method"
+                | "fn_ptr_call"
+                | "fn_ptr_curried"
+                | "fn_ptr_from_dynamic_name"
+                | "fn_ptr_to_native"
+                | "index_assign_nested"
+                | "interpolation_of_containers"
+                | "nested_containers"
+                | "property_assign_deep"
+                | "string_ops"
+                | "try_catch_native_error"
+                | "type_of_method_style"
         )
     {
         return false;

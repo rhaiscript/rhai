@@ -14,14 +14,16 @@ use crate::types::fn_ptr::FnPtrType;
 use crate::ast::Expr;
 #[cfg(not(feature = "no_function"))]
 use crate::types::dynamic::Variant;
+#[cfg(not(feature = "no_index"))]
+use crate::Array;
 #[cfg(not(feature = "no_function"))]
 use crate::CallFnOptions;
+#[cfg(not(feature = "no_object"))]
+use crate::Map;
 use crate::{
     eval::Caches, eval::GlobalRuntimeState, Dynamic, Engine, EvalAltResult, EvalContext, Scope,
 };
-use crate::{
-    Array, FnPtr, ImmutableString, Map, NativeCallContext, Position, ThinVec, FUNC_TO_STRING, INT,
-};
+use crate::{FnPtr, ImmutableString, NativeCallContext, Position, ThinVec, FUNC_TO_STRING, INT};
 
 mod callback;
 
@@ -1391,10 +1393,18 @@ impl<'e> Vm<'e> {
         setter: u32,
     ) -> Result<(Dynamic, bool), Box<EvalAltResult>> {
         let last = rest.is_empty();
+        // The key names a map entry; a host type is reached through the getter
+        // and setter names instead, which are looked up below.
+        #[cfg(not(feature = "no_object"))]
         let key = program
             .name(name)
             .ok_or_else(|| malformed(format!("no name {name}")))?;
+        #[cfg(feature = "no_object")]
+        let _ = name;
 
+        // A map is the one property holder that is not a host type, and
+        // `no_object` removes both it and the syntax that would reach one.
+        #[cfg(not(feature = "no_object"))]
         if target.is_map() {
             let mut map = target
                 .write_lock::<Map>()
@@ -2440,6 +2450,7 @@ impl<'e> Vm<'e> {
     /// Unit, unless the host asked for the strict reading — which is a whole
     /// engine option (`fail_on_invalid_map_property`) rather than anything the
     /// script says, so it has to be consulted rather than assumed.
+    #[cfg(not(feature = "no_object"))]
     fn absent_key(&self, key: &str, pos: Position) -> VmResult {
         if self.engine.fail_on_invalid_map_property() {
             Err(Box::new(EvalAltResult::ErrorPropertyNotFound(
@@ -2633,6 +2644,9 @@ impl<'e> Vm<'e> {
     /// for a `throw`, and a map of the error's parts for anything else. The
     /// unwrapping matters — a `throw` inside a called function arrives wrapped
     /// in `ErrorInFunctionCall`, and rhai still binds the bare value.
+    ///
+    /// Under `no_object` there is no map to build one in, and rhai binds the
+    /// message alone (`eval/stmt.rs:815`).
     fn catch_value(&self, err: &mut Box<EvalAltResult>, wanted: bool) -> Dynamic {
         if !wanted {
             return Dynamic::UNIT;
@@ -2641,23 +2655,32 @@ impl<'e> Vm<'e> {
             return value.clone();
         }
 
-        let mut map = Map::new();
         // Read *and cleared*, as rhai does, so the message below carries no
         // trailing position and a re-raise starts from the catch site.
-        let pos = err.take_position();
+        #[cfg(feature = "no_object")]
+        {
+            let _ = err.take_position();
+            err.to_string().into()
+        }
 
-        map.insert("message".into(), err.to_string().into());
-        if let Some(source) = &self.global.source {
-            map.insert("source".into(), source.into());
+        #[cfg(not(feature = "no_object"))]
+        {
+            let mut map = Map::new();
+            let pos = err.take_position();
+
+            map.insert("message".into(), err.to_string().into());
+            if let Some(source) = &self.global.source {
+                map.insert("source".into(), source.into());
+            }
+            if !pos.is_none() {
+                let line = pos.line().unwrap_or(0) as INT;
+                map.insert("line".into(), line.into());
+                let column = pos.position().unwrap_or(0) as INT;
+                map.insert("position".into(), column.into());
+            }
+            err.dump_fields(&mut map);
+            map.into()
         }
-        if !pos.is_none() {
-            let line = pos.line().unwrap_or(0) as INT;
-            map.insert("line".into(), line.into());
-            let column = pos.position().unwrap_or(0) as INT;
-            map.insert("position".into(), column.into());
-        }
-        err.dump_fields(&mut map);
-        map.into()
     }
 
     /// The dispatch loop. `start` is the chunk's entry, or a catch block's
@@ -3145,6 +3168,9 @@ impl<'e> Vm<'e> {
                     self.stack[to..].rotate_right(1);
                 }
 
+                // Emitted only for a literal, which is not syntax under the
+                // feature that removes the type.
+                #[cfg(not(feature = "no_index"))]
                 code::tag::MAKE_ARRAY => {
                     let len = small(1)? as usize;
                     let first = self
@@ -3171,6 +3197,7 @@ impl<'e> Vm<'e> {
                     self.stack.push(Dynamic::from_array(array));
                 }
 
+                #[cfg(not(feature = "no_object"))]
                 code::tag::MAKE_MAP => {
                     let len = small(1)? as usize;
                     let first = self
@@ -3840,6 +3867,7 @@ mod tests {
     /// A chain rooted at `this` mutates the caller's value rather than a copy.
     /// That is the whole reason `Root::This` is not `Root::Temporary`.
     #[test]
+    #[cfg(not(feature = "no_index"))]
     fn a_chain_rooted_at_this_mutates_the_hosts_value() {
         let program = program_with_chains(
             &[&[Op::Const(0), Op::Chain(0), Op::Return]],
@@ -3870,6 +3898,7 @@ mod tests {
     /// `f(this, ..)` is rhai's method-call rewrite, so the receiver goes by
     /// reference and a mutating native reaches the caller's value.
     #[test]
+    #[cfg(not(feature = "no_index"))]
     fn this_as_a_first_argument_goes_by_reference() {
         let program = one(
             &[

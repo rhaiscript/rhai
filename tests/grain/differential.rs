@@ -98,7 +98,7 @@ fn harness_detects_a_real_difference() {
     assert_ne!(run_stock(&engine, "let a = 1; a"), run_stock(&engine, "1"), "differing leftover scope must compare unequal",);
     // `no_position` compiles positions out, so there is no such thing as the
     // same error at a different one and nothing here to detect.
-    #[cfg(not(feature = "no_position"))]
+    #[cfg(not(any(feature = "no_position", feature = "no_index")))]
     assert_ne!(run_stock(&engine, "let a = [1]; a[9]"), run_stock(&engine, "let a = [1];  a[9]"), "the same error at a different position must compare unequal",);
 }
 

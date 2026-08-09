@@ -2,7 +2,11 @@ use core::ops::{Range, RangeInclusive};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
-use rhai::{tokenizer::Token, Array, Blob, Dynamic, Map, INT};
+#[cfg(not(feature = "no_object"))]
+use rhai::Map;
+use rhai::{tokenizer::Token, Dynamic, INT};
+#[cfg(not(feature = "no_index"))]
+use rhai::{Array, Blob};
 
 use crate::grain::bytecode::{AssignOp, Chain, Root, Step, Tail};
 use crate::grain::format::abi::Abi;
@@ -389,6 +393,7 @@ fn put_constant(out: &mut Vec<u8>, value: &Dynamic) -> Result<(), String> {
         put_str(out, text.as_str());
         return Ok(());
     }
+    #[cfg(not(feature = "no_index"))]
     if value.is_array() {
         let array = value
             .read_lock::<Array>()
@@ -400,6 +405,7 @@ fn put_constant(out: &mut Vec<u8>, value: &Dynamic) -> Result<(), String> {
         }
         return Ok(());
     }
+    #[cfg(not(feature = "no_object"))]
     if value.is_map() {
         let map = value
             .read_lock::<Map>()
@@ -412,6 +418,7 @@ fn put_constant(out: &mut Vec<u8>, value: &Dynamic) -> Result<(), String> {
         }
         return Ok(());
     }
+    #[cfg(not(feature = "no_index"))]
     if value.is_blob() {
         let blob = value
             .read_lock::<Blob>()

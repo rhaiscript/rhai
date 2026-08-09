@@ -1,6 +1,10 @@
 use core::ops::{Range, RangeInclusive};
 
-use rhai::{Array, Blob, Dynamic, Map, INT};
+#[cfg(not(feature = "no_object"))]
+use rhai::Map;
+#[cfg(not(feature = "no_index"))]
+use rhai::{Array, Blob};
+use rhai::{Dynamic, INT};
 
 /// Whether a constant can live in the artifact's constant pool.
 ///
@@ -29,6 +33,9 @@ pub(crate) fn is_poolable(value: &Dynamic) -> bool {
         return true;
     }
 
+    // Arrays and blobs go with `no_index`, maps with `no_object` — the same
+    // reason as the float above: no type, and no question to ask about one.
+    #[cfg(not(feature = "no_index"))]
     if value.is_array() {
         return value
             .read_lock::<Array>()
@@ -36,6 +43,7 @@ pub(crate) fn is_poolable(value: &Dynamic) -> bool {
             .unwrap_or(false);
     }
 
+    #[cfg(not(feature = "no_object"))]
     if value.is_map() {
         return value
             .read_lock::<Map>()
@@ -43,6 +51,7 @@ pub(crate) fn is_poolable(value: &Dynamic) -> bool {
             .unwrap_or(false);
     }
 
+    #[cfg(not(feature = "no_index"))]
     if value.is_blob() {
         return value.read_lock::<Blob>().is_some();
     }
