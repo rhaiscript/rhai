@@ -39,6 +39,7 @@ fn encoded_size(node: &ASTNode) -> (&'static str, usize) {
             // anything else is an index into the constant pool. Either way two
             // bytes, which is why they are not split here.
             Expr::IntegerConstant(..) => ("int", 2),
+            #[cfg(not(feature = "no_float"))]
             Expr::FloatConstant(..) => ("float", 2),
             Expr::StringConstant(..) => ("string", 2),
             Expr::CharConstant(..) => ("char", 2),
@@ -81,6 +82,7 @@ fn encoded_size(node: &ASTNode) -> (&'static str, usize) {
 
             // Cannot be lowered at all — the handler is looked up by string
             // against a live Engine. Priced as the residual it would stay.
+            #[cfg(not(feature = "no_custom_syntax"))]
             Expr::Custom(..) => ("custom syntax", 3),
 
             // `Expr` is #[non_exhaustive]. A variant added by a rhai upgrade

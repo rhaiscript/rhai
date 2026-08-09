@@ -713,6 +713,7 @@ impl Lowering {
     #[cfg(not(feature = "no_function"))]
     fn function(&mut self, def: &ScriptFuncDef) -> Option<LoweredFn> {
         let first_op = self.code.len();
+        let first_residual = self.residuals.len();
         let saved_slots = mem::take(&mut self.slots);
         let saved_loops = mem::take(&mut self.loops);
         // Per-function, like the slots: one body the model cannot handle must
@@ -739,8 +740,16 @@ impl Lowering {
         if !lowered {
             // Roll back whatever the attempt emitted, so a function that could
             // not be lowered leaves no unreachable instructions behind.
+            //
+            // The fragments go with the instructions that referred to them.
+            // Rhai keeps its own copy of a body this turned down, so it is the
+            // walker that evaluates what is in there — a fragment left here
+            // would be one nothing can reach, counted against a program that
+            // does not need it. Only this function's are dropped: the ones
+            // below `first_residual` belong to code that is staying.
             self.code.truncate(first_op);
             self.positions.truncate(first_op);
+            self.residuals.truncate(first_residual);
             return None;
         }
 

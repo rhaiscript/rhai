@@ -29,7 +29,7 @@ mod grain {
     // against `follow.rhai` — a checked-in fixture, so a build without the
     // syntax it is written in has nothing to price.
     #[cfg(feature = "internals")]
-    #[cfg(not(any(feature = "no_function", feature = "no_index", feature = "no_object")))]
+    #[cfg(not(any(feature = "no_float", feature = "no_function", feature = "no_index", feature = "no_object")))]
     mod projection;
     mod scope;
 }

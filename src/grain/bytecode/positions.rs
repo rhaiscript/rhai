@@ -220,7 +220,12 @@ mod tests {
 
     /// Attaching the wrong program's table would silently misreport every
     /// error, which is worse than reporting none.
+    ///
+    /// Under `no_position` every `Position` is `NONE`, so `sample()` collapses
+    /// to a stripped table — which any chunk length accepts, there being no
+    /// addresses in it to fall past the end of.
     #[test]
+    #[cfg(not(feature = "no_position"))]
     fn a_table_from_another_program_is_refused() {
         let table = sample().to_table();
         assert!(matches!(

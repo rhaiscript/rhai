@@ -236,7 +236,10 @@ fn quietly<T>(body: impl FnOnce() -> T) -> Option<T> {
 /// Pinned because `generated_scripts_agree_with_the_walker` and both `cargo
 /// fuzz` targets have to skip these, and every one of those skips should go the
 /// day this test starts failing.
+///
+/// The bug is the optimizer's, so `no_optimize` is the one build without it.
 #[test]
+#[cfg(not(feature = "no_optimize"))]
 fn rhai_drops_a_local_its_optimizer_still_refers_to() {
     // The read lands on `a`, so rhai answers 1 where the script says 99.
     const WRONG: &str = "let a = 1; { let b = 99; switch b { _ => b } }";
@@ -280,7 +283,10 @@ fn rhai_drops_a_local_its_optimizer_still_refers_to() {
 /// it and disagreeing with it says the AST is at fault rather than the
 /// lowering. Only ever asked about a divergence that already looks like one.
 fn agree_unoptimised(source: &str) -> bool {
+    #[allow(unused_mut)]
     let mut plain = corpus::engine();
+    // `no_optimize` builds one that way to begin with.
+    #[cfg(not(feature = "no_optimize"))]
     plain.set_optimization_level(rhai::OptimizationLevel::None);
     let Ok(ast) = plain.compile(source) else {
         return false;
