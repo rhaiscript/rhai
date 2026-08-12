@@ -794,10 +794,16 @@ impl<'e> Vm<'e> {
         result
     }
 
+    #[inline(always)]
+    #[must_use]
     fn pop(&mut self) -> Result<Dynamic, Box<EvalAltResult>> {
-        self.stack
+        #[cfg(not(feature = "unchecked"))]
+        return self
+            .stack
             .pop()
-            .ok_or_else(|| malformed("operand stack underflow".to_string()))
+            .ok_or_else(|| malformed("operand stack underflow".to_string()));
+        #[cfg(feature = "unchecked")]
+        return Ok(self.stack.pop().expect("operand stack underflow"));
     }
 
     /// `reached` tracks the instruction being executed, so a failure can be
@@ -2770,8 +2776,12 @@ impl<'e> Vm<'e> {
             // and nothing allocated. The bounds checks are what let this run
             // straight off an artifact without trusting it; the verifier has
             // already made them unreachable for anything that loaded.
+            #[cfg(not(feature = "unchecked"))]
             let width = code::width(code, pc)
                 .ok_or_else(|| malformed(format!("undecodable instruction at {pc}")))?;
+            #[cfg(feature = "unchecked")]
+            let width = code::width_unchecked(code, pc);
+
             let small = |offset: usize| {
                 code::u16_at(code, pc + offset)
                     .ok_or_else(|| malformed(format!("truncated operand at {pc}")))

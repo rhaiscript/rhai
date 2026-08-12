@@ -274,22 +274,68 @@ pub fn width(code: &[u8], at: usize) -> Option<usize> {
     (at + size <= code.len()).then_some(size)
 }
 
+/// How many bytes the instruction at `at` occupies.
+///
+/// # Panics
+///
+/// Panics if the offsets are out of bounds or the tag is unknown.
+///
+/// This is intended for use cases where the inputs are precisely known.
+/// Use [`width`] instead to handle potential errors.
+#[must_use]
+#[inline(always)]
+pub fn width_unchecked(code: &[u8], at: usize) -> usize {
+    WIDTHS[code[at] as usize] as usize
+}
+
 /// Read a `u16` operand at `at`.
 ///
-/// Returns `None` past the end rather than panicking. The verifier makes that
-/// unreachable for any program the VM will run, but the check is a load's worth
-/// of cost and it means nothing has to be trusted.
+/// Returns `None` past the end rather than panicking.
+///
+/// The verifier makes that unreachable for any program the VM will run,
+/// but the check is a load's worth of cost and it means nothing has to be trusted.
+///
+/// Under `unchecked` it by-passes these checks for raw performance,
+/// so it may panic if the slice is too short.
 #[must_use]
-#[inline]
+#[inline(always)]
 pub fn u16_at(code: &[u8], at: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(code.get(at..at + 2)?.try_into().ok()?))
+    // The checked version which returns `None` if the slice is too short.
+    #[cfg(not(feature = "unchecked"))]
+    return Some(u16::from_le_bytes(code.get(at..at + 2)?.try_into().ok()?));
+
+    // The unchecked version which does a straight slice copy.
+    #[cfg(feature = "unchecked")]
+    {
+        let mut buf = [0_u8; 2];
+        buf.copy_from_slice(&code[at..at + 2]);
+        return Some(u16::from_le_bytes(buf));
+    }
 }
 
 /// Read a `u32` operand at `at`.
+///
+/// Returns `None` past the end rather than panicking.
+///
+/// The verifier makes that unreachable for any program the VM will run,
+/// but the check is a load's worth of cost and it means nothing has to be trusted.
+///
+/// Under `unchecked` it by-passes these checks for raw performance,
+/// so it may panic if the slice is too short.
 #[must_use]
-#[inline]
+#[inline(always)]
 pub fn u32_at(code: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(code.get(at..at + 4)?.try_into().ok()?))
+    // The checked version which returns `None` if the slice is too short.
+    #[cfg(not(feature = "unchecked"))]
+    return Some(u32::from_le_bytes(code.get(at..at + 4)?.try_into().ok()?));
+
+    // The unchecked version which does a straight slice copy.
+    #[cfg(feature = "unchecked")]
+    {
+        let mut buf = [0_u8; 4];
+        buf.copy_from_slice(&code[at..at + 4]);
+        return Some(u32::from_le_bytes(buf));
+    }
 }
 
 /// Why a lowering could not be turned into bytes.

@@ -526,8 +526,27 @@ impl<'a> Program<'a> {
             .unwrap_or(0);
     }
 
+    /// Get the constant at `index`, or `None` if the index is out of bounds.
+    ///
+    /// Returns `None` past the end rather than panicking.
+    ///
+    /// The verifier makes that unreachable for any program the VM will run,
+    /// but the check is a load's worth of cost and it means nothing has to be trusted.
+    ///
+    /// # Panics
+    ///
+    /// Under `unchecked` it by-passes these checks for raw performance,
+    /// so it panics if the slice is too short.
+    #[inline(always)]
+    #[must_use]
     pub(crate) fn constant(&self, index: u32) -> Option<&Dynamic> {
-        self.consts.get(index as usize)
+        // The checked version which returns `None` if the slice is too short.
+        #[cfg(not(feature = "unchecked"))]
+        return self.consts.get(index as usize);
+
+        // The unchecked version which may panic if the index is out of bounds.
+        #[cfg(feature = "unchecked")]
+        return Some(&self.consts[index as usize]);
     }
 
     /// A name, borrowed from the artifact. Never allocates.
@@ -535,27 +554,105 @@ impl<'a> Program<'a> {
         self.names.get(index)
     }
 
+    /// Get the token at `index`, or `None` if the index is out of bounds.
+    ///
+    /// Returns `None` past the end rather than panicking.
+    ///
+    /// The verifier makes that unreachable for any program the VM will run,
+    /// but the check is a load's worth of cost and it means nothing has to be trusted.
+    ///
+    /// # Panics
+    ///
+    /// Under `unchecked` it by-passes these checks for raw performance,
+    /// so it panics if the slice is too short.
+    #[inline(always)]
+    #[must_use]
     pub(crate) fn token(&self, index: u32) -> Option<&Token> {
-        self.tokens.get(index as usize)
+        // The checked version which returns `None` if the slice is too short.
+        #[cfg(not(feature = "unchecked"))]
+        return self.tokens.get(index as usize);
+
+        // The unchecked version which may panic if the index is out of bounds.
+        #[cfg(feature = "unchecked")]
+        return Some(&self.tokens[index as usize]);
     }
 
+    /// Get the `assign_op` at `index`, or `None` if the index is out of bounds.
+    ///
+    /// Returns `None` past the end rather than panicking.
+    ///
+    /// The verifier makes that unreachable for any program the VM will run,
+    /// but the check is a load's worth of cost and it means nothing has to be trusted.
+    ///
+    /// # Panics
+    ///
+    /// Under `unchecked` it by-passes these checks for raw performance,
+    /// so it panics if the slice is too short.
+    #[inline(always)]
+    #[must_use]
     pub(crate) fn assign_op(&self, index: u32) -> Option<&AssignOp> {
-        self.assign_ops.get(index as usize)
+        // The checked version which returns `None` if the slice is too short.
+        #[cfg(not(feature = "unchecked"))]
+        return self.assign_ops.get(index as usize);
+
+        // The unchecked version which may panic if the index is out of bounds.
+        #[cfg(feature = "unchecked")]
+        return Some(&self.assign_ops[index as usize]);
     }
 
+    /// Get the `chain` at `index`, or `None` if the index is out of bounds.
+    ///
+    /// Returns `None` past the end rather than panicking.
+    ///
+    /// The verifier makes that unreachable for any program the VM will run,
+    /// but the check is a load's worth of cost and it means nothing has to be trusted.
+    ///
+    /// # Panics
+    ///
+    /// Under `unchecked` it by-passes these checks for raw performance,
+    /// so it panics if the slice is too short.
+    #[inline(always)]
+    #[must_use]
     pub(crate) fn chain(&self, index: u32) -> Option<&Chain> {
-        self.chains.get(index as usize)
+        // The checked version which returns `None` if the slice is too short.
+        #[cfg(not(feature = "unchecked"))]
+        return self.chains.get(index as usize);
+
+        // The unchecked version which may panic if the index is out of bounds.
+        #[cfg(feature = "unchecked")]
+        return Some(&self.chains[index as usize]);
     }
 
+    #[must_use]
     pub(crate) fn chains(&self) -> &[Chain] {
         &self.chains
     }
 
+    /// Get the [`Op::Switch`](crate::grain::bytecode::Op::Switch) at `index`,
+    /// or `None` if the index is out of bounds.
+    ///
+    /// Returns `None` past the end rather than panicking.
+    ///
+    /// The verifier makes that unreachable for any program the VM will run,
+    /// but the check is a load's worth of cost and it means nothing has to be trusted.
+    ///
+    /// # Panics
+    ///
+    /// Under `unchecked` it by-passes these checks for raw performance,
+    /// so it panics if the slice is too short.
+    #[inline(always)]
+    #[must_use]
     pub(crate) fn switch(&self, index: u32) -> Option<&Switch> {
-        self.switches.get(index as usize)
+        // The checked version which returns `None` if the slice is too short.
+        #[cfg(not(feature = "unchecked"))]
+        return self.switches.get(index as usize);
+
+        // The unchecked version which may panic if the index is out of bounds.
+        #[cfg(feature = "unchecked")]
+        return Some(&self.switches[index as usize]);
     }
 
-    /// The dispatch tables [`Op::Switch`](crate::grain::bytecode::Op::Switch) indexes.
+    /// The dispatch table's [`Op::Switch`](crate::grain::bytecode::Op::Switch) indexes.
     ///
     /// Public because a disassembly that leaves them out is misleading: a
     /// switch's arms are reached only from its table, so without it they read
@@ -653,8 +750,27 @@ impl<'a> Program<'a> {
         nodes
     }
 
+    /// Get the AST nodes still inside fragments at `index`,
+    /// or `None` if the index is out of bounds.
+    ///
+    /// Returns `None` past the end rather than panicking.
+    ///
+    /// The verifier makes that unreachable for any program the VM will run,
+    /// but the check is a load's worth of cost and it means nothing has to be trusted.
+    ///
+    /// # Panics
+    ///
+    /// Under `unchecked` it by-passes these checks for raw performance,
+    /// so it panics if the slice is too short.
+    #[inline(always)]
+    #[must_use]
     pub(crate) fn residual(&self, index: u32) -> Option<&Expr> {
-        self.residuals.get(index as usize)
+        // The checked version which returns `None` if the slice is too short.
+        return self.residuals.get(index as usize);
+
+        // The unchecked version which may panic if the index is out of bounds.
+        #[cfg(feature = "unchecked")]
+        return Some(&self.residuals[index as usize]);
     }
 
     /// The construct that stopped this program being written, and where.
