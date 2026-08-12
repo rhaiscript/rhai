@@ -3438,13 +3438,10 @@ impl<'e> Vm<'e> {
                     #[cfg(feature = "unchecked")]
                     let at = self.stack.len() - (argc + 1);
 
-                    #[cfg(not(feature = "unchecked"))]
                     let mut pointer = self.stack[at]
                         .clone()
                         .try_cast::<FnPtr>()
                         .ok_or_else(|| self.mismatch::<FnPtr>(self.stack[at].type_name(), pos()))?;
-                    #[cfg(feature = "unchecked")]
-                    let mut pointer = self.stack[at].clone().cast::<FnPtr>();
 
                     for value in self.stack.drain(at + 1..) {
                         pointer.add_curry(value);
