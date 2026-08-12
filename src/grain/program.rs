@@ -536,11 +536,11 @@ impl<'a> Program<'a> {
     /// # Panics
     ///
     /// Under `unchecked` it by-passes these checks for raw performance,
-    /// so it panics if the slice is too short.
+    /// so it panics if the index is out of bounds.
     #[inline(always)]
     #[must_use]
     pub(crate) fn constant(&self, index: u32) -> Option<&Dynamic> {
-        // The checked version which returns `None` if the slice is too short.
+        // The checked version which returns `None` if the index is out of bounds.
         #[cfg(not(feature = "unchecked"))]
         return self.consts.get(index as usize);
 
@@ -564,11 +564,11 @@ impl<'a> Program<'a> {
     /// # Panics
     ///
     /// Under `unchecked` it by-passes these checks for raw performance,
-    /// so it panics if the slice is too short.
+    /// so it panics if the index is out of bounds.
     #[inline(always)]
     #[must_use]
     pub(crate) fn token(&self, index: u32) -> Option<&Token> {
-        // The checked version which returns `None` if the slice is too short.
+        // The checked version which returns `None` if the index is out of bounds.
         #[cfg(not(feature = "unchecked"))]
         return self.tokens.get(index as usize);
 
@@ -587,11 +587,11 @@ impl<'a> Program<'a> {
     /// # Panics
     ///
     /// Under `unchecked` it by-passes these checks for raw performance,
-    /// so it panics if the slice is too short.
+    /// so it panics if the index is out of bounds.
     #[inline(always)]
     #[must_use]
     pub(crate) fn assign_op(&self, index: u32) -> Option<&AssignOp> {
-        // The checked version which returns `None` if the slice is too short.
+        // The checked version which returns `None` if the index is out of bounds.
         #[cfg(not(feature = "unchecked"))]
         return self.assign_ops.get(index as usize);
 
@@ -610,11 +610,11 @@ impl<'a> Program<'a> {
     /// # Panics
     ///
     /// Under `unchecked` it by-passes these checks for raw performance,
-    /// so it panics if the slice is too short.
+    /// so it panics if the index is out of bounds.
     #[inline(always)]
     #[must_use]
     pub(crate) fn chain(&self, index: u32) -> Option<&Chain> {
-        // The checked version which returns `None` if the slice is too short.
+        // The checked version which returns `None` if the index is out of bounds.
         #[cfg(not(feature = "unchecked"))]
         return self.chains.get(index as usize);
 
@@ -639,11 +639,11 @@ impl<'a> Program<'a> {
     /// # Panics
     ///
     /// Under `unchecked` it by-passes these checks for raw performance,
-    /// so it panics if the slice is too short.
+    /// so it panics if the index is out of bounds.
     #[inline(always)]
     #[must_use]
     pub(crate) fn switch(&self, index: u32) -> Option<&Switch> {
-        // The checked version which returns `None` if the slice is too short.
+        // The checked version which returns `None` if the index is out of bounds.
         #[cfg(not(feature = "unchecked"))]
         return self.switches.get(index as usize);
 
@@ -761,11 +761,12 @@ impl<'a> Program<'a> {
     /// # Panics
     ///
     /// Under `unchecked` it by-passes these checks for raw performance,
-    /// so it panics if the slice is too short.
+    /// so it panics if the index is out of bounds.
     #[inline(always)]
     #[must_use]
     pub(crate) fn residual(&self, index: u32) -> Option<&Expr> {
-        // The checked version which returns `None` if the slice is too short.
+        // The checked version which returns `None` if the index is out of bounds.
+        #[cfg(not(feature = "unchecked"))]
         return self.residuals.get(index as usize);
 
         // The unchecked version which may panic if the index is out of bounds.
