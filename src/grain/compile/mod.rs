@@ -419,7 +419,7 @@ impl Lowering {
                 return false;
             }
 
-            let value_name = self.strings_interner.get("$CHAIN_SET_VALUE$");
+            let value_name = ImmutableString::from("$CHAIN_SET_VALUE$");
             let value_name_index = self.push_name(value_name.clone());
             let value_slot = self.slots.declare(value_name);
 
