@@ -405,6 +405,39 @@ impl Lowering {
             _ => return false,
         };
 
+        // Evaluate the assignment value first, so the chain can read it back
+        // after the lvalue steps have been resolved.
+
+        // The chain is a single expression, so the value is evaluated before
+        // the root and steps.
+
+        let rewind_mark = self.mark();
+        let unwind_depth = self.slots.depth();
+
+        let value_slot = if let Some(value) = value {
+            if self.slots.is_full() {
+                return false;
+            }
+
+            let value_name = self.strings_interner.get("$CHAIN_SET_VALUE$");
+            let value_name_index = self.push_name(value_name.clone());
+            let value_slot = self.slots.declare(value_name);
+
+            // First evaluate the assigned value first, stash it so the chain
+            // can read it back after the lvalue steps have been resolved.
+            self.emit(Op::Unit);
+            self.emit(Op::DeclareLocal {
+                name: value_name_index,
+                is_const: false,
+            });
+            self.expression(value);
+            self.emit(Op::StoreLocal(value_slot));
+
+            Some(value_slot)
+        } else {
+            None
+        };
+
         // Index values and method arguments are evaluated first, in step
         // order, exactly as rhai collects them before walking
         // (`eval/chaining.rs:568`). Evaluating one partway down would need the
@@ -434,9 +467,17 @@ impl Lowering {
                 }
                 ChainStep::Method(call, pos) => {
                     if !self.is_lowerable_call(call) {
+                        if value_slot.is_some() {
+                            self.rewind(rewind_mark);
+                            self.slots.unwind_to(unwind_depth);
+                        }
                         return false;
                     }
                     let Ok(argc) = u8::try_from(call.args.len()) else {
+                        if value_slot.is_some() {
+                            self.rewind(rewind_mark);
+                            self.slots.unwind_to(unwind_depth);
+                        }
                         return false;
                     };
                     let first = operands;
@@ -461,10 +502,8 @@ impl Lowering {
             self.expression(root);
         }
 
-        // The value being assigned goes on last, above everything, so the
-        // walk can take what it needs before it borrows the container.
-        if let Some(value) = value {
-            self.expression(value);
+        if let Some(value_slot) = value_slot {
+            self.emit(Op::LoadLocal(value_slot));
         }
 
         let index = self.push_chain(Chain {
@@ -474,6 +513,7 @@ impl Lowering {
             operands,
         });
         self.emit_at(Op::Chain(index), expr.position());
+        self.unwind_to(unwind_depth);
         true
     }
 
