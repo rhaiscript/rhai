@@ -76,8 +76,8 @@ fn a_bare_function_name_is_a_pointer() {
 /// A capture arrives, and has the right value.
 ///
 /// Multiplication commutes, so this says nothing about which *position* it
-/// arrives in — see `a_capturing_closure_reaches_a_native_with_its_arguments_rotated`
-/// for that, which is where the answer is unwelcome.
+/// arrives in — see `a_capturing_closure_reaches_a_native_with_its_arguments_in_order`
+/// for that.
 #[test]
 #[cfg(not(feature = "no_closure"))]
 fn a_capturing_closure_resolves_and_sees_its_capture() {
@@ -86,49 +86,38 @@ fn a_capturing_closure_resolves_and_sees_its_capture() {
 }
 
 /// A capturing closure handed to a native that binds `this` gets its captured
-/// values *after* the element instead of before.
+/// values *before* the element, which is where currying puts them.
 ///
-/// Not our arithmetic: it is which shape Rhai tries first. A capture is a
-/// curried value, and `_call_with_extra_args` (`types/fn_ptr.rs:573`) opens
-/// with `[this] ++ curry ++ args` — the one order that is never right. Rhai's
-/// own closures escape it because they are `Fn*` pointers with the body
-/// attached, which is caught two branches earlier at `:538` and rearranged
-/// into `curry ++ [this] ++ args`.
+/// A capture is a curried value, and ours are `Fn` pointers resolved by name,
+/// so Rhai reaches them as natives rather than as `Fn*` pointers with the body
+/// attached. Both routes now build `curry ++ [this] ++ args`.
 ///
-/// Ours are `Fn` pointers resolved by name, so Rhai reaches them as *natives*
-/// and takes the first shape. The proof that this is Rhai's behaviour rather
-/// than ours is `stock_rhai_does_the_same_to_its_own_native_pointers` below,
-/// which reproduces it with no Rhai Grain in the picture at all.
-///
-/// So: safe for a closure that captures nothing, and for one whose parameters
-/// commute. Wrong, silently, otherwise. Non-commutative on purpose here —
-/// `n - x` and `x - n` are the same two values in the other order, and only
-/// arithmetic that cares can tell them apart.
+/// Non-commutative on purpose — `n - x` and `x - n` are the same two values in
+/// the other order, and only arithmetic that cares can tell them apart.
 #[test]
 #[cfg(not(feature = "no_closure"))]
-fn a_capturing_closure_reaches_a_native_with_its_arguments_rotated() {
+fn a_capturing_closure_reaches_a_native_with_its_arguments_in_order() {
     let engine = corpus::engine();
     let source = "let n = 10; let a = [1, 2, 3]; a.map(|x| n - x)";
 
     assert_eq!(walk(&engine, source), Ok("[9, 8, 7]".to_string()));
-    assert_eq!(run(&engine, source), Ok("[-9, -8, -7]".to_string()));
+    assert_eq!(run(&engine, source), Ok("[9, 8, 7]".to_string()));
 }
 
-/// The same rotation, with nothing of ours involved.
+/// The same ordering, with nothing of ours involved.
 ///
 /// `Fn(s)` on a computed name is the one spelling that gets a name-only
 /// pointer out of stock Rhai, which is what every pointer we make is. Curry it,
-/// point it at a native, and hand it to `map`: Rhai passes the element first
-/// and the curried value second, while `f.call(1)` on the very same pointer
-/// passes them the other way round.
+/// point it at a native, and hand it to `map`: the curried value leads, exactly
+/// as `f.call(1)` on the very same pointer passes it.
 #[test]
-fn stock_rhai_does_the_same_to_its_own_native_pointers() {
+fn stock_rhai_orders_its_own_native_pointers_the_same_way() {
     let mut engine = corpus::engine();
     engine.register_fn("subtract", |a: rhai::INT, b: rhai::INT| a - b);
 
     let curried = "let s = \"sub\" + \"tract\"; let f = Fn(s).curry(10);";
-    assert_eq!(walk(&engine, &format!("{curried} [1, 2, 3].map(f)")), Ok("[-9, -8, -7]".to_string()), "rhai puts the element before the curried value",);
-    assert_eq!(walk(&engine, &format!("{curried} f.call(1)")), Ok("9".to_string()), "and the curried value first when there is no element",);
+    assert_eq!(walk(&engine, &format!("{curried} [1, 2, 3].map(f)")), Ok("[9, 8, 7]".to_string()), "the curried value leads the element",);
+    assert_eq!(walk(&engine, &format!("{curried} f.call(1)")), Ok("9".to_string()), "and leads on its own when there is no element",);
 }
 
 #[test]

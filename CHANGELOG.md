@@ -28,6 +28,7 @@ Bug fixes
 ---------
 
 * Fixes bug in `Engine::compact_script` that generates invalid compacted scripts due to missing spaces between ambiguous operators (thanks [`@yuvalrakavy`](https://github.com/yuvalrakavy) [`#1106`](https://github.com/rhaiscript/rhai/pull/1106)).
+* Fixes bug where a curried function pointer passed to a native iteration function (e.g. `map`, `filter`, `reduce`) received the element _before_ the curried arguments, the reverse of what `FnPtr::call` does.
 
 Enhancements
 ------------

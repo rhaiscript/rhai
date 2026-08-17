@@ -136,6 +136,45 @@ fn test_fn_ptr_curry() {
     );
 }
 
+/// A curried argument comes first no matter who does the calling - a direct `call` or a
+/// native iteration function such as `map`.
+#[test]
+#[cfg(not(feature = "no_object"))]
+#[cfg(not(feature = "no_index"))]
+fn test_fn_ptr_curry_arg_order() {
+    let mut engine = Engine::new();
+
+    engine.register_fn("subtract", |a: INT, b: INT| a - b);
+
+    assert_eq!(engine.eval::<INT>(r#"Fn("subtract").curry(10).call(1)"#).unwrap(), 9);
+
+    assert_eq!(
+        engine
+            .eval::<rhai::Array>(r#"[1, 2, 3].map(Fn("subtract").curry(10))"#)
+            .unwrap()
+            .into_iter()
+            .map(|v| v.as_int().unwrap())
+            .collect::<Vec<_>>(),
+        [9, 8, 7]
+    );
+
+    #[cfg(not(feature = "no_function"))]
+    assert_eq!(
+        engine
+            .eval::<rhai::Array>(
+                r#"
+                    fn sub(a, b) { a - b }
+                    [1, 2, 3].map(Fn("sub").curry(10))
+                "#
+            )
+            .unwrap()
+            .into_iter()
+            .map(|v| v.as_int().unwrap())
+            .collect::<Vec<_>>(),
+        [9, 8, 7]
+    );
+}
+
 #[test]
 #[cfg(not(feature = "no_function"))]
 fn test_fn_ptr_call() {

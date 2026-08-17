@@ -832,9 +832,8 @@ impl<'e> Vm<'e> {
     /// does not get it still runs — the pointer simply fails to resolve, as
     /// `ErrorFunctionNotFound`, at the point the native tries to call it.
     ///
-    /// Read the `callback` module before relying on it: a crossing is slower than the
-    /// walker, and a *capturing* closure handed to a native that binds `this`
-    /// arrives with its arguments rotated.
+    /// Read the `callback` module before relying on it: a crossing is slower
+    /// than the walker.
     ///
     /// Named `eval_` rather than `run_` because it yields the program's value;
     /// Rhai has no `Engine` method to mirror here, so the crate's own rule is

@@ -566,10 +566,27 @@ impl FnPtr {
             _ => (),
         }
 
-        self.call_raw(ctx, this_ptr.as_deref_mut(), args.clone())
+        // Curried arguments bind to the front of the parameter list, so `this` cannot be passed as
+        // the object -- that would place it ahead of them and reverse the argument order relative
+        // to a direct `call`. Move it into the argument list at the designated position instead.
+        let this_ptr_is_curried_arg = MOVE_PTR && self.is_curried() && this_ptr.is_some();
+
+        let result = if this_ptr_is_curried_arg {
+            let mut args2 = FnArgsVec::with_capacity(args.len() + 1);
+            args2.extend(args.clone());
+            args2.insert(move_this_ptr_to_args, this_ptr.as_deref().unwrap().clone());
+            self.call_raw(ctx, None, args2)
+        } else {
+            self.call_raw(ctx, this_ptr.as_deref_mut(), args.clone())
+        };
+
+        result
             .or_else(|err| match *err {
                 ERR::ErrorFunctionNotFound(sig, ..)
-                    if MOVE_PTR && this_ptr.is_some() && sig.starts_with(self.fn_name()) =>
+                    if MOVE_PTR
+                        && !this_ptr_is_curried_arg
+                        && this_ptr.is_some()
+                        && sig.starts_with(self.fn_name()) =>
                 {
                     let mut args2 = FnArgsVec::with_capacity(args.len() + 1);
                     if move_this_ptr_to_args == 0 {
