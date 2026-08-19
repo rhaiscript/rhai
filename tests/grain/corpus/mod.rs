@@ -74,6 +74,17 @@ pub fn engine() -> rhai::Engine {
             Err("bump_then_fail".into())
         });
 
+    // A host handing back a value that is already shared, which is the only way
+    // a script can be given one: sharing is otherwise something Rhai does to a
+    // variable a closure captured, and loading such a variable flattens it on
+    // the way out. Whether the sharing survives crossing into a `let` is a
+    // difference nothing else here can see.
+    #[cfg(not(feature = "no_closure"))]
+    {
+        let cell = rhai::Dynamic::from(42 as INT).into_shared();
+        engine.register_fn("shared_cell", move || cell.clone());
+    }
+
     // A property is reached with `.`, which `no_object` removes; an indexer
     // with `[..]`, which `no_index` does. Registered apart from the chain
     // above so each can go with the feature that takes its syntax away.
@@ -559,6 +570,13 @@ pub const CASES: &[Case] = &[
     // value outright, so walking one takes the host down rather than returning
     // an error (`eval/chaining.rs:461`).
     case("closure_shared_chain_root", "let a = [1, 2, 3]; { let f = || a[0]; } a[1] = 20; a[1]"),
+    // A host handing back a cell that is *already* shared. Rhai flattens a
+    // declaration's initializer (`eval/stmt.rs:438`), so the sharing stops at
+    // the boundary and the local holds a plain value. Reaching this needs a
+    // native, because loading a variable flattens on the way out either way.
+    // The `closure_` prefix is what keeps it out of a `no_closure` build, where
+    // there is no such thing as a shared value to hand back.
+    case("closure_shared_from_a_native", "let m = shared_cell(); m"),
     // Rhai answers this syntactically and registers no function for it, so a
     // lowered call would fail to resolve where the walker returns a bool.
     case("is_shared_after_capture", "let x = 1; let r = false; { let f = || x; r = is_shared(f); } [is_shared(x), r]"),
