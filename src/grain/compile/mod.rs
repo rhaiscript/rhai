@@ -303,6 +303,11 @@ struct Lowering {
     handlers: usize,
     /// Names that are script functions rather than variables.
     script_fns: Vec<ImmutableString>,
+    /// How many statements enclose the one being lowered, for the marker
+    /// [`Lowering::statement`] emits. Restored on the way out, so it is the
+    /// nesting rather than a running count.
+    #[cfg(feature = "debugging")]
+    stmt_depth: u16,
     /// Set when something nested inside an expression defeated the slot model.
     ///
     /// [`Lowering::statement`] says so by returning false, but
@@ -843,6 +848,14 @@ impl Lowering {
             .map(|p| self.push_name(p.clone()))
             .collect();
 
+        // Rhai stops once on entering a body, before its first statement, at a
+        // synthetic node placed on the body itself (`func/script.rs:115-119`).
+        // A marker at the same place is that stop, and puts it in the chunk
+        // rather than in the VM. Depth zero, like the statements it precedes:
+        // it does not enclose them, so stepping from here reaches the first one.
+        #[cfg(feature = "debugging")]
+        self.emit_at(Op::Statement { depth: 0 }, def.body.position());
+
         // A body is a statement list whose last value is the return value,
         // which is what `program` already does.
         let lowered = self.program(def.body.statements(), false);
@@ -897,7 +910,36 @@ impl Lowering {
     }
 
     /// Lower one statement, leaving its value on the stack.
+    ///
+    /// Marks where it begins first, which is what the debugger stops at — see
+    /// [`Op::Statement`]. Every statement gets one, the ones that end up as
+    /// fragments included: the walker evaluating a fragment stops at its own
+    /// node as well, so such a statement stops twice at the same place. Driving
+    /// the residual count to zero is what removes that.
     fn statement(&mut self, stmt: &Stmt) -> bool {
+        #[cfg(feature = "debugging")]
+        let enclosing = {
+            let depth = self.stmt_depth;
+            self.emit_at(Op::Statement { depth }, stmt.position());
+            // Saturating, so a script nested past 65,535 statements marks its
+            // innermost ones as siblings rather than wrapping the depth into a
+            // shallower one. `max_expr_depth` stops a parse long before.
+            self.stmt_depth = depth.saturating_add(1);
+            depth
+        };
+
+        let lowered = self.lower_statement(stmt);
+
+        #[cfg(feature = "debugging")]
+        {
+            self.stmt_depth = enclosing;
+        }
+
+        lowered
+    }
+
+    /// The lowering itself, one arm per kind of statement.
+    fn lower_statement(&mut self, stmt: &Stmt) -> bool {
         match stmt {
             Stmt::Var(payload, flags, ..) => {
                 // `export let x = ...` also binds a module alias, which the

@@ -117,6 +117,24 @@ assert_eq!(sites[1].unwrap().line, 2); // the call to it
 ```
 "##
 )]
+//! # Debugging
+//!
+//! A `debugging` build marks every statement, and the VM stops at the markers:
+//! `back_trace`, stepping, break-points by position and the function-exit
+//! events all work against a chunk.
+//!
+//! A statement is as fine as the grain gets. Rhai's walker stops at every
+//! *expression* too, which is a node a compiled program no longer has — so a
+//! step lands on the next statement rather than part way through the one it is
+//! on, and a break-point on a function name, a call's arity or a property never
+//! matches, because what a marker hands the callback is a synthetic `Noop` and
+//! not the call. A break-point by position covers the same line.
+//!
+//! The markers are the one part of a program that a shipping build does not
+//! compile: a device with no callback to call has nothing to stop for. They cost
+//! about six bytes per statement where they are compiled — `tests/grain/format.rs`
+//! measures it — and an artifact written without them still runs anywhere, it
+//! simply cannot be stopped.
 // A VM that runs untrusted bytecode has no business containing any, and saying
 // so here makes it the compiler's problem rather than a promise. `crates/
 // rhaigrain-pos` declares the same.

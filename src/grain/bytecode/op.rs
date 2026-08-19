@@ -519,6 +519,28 @@ pub enum Op {
     /// a function body, whose scope is discarded whole.
     Checkpoint,
 
+    /// A statement begins here, at nesting `depth` within its chunk.
+    ///
+    /// Where the debugger stops. Rhai runs its callback per AST node
+    /// (`eval/stmt.rs:269`) and a chunk has no nodes, so the compiler records
+    /// where the statements were and the VM stops there instead. Without this
+    /// there is nothing to stop at, and break-points and stepping are inert.
+    ///
+    /// `depth` is how many statements enclose this one. It is what stepping
+    /// re-arms against: Rhai restores the stepping state when the statement it
+    /// was asked at *ends* (`eval/stmt.rs:271`), and the next marker at the
+    /// same depth or shallower is where that has happened. Without it, a
+    /// `next` over an `if` would step into its body.
+    ///
+    /// Emitted only under `debugging`. An instruction per statement is not
+    /// worth carrying to a device with no callback to call, so a shipping build
+    /// has none. Decoding is unconditional, so an artifact written by a
+    /// debugging build still runs anywhere — it simply cannot be stopped.
+    Statement {
+        /// How many statements enclose this one.
+        depth: u16,
+    },
+
     /// Evaluate residual AST fragment `residual` through Rhai's walker,
     /// pushing its value.
     ///

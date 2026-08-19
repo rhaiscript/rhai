@@ -177,6 +177,8 @@ pub mod tag {
     pub const CALL_NAMED_REF_CAPTURE: u8 = 0x45;
     /// [`Op::CallRef`](super::Op::CallRef) through [`Receiver::This`](super::Receiver::This) capturing the parent's scope.
     pub const CALL_THIS_REF_CAPTURE: u8 = 0x46;
+    /// [`Op::Statement`](super::Op::Statement).
+    pub const STATEMENT: u8 = 0x47;
 }
 
 /// How wide each tag's instruction is, with 0 for the tags that are not one.
@@ -193,6 +195,7 @@ static WIDTHS: [u8; 256] = {
     widths[tag::POP as usize] = 1;
     widths[tag::TICK as usize] = 1;
     widths[tag::CHECKPOINT as usize] = 1;
+    widths[tag::STATEMENT as usize] = 3;
     widths[tag::MAKE_MAP as usize] = 3;
     widths[tag::CHECK_ARRAY_SIZE as usize] = 3;
     widths[tag::CHECK_MAP_SIZE as usize] = 3;
@@ -649,6 +652,10 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
 
             Op::Tick => code.push(tag::TICK),
             Op::Checkpoint => code.push(tag::CHECKPOINT),
+            Op::Statement { depth } => {
+                code.push(tag::STATEMENT);
+                code.extend_from_slice(&depth.to_le_bytes());
+            }
             Op::Throw => code.push(tag::THROW),
             Op::IterInit => code.push(tag::ITER_INIT),
             Op::IterDrop => code.push(tag::ITER_DROP),
@@ -770,6 +777,7 @@ fn encoded_width(op: &Op) -> usize {
         | Op::StoreLocal(..)
         | Op::DeclareLocal { .. }
         | Op::UnwindTo(..)
+        | Op::Statement { .. }
         | Op::EvalAst { .. }
         | Op::Chain(..)
         | Op::Switch(..)
@@ -966,6 +974,7 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         tag::UNWIND_TO => Op::UnwindTo(small(1)?),
         tag::TICK => Op::Tick,
         tag::CHECKPOINT => Op::Checkpoint,
+        tag::STATEMENT => Op::Statement { depth: small(1)? },
         tag::THROW => Op::Throw,
         tag::ITER_INIT => Op::IterInit,
         tag::ITER_DROP => Op::IterDrop,
@@ -1145,6 +1154,7 @@ mod tests {
             Op::Rotate(3),
             Op::UnwindTo(6),
             Op::Tick,
+            Op::Statement { depth: 2 },
             Op::EvalAst {
                 residual: 0,
                 rewind_scope: true,

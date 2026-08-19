@@ -442,6 +442,7 @@ fn effect(op: &Op, pools: Pools) -> (usize, usize, usize) {
         | Op::UnwindTo(..)
         | Op::Tick
         | Op::Checkpoint
+        | Op::Statement { .. }
         | Op::PushHandler { .. }
         | Op::PopHandler => (0, 0, 0),
 

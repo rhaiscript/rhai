@@ -120,6 +120,23 @@ fn reposition(mut err: Box<EvalAltResult>, pos: Position) -> Box<EvalAltResult> 
     err
 }
 
+/// Take back off the scope whatever a debugger callback left on it.
+///
+/// Slots are positions. An entry a callback declares sits underneath every
+/// declaration the chunk has yet to make, so the next `let` would land above it
+/// and every slot from there on would name the variable before the one it meant
+/// — silently, and in a program that has nothing to do with the debugger. Rhai
+/// answers this by searching by name from then on (`eval/debugger.rs:436`); a
+/// chunk has no names to search, so the scope goes back to the shape it was
+/// compiled against instead, and what a callback declares does not outlive the
+/// stop it declared it at.
+#[cfg(feature = "debugging")]
+fn rewind_after_stop(scope: &mut Scope, before: usize) {
+    if scope.len() > before {
+        scope.rewind(before);
+    }
+}
+
 /// Stamp the site on an error that arrived without one.
 ///
 /// Unlike [`reposition`] this never overwrites a position the callee already set.
@@ -408,6 +425,16 @@ pub struct Vm<'e> {
     ///
     /// Set by [`Vm::run_chain`], taken by the next [`Vm::record_fault`].
     pending_slot: Option<u32>,
+    /// Steps waiting for the statement that asked for them to end.
+    ///
+    /// Rhai keeps this in a `defer` per AST node (`eval/stmt.rs:271`): a `next`
+    /// runs the statement it was asked at with the debugger quiet, and re-arms
+    /// once that statement is over. A marker is a point rather than a scope, so
+    /// the call level and statement depth it was asked at are recorded here
+    /// instead, and the next marker at or outside them is where the statement
+    /// has ended. Innermost last.
+    #[cfg(feature = "debugging")]
+    pending_steps: Vec<(usize, u16, crate::eval::DebuggerStatus)>,
 }
 
 /// Take a receiver for a callee to own, and say whether it goes back.
@@ -485,6 +512,8 @@ impl<'e> Vm<'e> {
             owns_trace: true,
             chain_step: 0,
             pending_slot: None,
+            #[cfg(feature = "debugging")]
+            pending_steps: Vec::new(),
         }
     }
 
@@ -527,6 +556,10 @@ impl<'e> Vm<'e> {
             owns_trace: false,
             chain_step: 0,
             pending_slot: None,
+            // A step belongs to the statement that asked for it, and that
+            // statement is running in the `Vm` this crossing came from.
+            #[cfg(feature = "debugging")]
+            pending_steps: Vec::new(),
         }
     }
 
@@ -642,6 +675,9 @@ impl<'e> Vm<'e> {
     ) -> (VmResult, Option<Dynamic>) {
         // An entry point in its own right so the trace starts here rather than at `run_main`.
         self.clear_faults();
+        // A step a previous run left waiting is not this one's to honour.
+        #[cfg(feature = "debugging")]
+        self.pending_steps.clear();
 
         let Some(function) = program.function_named(name, args.len()) else {
             return (
@@ -761,20 +797,30 @@ impl<'e> Vm<'e> {
                 // not what the caller asked for. The main chunk gets no
                 // receiver, as `eval_global_statements` does not either.
                 evaluated = unwind_exit(vm.run_main(program, scope)).map(|_| ());
-                if evaluated.is_err() {
-                    return (Ok(Dynamic::UNIT), this);
-                }
             }
-            vm.call_function_with_this(
-                program,
-                name,
-                arg_values,
-                0,
-                scope,
-                options.rewind_scope,
-                Position::NONE,
-                this,
-            )
+
+            let (result, returned) = if evaluated.is_ok() {
+                vm.call_function_with_this(
+                    program,
+                    name,
+                    arg_values,
+                    0,
+                    scope,
+                    options.rewind_scope,
+                    Position::NONE,
+                    this,
+                )
+            } else {
+                (Ok(Dynamic::UNIT), this)
+            };
+
+            // However it went, and whether the call happened at all: Rhai
+            // reports the end of a `call_fn` unconditionally
+            // (`api/call_fn.rs:302-308`).
+            #[cfg(feature = "debugging")]
+            let result = vm.at_end(scope).and(result);
+
+            (result, returned)
         });
 
         // Before the errors below, both of them: Rhai's mutation through `this`
@@ -882,8 +928,16 @@ impl<'e> Vm<'e> {
         scope: &mut Scope,
         wrappers: Option<SharedModule>,
     ) -> VmResult {
-        let result = self.with_environment(program, wrappers, |vm| vm.run_main(program, scope));
-        unwind_exit(result)
+        self.with_environment(program, wrappers, |vm| {
+            // `exit` and a top-level `return` become the run's value before the
+            // debugger hears that it is over, because Rhai maps them inside
+            // `eval_global_statements` (`eval/stmt.rs:1046-1048`) and reports
+            // the end after it.
+            let value = unwind_exit(vm.run_main(program, scope))?;
+            #[cfg(feature = "debugging")]
+            vm.at_end(scope)?;
+            Ok(value)
+        })
     }
 
     /// What a program contributes to `global`, in place for the duration of `f`.
@@ -938,6 +992,9 @@ impl<'e> Vm<'e> {
     /// The main chunk, against an environment the caller has already installed.
     fn run_main(&mut self, program: &Program, scope: &mut Scope) -> VmResult {
         self.clear_faults();
+        // A step a previous run left waiting is not this one's to honour.
+        #[cfg(feature = "debugging")]
+        self.pending_steps.clear();
         let mut pc = program.main().entry() as usize;
         // Slots are indices into the caller's scope, so a caller that arrives
         // with variables already in it shifts every one of them.
@@ -2774,27 +2831,11 @@ impl<'e> Vm<'e> {
         // a scope that holds nothing else — so slot 0 is index 0.
         let mut reached = chunk.entry() as usize;
         let outcome = self.execute(program, scope, chunk, scope_start_len, &mut reached);
+        // Read before the mapping below, which turns the `Return` that carries a
+        // body's value into a success.
+        let failed = outcome.is_err();
 
-        // Pop the frame however the body left — an error escaping a call must not
-        // leave the stack deep, or every later trace is wrong.
-        #[cfg(feature = "debugging")]
-        if let Some(dbg) = self.global.debugger.as_mut() {
-            dbg.rewind_call_stack(orig_call_stack_len);
-        }
-
-        // Rewind scope.
-        if rewind_scope {
-            scope.rewind(scope_start_len);
-        } else if scope_end_len != scope_start_len {
-            // Remove arguments only, leaving new variables in the scope
-            scope.remove_range(scope_start_len, scope_end_len - scope_start_len);
-        }
-
-        if outcome.is_err() {
-            self.record_fault(reached);
-        }
-
-        outcome.or_else(|err| match *err {
+        let result = outcome.or_else(|err| match *err {
             // A `return` inside the body is the body's value.
             EvalAltResult::Return(value, ..) => Ok(value),
             // Exits and system errors pass straight through, positioned at the
@@ -2808,7 +2849,154 @@ impl<'e> Vm<'e> {
                 err,
                 pos,
             ))),
-        })
+        });
+
+        // Mapped first, then reported: Rhai tells the debugger what the *caller*
+        // will see (`func/script.rs:157-186`), with the body's locals still in
+        // scope for the callback to read.
+        #[cfg(feature = "debugging")]
+        let result = self.at_function_exit(scope, result, orig_call_stack_len, pos);
+
+        // Rewind scope.
+        if rewind_scope {
+            scope.rewind(scope_start_len);
+        } else if scope_end_len != scope_start_len {
+            // Remove arguments only, leaving new variables in the scope
+            scope.remove_range(scope_start_len, scope_end_len - scope_start_len);
+        }
+
+        if failed {
+            self.record_fault(reached);
+        }
+
+        result
+    }
+
+    /// Report how a body ended and drop its call stack frame.
+    ///
+    /// The frame goes however the call ended — an error escaping one must not
+    /// leave the stack deep, or every later trace is wrong.
+    #[cfg(feature = "debugging")]
+    fn at_function_exit(
+        &mut self,
+        scope: &mut Scope,
+        result: VmResult,
+        orig_call_stack_len: usize,
+        pos: Position,
+    ) -> VmResult {
+        if !self.engine.is_debugger_registered() {
+            return result;
+        }
+
+        // Only where something is waiting for it: a `FunctionExit` asked for at
+        // this level or outside it, or a step that has to stop somewhere and
+        // this is where the body ran out (`func/script.rs:159-163`).
+        let trigger = match self.global.debugger().status {
+            crate::eval::DebuggerStatus::FunctionExit(n) => n >= self.global.level,
+            crate::eval::DebuggerStatus::Next(.., true) => true,
+            _ => false,
+        };
+
+        let result = if trigger {
+            // The call site, where Rhai has the body's closing brace: a chunk
+            // keeps no position for the end of itself, and the call is the place
+            // Rhai falls back to when the body has none either.
+            let node = crate::ast::Stmt::Noop(pos);
+            let event = match result {
+                Ok(ref value) => crate::eval::DebuggerEvent::FunctionExitWithValue(value),
+                Err(ref err) => crate::eval::DebuggerEvent::FunctionExitWithError(err),
+            };
+
+            let before = scope.len();
+            let reported = self.engine.dbg_raw(
+                &mut self.global,
+                &mut self.caches,
+                scope,
+                self.this.as_mut(),
+                (&node).into(),
+                event,
+            );
+            rewind_after_stop(scope, before);
+
+            match reported {
+                Ok(..) => result,
+                Err(err) => Err(err),
+            }
+        } else {
+            result
+        };
+
+        if let Some(dbg) = self.global.debugger.as_mut() {
+            dbg.rewind_call_stack(orig_call_stack_len);
+        }
+
+        result
+    }
+
+    /// Stop at a statement boundary, as Rhai stops at a statement node
+    /// (`eval/stmt.rs:269`).
+    ///
+    /// `depth` is the marker's, and says which of the steps waiting in
+    /// [`Vm::pending_steps`] belong to statements that have now ended.
+    #[cfg(feature = "debugging")]
+    fn at_statement(
+        &mut self,
+        scope: &mut Scope,
+        depth: u16,
+        pos: Position,
+    ) -> Result<(), Box<EvalAltResult>> {
+        if !self.engine.is_debugger_registered() {
+            return Ok(());
+        }
+
+        let level = self.global.level;
+
+        // A marker inside the statement a step was asked at is one that step
+        // must not stop for — that is what stepping *over* a call or a block
+        // means. Anything at the same depth or outside it, or in a frame further
+        // out, is past the end of that statement.
+        while let Some(&(at_level, at_depth, status)) = self.pending_steps.last() {
+            if level > at_level || (level == at_level && depth > at_depth) {
+                break;
+            }
+            self.pending_steps.pop();
+            self.global.debugger_mut().reset_status(status);
+        }
+
+        let node = crate::ast::Stmt::Noop(pos);
+        let before = scope.len();
+        let resumed = self.engine.dbg_reset(
+            &mut self.global,
+            &mut self.caches,
+            scope,
+            self.this.as_mut(),
+            &node,
+        );
+        rewind_after_stop(scope, before);
+
+        if let Some(status) = resumed? {
+            self.pending_steps.push((level, depth, status));
+        }
+
+        Ok(())
+    }
+
+    /// Tell the debugger the run is over, as Rhai does at the end of an `eval`
+    /// (`api/eval.rs:255-260`).
+    ///
+    /// Only where the run got there: the walker's `?` on the statements means a
+    /// failed script never reaches this.
+    #[cfg(feature = "debugging")]
+    fn at_end(&mut self, scope: &mut Scope) -> Result<(), Box<EvalAltResult>> {
+        if !self.engine.is_debugger_registered() {
+            return Ok(());
+        }
+
+        self.global.debugger_mut().status = crate::eval::DebuggerStatus::Terminate;
+        let node = crate::ast::Stmt::Noop(Position::NONE);
+
+        self.engine
+            .dbg(&mut self.global, &mut self.caches, scope, None, &node)
     }
 
     /// Run one frame, cleaning up after it however it leaves.
@@ -3928,6 +4116,17 @@ impl<'e> Vm<'e> {
                 code::tag::TICK => self.engine.track_operation(&mut self.global, pos())?,
 
                 code::tag::CHECKPOINT => self.unwind_floor = scope.len(),
+
+                code::tag::STATEMENT => {
+                    // Nothing to stop for without the interface to stop at, and
+                    // no marker in the code at all unless it was compiled by a
+                    // build that has one.
+                    #[cfg(feature = "debugging")]
+                    {
+                        let depth = small(1)?;
+                        self.at_statement(scope, depth, pos())?;
+                    }
+                }
 
                 code::tag::PUSH_HANDLER | code::tag::PUSH_HANDLER_VAR => {
                     let target = wide(1)? as usize;

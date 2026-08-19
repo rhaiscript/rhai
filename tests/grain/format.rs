@@ -942,6 +942,25 @@ fn artifact_size_census() {
     // version, ABI and debug id would dominate a plain ratio and the density
     // this is watching would stop showing through.
     const HEADER: usize = 4 + 2 + 6 + 16;
-    let allowed = source_bytes * 3 + rows.len() * HEADER;
+
+    // Statement markers are allowed for the same way. A `debugging` build puts
+    // one before every statement so the debugger has somewhere to stop
+    // (`Op::Statement`) and no shipping artifact carries any, so counting them
+    // against the encoding would measure the wrong build. Three bytes of
+    // instruction and up to three of position-table entry, counted off the
+    // artifacts rather than guessed at; zero of them anywhere else.
+    const MARKER: usize = 3 + 3;
+    let markers: usize = written
+        .iter()
+        .filter_map(|(_, _, bytes)| Program::read(bytes).ok())
+        .map(|program| {
+            rhai::grain::bytecode::disassemble(program.code())
+                .filter(|(_, op)| matches!(op, rhai::grain::bytecode::Op::Statement { .. }))
+                .count()
+        })
+        .sum();
+    println!("{markers} statement markers, allowed {} bytes", markers * MARKER);
+
+    let allowed = source_bytes * 3 + rows.len() * HEADER + markers * MARKER;
     assert!(artifact_bytes < allowed, "{artifact_bytes} artifact bytes for {source_bytes} of source across {} scripts is not an encoding", rows.len(),);
 }
