@@ -37,6 +37,16 @@ pub enum FnPtrType {
     /// The program travels with the pointer rather than the index alone: a
     /// pointer escapes to the host, and a bare index into a table it no longer
     /// has would address whatever happened to be there.
+    ///
+    /// What this variant is *for* is declaring the callee's shape, which only
+    /// [`FnPtr::declared_shape`] and its one caller read. Everywhere else — the
+    /// dispatch arms in `func/call.rs`, and [`FnPtr::call_raw`] — it deliberately
+    /// falls through to dispatch by name, exactly as [`Normal`][FnPtrType::Normal]
+    /// does, reaching the chunk through the wrapper the VM registered for it
+    /// (`grain/vm/callback.rs`). That is not an oversight: routing a call
+    /// straight into the chunk is a larger change, and leaving those sites alone
+    /// keeps this variant a strict improvement on the name-only pointer rather
+    /// than a second way to call one.
     #[cfg(all(feature = "grain", not(feature = "no_function")))]
     Compiled {
         program: crate::grain::SharedProgram,
@@ -592,6 +602,33 @@ impl FnPtr {
             }
         }
     }
+    /// How many parameters the callee declares, and whether it can be *handed*
+    /// the receiver rather than having it materialised into the arguments.
+    ///
+    /// [`None`] where the pointer cannot say — a bare name, or a native — which
+    /// leaves the caller to guess a shape and correct itself from the resulting
+    /// `ErrorFunctionNotFound`.
+    ///
+    /// The second half is not decoration. A script body binds `this` whether or
+    /// not it reads it, so Rhai's own pointers answer `true` unconditionally. A
+    /// compiled chunk is reached through a wrapper registered at one arity, and
+    /// only a chunk that reads the receiver is reachable that way at all
+    /// (`grain/vm/callback.rs`) — so handing one to a chunk that does not take
+    /// it means calling a wrapper with an argument too many.
+    #[must_use]
+    fn declared_shape(&self) -> Option<(usize, bool)> {
+        match self.typ {
+            #[cfg(not(feature = "no_function"))]
+            FnPtrType::Script { num_params, .. } => Some((num_params, true)),
+            #[cfg(all(feature = "grain", not(feature = "no_function")))]
+            FnPtrType::Compiled { ref program, index } => program
+                .functions()
+                .get(index as usize)
+                .map(|f| (f.params.len(), f.takes_this)),
+            _ => None,
+        }
+    }
+
     /// Make a call to a function pointer with either a specified number of arguments, or with extra
     /// arguments attached.
     fn _call_with_extra_args<const MOVE_PTR: bool, const N: usize, const E: usize>(
@@ -603,48 +640,55 @@ impl FnPtr {
         extras: [Dynamic; E],
         move_this_ptr_to_args: usize,
     ) -> RhaiResult {
-        match self.typ {
-            #[cfg(not(feature = "no_function"))]
-            FnPtrType::Script { num_params, .. } => {
-                if num_params == N + self.curry().len() {
-                    return self.call_raw(ctx, this_ptr, args);
-                }
-                if MOVE_PTR {
-                    if let Some(this_ptr) = this_ptr.as_deref() {
-                        if num_params == N + 1 + self.curry().len() {
-                            let mut args2 = FnArgsVec::with_capacity(args.len() + 1);
-                            if move_this_ptr_to_args == 0 {
-                                args2.push(this_ptr.clone());
-                                args2.extend(args);
-                            } else {
-                                args2.extend(args);
-                                args2.insert(move_this_ptr_to_args, this_ptr.clone());
-                            }
-                            return self.call_raw(ctx, None, args2);
+        if let Some((num_params, binds_this)) = self.declared_shape() {
+            if num_params == N + self.curry().len() {
+                // `binds_this` is what separates a callee that will be *handed*
+                // the receiver from one that cannot take it. Rhai's own pointers
+                // reach a script body, which binds `this` whether or not it
+                // reads it; a compiled chunk is reached by name, and `call_raw`
+                // would splice the receiver in as argument zero — one more
+                // argument than the callee has room for.
+                let receiver = if binds_this { this_ptr } else { None };
+                return self.call_raw(ctx, receiver, args);
+            }
+            if MOVE_PTR {
+                if let Some(this_ptr) = this_ptr.as_deref() {
+                    if num_params == N + 1 + self.curry().len() {
+                        let mut args2 = FnArgsVec::with_capacity(args.len() + 1);
+                        if move_this_ptr_to_args == 0 {
+                            args2.push(this_ptr.clone());
+                            args2.extend(args);
+                        } else {
+                            args2.extend(args);
+                            args2.insert(move_this_ptr_to_args, this_ptr.clone());
                         }
-                        if num_params == N + E + 1 + self.curry().len() {
-                            let mut args2 = FnArgsVec::with_capacity(args.len() + extras.len() + 1);
-                            if move_this_ptr_to_args == 0 {
-                                args2.push(this_ptr.clone());
-                                args2.extend(args);
-                                args2.extend(extras);
-                            } else {
-                                args2.extend(args);
-                                args2.extend(extras);
-                                args2.insert(move_this_ptr_to_args, this_ptr.clone());
-                            }
-                            return self.call_raw(ctx, None, args2);
+                        return self.call_raw(ctx, None, args2);
+                    }
+                    if num_params == N + E + 1 + self.curry().len() {
+                        let mut args2 = FnArgsVec::with_capacity(args.len() + extras.len() + 1);
+                        if move_this_ptr_to_args == 0 {
+                            args2.push(this_ptr.clone());
+                            args2.extend(args);
+                            args2.extend(extras);
+                        } else {
+                            args2.extend(args);
+                            args2.extend(extras);
+                            args2.insert(move_this_ptr_to_args, this_ptr.clone());
                         }
+                        return self.call_raw(ctx, None, args2);
                     }
                 }
-                if num_params == N + E + self.curry().len() {
-                    let mut args2 = FnArgsVec::with_capacity(args.len() + extras.len());
-                    args2.extend(args);
-                    args2.extend(extras);
-                    return self.call_raw(ctx, this_ptr, args2);
-                }
             }
-            _ => (),
+            if num_params == N + E + self.curry().len() {
+                let mut args2 = FnArgsVec::with_capacity(args.len() + extras.len());
+                args2.extend(args);
+                args2.extend(extras);
+                // Same reasoning as the first row: the callee asked for the
+                // extras and not for the receiver, so the receiver must stay out
+                // of the argument list.
+                let receiver = if binds_this { this_ptr } else { None };
+                return self.call_raw(ctx, receiver, args2);
+            }
         }
 
         self.call_raw(ctx, this_ptr.as_deref_mut(), args.clone())
