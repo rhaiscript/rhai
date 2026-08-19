@@ -2732,6 +2732,13 @@ impl<'e> Vm<'e> {
 
         let scope_start_len = scope.len();
 
+        #[cfg(feature = "debugging")]
+        let orig_call_stack_len = self
+            .global
+            .debugger
+            .as_ref()
+            .map_or(0, |dbg| dbg.call_stack().len());
+
         for (param, slot) in params.iter().zip(first..) {
             let name = program
                 .name(*param)
@@ -2747,10 +2754,33 @@ impl<'e> Vm<'e> {
         }
         let scope_end_len = scope.len();
 
+        // A frame for `back_trace` to see, pushed once the arguments are in the
+        // scope so it reports the values the body will run with — the moment
+        // Rhai picks (`func/script.rs:78`).
+        #[cfg(feature = "debugging")]
+        if self.engine.is_debugger_registered() {
+            let args = scope
+                .iter_inner()
+                .skip(scope_start_len)
+                .map(|(.., v)| v.flatten_clone());
+            let source = self.global.source.clone();
+
+            self.global
+                .debugger_mut()
+                .push_call_stack_frame(name.into(), args, source, pos);
+        }
+
         // A function's parameters are its first locals, sitting at 0 upwards in
         // a scope that holds nothing else — so slot 0 is index 0.
         let mut reached = chunk.entry() as usize;
         let outcome = self.execute(program, scope, chunk, scope_start_len, &mut reached);
+
+        // Pop the frame however the body left — an error escaping a call must not
+        // leave the stack deep, or every later trace is wrong.
+        #[cfg(feature = "debugging")]
+        if let Some(dbg) = self.global.debugger.as_mut() {
+            dbg.rewind_call_stack(orig_call_stack_len);
+        }
 
         // Rewind scope.
         if rewind_scope {

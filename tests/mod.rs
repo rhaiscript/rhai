@@ -16,6 +16,11 @@ mod grain {
     // method-call syntax to reach the native by.
     #[cfg(not(any(feature = "no_function", feature = "no_index", feature = "no_object")))]
     mod callback;
+    // `back_trace` is registered by the `debugging` package, hands back an array,
+    // and has nothing to report unless a script function was called.
+    #[cfg(feature = "debugging")]
+    #[cfg(not(any(feature = "no_function", feature = "no_index")))]
+    mod debugger;
     mod differential;
     mod format;
     // Both are about execution staying inside a bound, which `unchecked`
