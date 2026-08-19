@@ -125,7 +125,13 @@ fn invoke(
     // anything it still needs.
     let values: FnArgsVec<Dynamic> = args.iter_mut().map(|arg| mem::take(*arg)).collect();
 
-    Vm::reentrant(context).call_function(
+    let mut vm = Vm::reentrant(context);
+    // A chunk reached this way can itself build a closure, and that pointer
+    // needs the program as much as one built in the outer run does.
+    #[cfg(not(feature = "no_function"))]
+    vm.adopt(program);
+
+    vm.call_function(
         program,
         name,
         values,

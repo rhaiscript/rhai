@@ -26,6 +26,22 @@ pub enum FnPtrType {
     /// Pre-calculated hash of a script-defined function.
     #[cfg(not(feature = "no_function"))]
     Script { num_params: usize, hash: u64 },
+    /// A function the Grain VM compiled, addressed in its own table.
+    ///
+    /// Distinct from [`Script`][FnPtrType::Script], which says two things at
+    /// once: how many parameters the function takes, *and* that it resolves to
+    /// an AST body at a hash in `global.lib[0]`. A compiled function has the
+    /// first and not the second, so claiming `Script` would be a lie the
+    /// dispatcher acts on.
+    ///
+    /// The program travels with the pointer rather than the index alone: a
+    /// pointer escapes to the host, and a bare index into a table it no longer
+    /// has would address whatever happened to be there.
+    #[cfg(all(feature = "grain", not(feature = "no_function")))]
+    Compiled {
+        program: crate::grain::SharedProgram,
+        index: u32,
+    },
     /// Embedded native Rust function.
     #[cfg(not(feature = "sync"))]
     Native(Shared<dyn Fn(NativeCallContext, &mut FnCallArgs) -> RhaiResult + 'static>),
@@ -43,6 +59,11 @@ impl fmt::Display for FnPtrType {
             Self::Normal => f.write_str("Fn"),
             #[cfg(not(feature = "no_function"))]
             Self::Script { .. } => f.write_str("Fn*"),
+            // Its own mark rather than `Fn` or `Fn*`: the first would hide that
+            // the pointer knows its own shape, the second would claim an AST
+            // body it does not have.
+            #[cfg(all(feature = "grain", not(feature = "no_function")))]
+            Self::Compiled { .. } => f.write_str("Fn#"),
             Self::Native(..) => f.write_str("Fn"),
         }
     }
