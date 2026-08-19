@@ -62,17 +62,12 @@ fn describe(event: DebuggerEvent) -> (&'static str, String) {
 /// `reply` sees the stops so far with the current one last, which is how a test
 /// says "step until you are inside, then let it run". The log is shared rather
 /// than owned because the interface is `Fn` — and `Send + Sync` under `sync`.
-fn recording(
-    reply: impl Fn(&[Stop]) -> DebuggerCommand + Send + Sync + 'static,
-) -> (Engine, Log) {
+fn recording(reply: impl Fn(&[Stop]) -> DebuggerCommand + Send + Sync + 'static) -> (Engine, Log) {
     breaking(Vec::new(), reply)
 }
 
 /// The same, with break-points in place before the run.
-fn breaking(
-    points: Vec<BreakPoint>,
-    reply: impl Fn(&[Stop]) -> DebuggerCommand + Send + Sync + 'static,
-) -> (Engine, Log) {
+fn breaking(points: Vec<BreakPoint>, reply: impl Fn(&[Stop]) -> DebuggerCommand + Send + Sync + 'static) -> (Engine, Log) {
     let log: Log = Arc::new(Mutex::new(Vec::new()));
     let recorded = log.clone();
 
@@ -86,11 +81,7 @@ fn breaking(
         move |_, event, _, _, pos| {
             let (event, detail) = describe(event);
             let mut stops = recorded.lock().expect("nothing else holds the log");
-            stops.push(Stop {
-                event,
-                line: pos.line().unwrap_or(0),
-                detail,
-            });
+            stops.push(Stop { event, line: pos.line().unwrap_or(0), detail });
             Ok(reply(&stops))
         },
     );
@@ -106,11 +97,7 @@ fn stops(log: &Log) -> Vec<Stop> {
 /// position of their own.
 #[cfg(not(feature = "no_position"))]
 fn lines(log: &Log) -> Vec<usize> {
-    stops(log)
-        .iter()
-        .filter(|stop| stop.line > 0)
-        .map(|stop| stop.line)
-        .collect()
+    stops(log).iter().filter(|stop| stop.line > 0).map(|stop| stop.line).collect()
 }
 
 fn events(log: &Log) -> Vec<&'static str> {
@@ -124,20 +111,13 @@ fn compiled(engine: &Engine, source: &str) -> Program<'static> {
     let ast = engine.compile(source).expect("must compile");
     let program = Compiler::new().compile(&ast);
 
-    assert_eq!(
-        program.residual_count(),
-        0,
-        "{source:?} must be fully lowered, or the stops counted are the walker's: {:?}",
-        program.first_unsupported(),
-    );
+    assert_eq!(program.residual_count(), 0, "{source:?} must be fully lowered, or the stops counted are the walker's: {:?}", program.first_unsupported(),);
 
     program
 }
 
 fn vm_eval(engine: &Engine, source: &str) -> Dynamic {
-    Vm::new(engine)
-        .eval_with_scope(&mut Scope::new(), &compiled(engine, source))
-        .expect("must run")
+    Vm::new(engine).eval_with_scope(&mut Scope::new(), &compiled(engine, source)).expect("must run")
 }
 
 fn walker_eval(engine: &Engine, source: &str) -> Dynamic {
@@ -148,9 +128,7 @@ fn walker_eval(engine: &Engine, source: &str) -> Dynamic {
 /// left in it.
 fn walker_eval_with(engine: &Engine, scope: &mut Scope, source: &str) -> Dynamic {
     let ast = engine.compile(source).expect("must compile");
-    engine
-        .eval_ast_with_scope::<Dynamic>(scope, &ast)
-        .expect("must run under Rhai too")
+    engine.eval_ast_with_scope::<Dynamic>(scope, &ast).expect("must run under Rhai too")
 }
 
 /// Run it for the stops rather than for the answer.
@@ -163,15 +141,11 @@ fn walker_run(engine: &Engine, source: &str) {
 }
 
 fn vm_trace(engine: &Engine, source: &str) -> Array {
-    vm_eval(engine, source)
-        .into_array()
-        .expect("back_trace hands back an array")
+    vm_eval(engine, source).into_array().expect("back_trace hands back an array")
 }
 
 fn walker_trace(engine: &Engine, source: &str) -> Array {
-    walker_eval(engine, source)
-        .into_array()
-        .expect("back_trace hands back an array")
+    walker_eval(engine, source).into_array().expect("back_trace hands back an array")
 }
 
 /// Recursion, so a single missing push cannot pass by looking like an off-by-one.
@@ -216,11 +190,7 @@ fn a_caught_throw_leaves_no_frames_behind() {
     let ours = vm_trace(&engine, AFTER_A_CAUGHT_THROW);
     let walker = walker_trace(&engine, AFTER_A_CAUGHT_THROW);
 
-    assert_eq!(
-        ours.len(),
-        walker.len(),
-        "frames from the unwound calls are still on the stack",
-    );
+    assert_eq!(ours.len(), walker.len(), "frames from the unwound calls are still on the stack",);
 }
 
 /// Three statements, one per line, and nothing the optimizer can fold away.
@@ -251,25 +221,17 @@ b
 #[cfg(not(feature = "no_position"))]
 fn stepping_stops_at_every_statement() {
     let (engine, log) = recording(|_| DebuggerCommand::StepInto);
-    vm_run(&engine,THREE);
+    vm_run(&engine, THREE);
 
     assert_eq!(lines(&log), vec![1, 2, 3], "one stop per statement, in order");
-    assert_eq!(
-        events(&log),
-        vec!["start", "step", "step", "end"],
-        "the run must announce both of its ends",
-    );
+    assert_eq!(events(&log), vec!["start", "step", "step", "end"], "the run must announce both of its ends",);
 
     // The walker stops at expressions too, so it can only be asked for a
     // superset — that the VM stops nowhere Rhai would not.
     let (walker_engine, walker) = recording(|_| DebuggerCommand::StepInto);
-    walker_run(&walker_engine,THREE);
+    walker_run(&walker_engine, THREE);
     for line in lines(&log) {
-        assert!(
-            lines(&walker).contains(&line),
-            "line {line} is a stop the walker does not have: {:?}",
-            lines(&walker),
-        );
+        assert!(lines(&walker).contains(&line), "line {line} is a stop the walker does not have: {:?}", lines(&walker),);
     }
 }
 
@@ -283,45 +245,29 @@ fn a_break_point_stops_a_compiled_statement() {
     };
 
     let (engine, log) = breaking(vec![point()], |_| DebuggerCommand::Continue);
-    vm_run(&engine,THREE);
+    vm_run(&engine, THREE);
 
-    assert_eq!(
-        stops(&log)
-            .iter()
-            .filter(|stop| stop.event == "break")
-            .map(|stop| stop.line)
-            .collect::<Vec<_>>(),
-        vec![2],
-        "the break-point on line 2 fired once, at line 2",
-    );
+    assert_eq!(stops(&log).iter().filter(|stop| stop.event == "break").map(|stop| stop.line).collect::<Vec<_>>(), vec![2], "the break-point on line 2 fired once, at line 2",);
 
     // Rhai's own count is not one: a line matches the statement's node and
     // every expression node on it. Agreement is that the line stops at all.
     let (walker_engine, walker) = breaking(vec![point()], |_| DebuggerCommand::Continue);
-    walker_run(&walker_engine,THREE);
-    assert!(
-        stops(&walker).iter().any(|stop| stop.event == "break"),
-        "the walker did not stop for the same break-point: {:?}",
-        stops(&walker),
-    );
+    walker_run(&walker_engine, THREE);
+    assert!(stops(&walker).iter().any(|stop| stop.event == "break"), "the walker did not stop for the same break-point: {:?}", stops(&walker),);
 }
 
 #[test]
 #[cfg(not(feature = "no_position"))]
 fn a_next_steps_over_a_call() {
     let (engine, log) = recording(|_| DebuggerCommand::Next);
-    vm_run(&engine,CALLING);
+    vm_run(&engine, CALLING);
 
     assert_eq!(lines(&log), vec![4, 5, 6], "the call's own line, not its body");
 
     let (walker_engine, walker) = recording(|_| DebuggerCommand::Next);
-    walker_run(&walker_engine,CALLING);
+    walker_run(&walker_engine, CALLING);
     for log in [&log, &walker] {
-        assert!(
-            !lines(log).contains(&2),
-            "a `next` stopped inside the callee: {:?}",
-            lines(log),
-        );
+        assert!(!lines(log).contains(&2), "a `next` stopped inside the callee: {:?}", lines(log),);
     }
 }
 
@@ -357,11 +303,7 @@ fn a_next_steps_over_a_block() {
     let (walker_engine, walker) = recording(|_| DebuggerCommand::Next);
     walker_run(&walker_engine, BLOCKED);
     for log in [&log, &walker] {
-        assert!(
-            !lines(log).iter().any(|line| [3, 4].contains(line)),
-            "a `next` stopped inside the block: {:?}",
-            lines(log),
-        );
+        assert!(!lines(log).iter().any(|line| [3, 4].contains(line)), "a `next` stopped inside the block: {:?}", lines(log),);
     }
 }
 
@@ -369,34 +311,16 @@ fn a_next_steps_over_a_block() {
 #[cfg(not(feature = "no_position"))]
 fn a_step_goes_into_a_call_and_reports_leaving_it() {
     let (engine, log) = recording(|_| DebuggerCommand::StepInto);
-    vm_run(&engine,CALLING);
+    vm_run(&engine, CALLING);
 
-    assert_eq!(
-        lines(&log),
-        vec![4, 5, 1, 2, 5, 6],
-        "entering the body, running its statement, and coming back out",
-    );
-    assert_eq!(
-        stops(&log)
-            .iter()
-            .find(|stop| stop.event == "exit")
-            .map(|stop| stop.detail.clone()),
-        Some("2".to_string()),
-        "leaving `inner` must report what it returned",
-    );
+    assert_eq!(lines(&log), vec![4, 5, 1, 2, 5, 6], "entering the body, running its statement, and coming back out",);
+    assert_eq!(stops(&log).iter().find(|stop| stop.event == "exit").map(|stop| stop.detail.clone()), Some("2".to_string()), "leaving `inner` must report what it returned",);
 
     // The value a body ended with is the one thing about leaving it that both
     // engines can state exactly.
     let (walker_engine, walker) = recording(|_| DebuggerCommand::StepInto);
-    walker_run(&walker_engine,CALLING);
-    assert_eq!(
-        stops(&walker)
-            .iter()
-            .find(|stop| stop.event == "exit")
-            .map(|stop| stop.detail.clone()),
-        Some("2".to_string()),
-        "the walker reports the same body's value",
-    );
+    walker_run(&walker_engine, CALLING);
+    assert_eq!(stops(&walker).iter().find(|stop| stop.event == "exit").map(|stop| stop.detail.clone()), Some("2".to_string()), "the walker reports the same body's value",);
 }
 
 /// A `throw` out of a call, caught outside it, so the run still finishes.
@@ -412,30 +336,16 @@ a
 #[test]
 fn leaving_a_call_by_raising_is_reported_as_an_error() {
     let (engine, log) = recording(|_| DebuggerCommand::StepInto);
-    vm_run(&engine,RAISING);
+    vm_run(&engine, RAISING);
 
-    let raised: Vec<_> = stops(&log)
-        .iter()
-        .filter(|stop| stop.event == "raised")
-        .map(|stop| stop.detail.clone())
-        .collect();
+    let raised: Vec<_> = stops(&log).iter().filter(|stop| stop.event == "raised").map(|stop| stop.detail.clone()).collect();
 
     assert_eq!(raised.len(), 1, "one call raised, so one such event: {:?}", stops(&log));
-    assert!(
-        raised[0].contains("42"),
-        "the event must carry the error the caller sees, got {:?}",
-        raised[0],
-    );
+    assert!(raised[0].contains("42"), "the event must carry the error the caller sees, got {:?}", raised[0],);
 
     let (walker_engine, walker) = recording(|_| DebuggerCommand::StepInto);
-    walker_run(&walker_engine,RAISING);
-    assert!(
-        stops(&walker)
-            .iter()
-            .any(|stop| stop.event == "raised" && stop.detail.contains("42")),
-        "the walker reports the same error: {:?}",
-        stops(&walker),
-    );
+    walker_run(&walker_engine, RAISING);
+    assert!(stops(&walker).iter().any(|stop| stop.event == "raised" && stop.detail.contains("42")), "the walker reports the same error: {:?}", stops(&walker),);
 }
 
 #[test]
@@ -454,28 +364,18 @@ fn a_function_exit_runs_the_rest_of_the_body() {
     };
 
     let (engine, log) = recording(reply);
-    vm_run(&engine,CALLING);
+    vm_run(&engine, CALLING);
 
     assert_eq!(
-        stops(&log)
-            .iter()
-            .find(|stop| stop.event == "exit")
-            .map(|stop| stop.detail.clone()),
+        stops(&log).iter().find(|stop| stop.event == "exit").map(|stop| stop.detail.clone()),
         Some("2".to_string()),
         "asking to leave `inner` must stop again as it is left: {:?}",
         stops(&log),
     );
 
     let (walker_engine, walker) = recording(reply);
-    walker_run(&walker_engine,CALLING);
-    assert_eq!(
-        stops(&walker)
-            .iter()
-            .find(|stop| stop.event == "exit")
-            .map(|stop| stop.detail.clone()),
-        Some("2".to_string()),
-        "the walker leaves it the same way",
-    );
+    walker_run(&walker_engine, CALLING);
+    assert_eq!(stops(&walker).iter().find(|stop| stop.event == "exit").map(|stop| stop.detail.clone()), Some("2".to_string()), "the walker leaves it the same way",);
 }
 
 /// What a callback declares must not disturb the program it stopped.
@@ -513,26 +413,14 @@ a + b
 ";
 
     let mut ours = Scope::new();
-    let value = Vm::new(&engine)
-        .eval_with_scope(&mut ours, &compiled(&engine, DECLARING))
-        .expect("must run");
+    let value = Vm::new(&engine).eval_with_scope(&mut ours, &compiled(&engine, DECLARING)).expect("must run");
 
     let mut walked = Scope::new();
     let expected = walker_eval_with(&engine, &mut walked, DECLARING);
 
-    assert_eq!(
-        format!("{value:?}"),
-        format!("{expected:?}"),
-        "a stop moved the slots underneath the statements after it",
-    );
-    assert!(
-        ours.get_value::<INT>("injected").is_none(),
-        "the callback's variable outlived the stop, so the slots are its problem now",
-    );
-    assert!(
-        walked.get_value::<INT>("injected").is_some(),
-        "Rhai no longer keeps what a callback declares, so this is not the difference",
-    );
+    assert_eq!(format!("{value:?}"), format!("{expected:?}"), "a stop moved the slots underneath the statements after it",);
+    assert!(ours.get_value::<INT>("injected").is_none(), "the callback's variable outlived the stop, so the slots are its problem now",);
+    assert!(walked.get_value::<INT>("injected").is_some(), "Rhai no longer keeps what a callback declares, so this is not the difference",);
 }
 
 /// A break-point on a *name* has nothing to match under the VM, and saying so
@@ -544,23 +432,13 @@ a + b
 /// the script never wrote. Position break-points cover the same line.
 #[test]
 fn a_break_point_on_a_function_name_cannot_fire_under_the_vm() {
-    let point = || BreakPoint::AtFunctionName {
-        name: "inner".into(),
-        enabled: true,
-    };
+    let point = || BreakPoint::AtFunctionName { name: "inner".into(), enabled: true };
 
     let (engine, log) = breaking(vec![point()], |_| DebuggerCommand::Continue);
-    vm_run(&engine,CALLING);
-    assert_eq!(
-        events(&log),
-        vec!["start", "end"],
-        "a name break-point stopped the VM, so this limitation is stale",
-    );
+    vm_run(&engine, CALLING);
+    assert_eq!(events(&log), vec!["start", "end"], "a name break-point stopped the VM, so this limitation is stale",);
 
     let (walker_engine, walker) = breaking(vec![point()], |_| DebuggerCommand::Continue);
-    walker_run(&walker_engine,CALLING);
-    assert!(
-        events(&walker).contains(&"break"),
-        "the walker no longer stops on a name either, so this is not the VM's gap",
-    );
+    walker_run(&walker_engine, CALLING);
+    assert!(events(&walker).contains(&"break"), "the walker no longer stops on a name either, so this is not the VM's gap",);
 }
