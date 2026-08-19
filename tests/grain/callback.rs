@@ -53,7 +53,6 @@ fn a_native_can_call_a_closure_back() {
     agree("let a = [1, 2, 3, 4]; a.filter(|x| x % 2 == 0)");
 }
 
-
 #[test]
 fn a_native_can_call_a_named_function_back() {
     agree("fn double(x) { x * 2 } let a = [1, 2, 3]; a.map(Fn(\"double\"))");
@@ -186,11 +185,7 @@ fn a_callback_costs_more_call_levels() {
 fn without_the_wrappers_the_pointer_does_not_resolve() {
     let engine = corpus::engine();
 
-    for source in [
-        "let a = [1, 2, 3]; a.map(|x| x * 2)",
-        "let a = [1, 2, 3]; a.reduce(|a, v| if a == () { v } else { a + v })",
-        "let s = 0; let a = [10, 20, 30]; a.for_each(|i| s += i); s",
-    ] {
+    for source in ["let a = [1, 2, 3]; a.map(|x| x * 2)", "let a = [1, 2, 3]; a.reduce(|a, v| if a == () { v } else { a + v })", "let s = 0; let a = [10, 20, 30]; a.for_each(|i| s += i); s"] {
         let ast = engine.compile(source).unwrap();
         let program = Compiler::new().compile(&ast);
         assert!(program.makes_fn_pointers(), "{source} must be a program a host is told to run with callbacks",);
