@@ -97,6 +97,14 @@ pub fn engine() -> rhai::Engine {
             .register_type_with_name::<Holder>("Holder")
             .register_fn("holder", |level: INT| Holder { inner: Widget { level, cells: vec![1, 2, 3] } })
             .register_get_set("inner", |h: &mut Holder| h.inner.clone(), |h: &mut Holder, w: Widget| h.inner = w);
+
+        // The same `Widget`, behind an *indexer* rather than a property. The
+        // getter above is reached with the property name as a static operand;
+        // this one is reached with an index the walk has to evaluate, and a
+        // native's by-value parameter is bound by `take` — so the index a
+        // write-back needs is gone by the time the setter wants it.
+        #[cfg(not(feature = "no_index"))]
+        engine.register_indexer_get_set(|h: &mut Holder, _: INT| h.inner.clone(), |h: &mut Holder, _: INT, w: Widget| h.inner = w);
     }
 
     engine
@@ -227,6 +235,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
             | "host_index_get"
             | "host_index_set"
             | "host_mutation_before_a_failure_survives_in_an_array"
+            | "host_index_temp_set"
             | "host_temp_index_set"
             | "index_assign_array"
             | "index_assign_nested"
@@ -726,6 +735,10 @@ pub const CASES: &[Case] = &[
     // Two levels, so the middle one is a temporary.
     case("host_temp_set", "let h = holder(3); h.inner.level = 8; h.inner.level"),
     case("host_temp_index_set", "let h = holder(3); h.inner[0] = 7; h.inner[0]"),
+    // The mirror of it: an *index* step handing back the temporary, with the
+    // property below. The index has to survive the getter to address the setter
+    // with afterwards.
+    case("host_index_temp_set", "let h = holder(3); h[0].level = 8; h.inner.level"),
     // A mutating call on a temporary: Rhai writes it back, so the change
     // survives.
     case("host_temp_mutates", "let h = holder(3); h.inner.bump(); h.inner.level"),

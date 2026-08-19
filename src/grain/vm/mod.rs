@@ -1440,6 +1440,13 @@ impl<'e> Vm<'e> {
         let assigning = last && value.is_some();
         let mut detached = Scope::new();
 
+        // Cloned *before* the call, as Rhai clones it (`eval/chaining.rs:706`).
+        // `get_indexed_mut` may reach a custom indexer, and a native's by-value
+        // parameter is bound by `take` (`func/register.rs:69`) — so afterwards
+        // there is nothing left to address the setter with. Only the paths that
+        // can write need it; a read returns below without ever looking.
+        let index_for_setter = (!last || value.is_some()).then(|| idx.clone());
+
         let mut item = match self.engine.get_indexed_mut(
             &mut self.global,
             &mut self.caches,
@@ -1497,7 +1504,7 @@ impl<'e> Vm<'e> {
             // The element was a temporary — a custom indexer's — so the setter
             // is the only way back (`eval/chaining.rs:744`).
             let mut updated = item.take_or_clone();
-            let mut index = idx.clone();
+            let mut index = index_for_setter.expect("a read returns before here");
             self.call_indexer_set(target, &mut index, &mut updated, bracket)?;
         }
 
