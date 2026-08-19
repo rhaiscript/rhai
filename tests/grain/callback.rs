@@ -53,6 +53,7 @@ fn a_native_can_call_a_closure_back() {
     agree("let a = [1, 2, 3, 4]; a.filter(|x| x % 2 == 0)");
 }
 
+
 #[test]
 fn a_native_can_call_a_named_function_back() {
     agree("fn double(x) { x * 2 } let a = [1, 2, 3]; a.map(Fn(\"double\"))");
@@ -164,16 +165,37 @@ fn a_callback_costs_more_call_levels() {
     }
 }
 
+/// The whole reason `eval_with_callbacks` exists. A plain eval leaves Rhai
+/// nowhere to look, and the failure is a lookup failure rather than anything
+/// worse.
+///
+/// It is also what keeps the two entry points from meaning different things.
+/// `eval_with_scope` borrows the program, so a pointer it builds has no shared
+/// ownership to carry and cannot declare how many parameters its chunk takes —
+/// which is what the natives above size their calls from. That weakness is
+/// unreachable rather than merely unlikely: the only route from a native to a
+/// compiled chunk is a wrapper, and the run that installs no wrappers is the
+/// same run that hands out the weaker pointer. The call dies on the name before
+/// an argument list is ever built.
+///
+/// Every shape the wrappers path had to be taught is checked, not just `map`:
+/// if one of them ever *did* resolve here it would be answering with whatever
+/// order a pointer that cannot describe itself happens to produce, which is the
+/// silent-wrong-answer case nothing else would catch.
 #[test]
 fn without_the_wrappers_the_pointer_does_not_resolve() {
-    // The whole reason `eval_with_callbacks` exists. A plain eval leaves Rhai
-    // nowhere to look, and the failure is a lookup failure rather than
-    // anything worse.
     let engine = corpus::engine();
-    let source = "let a = [1, 2, 3]; a.map(|x| x * 2)";
-    let ast = engine.compile(source).unwrap();
-    let program = Compiler::new().compile(&ast);
 
-    let err = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).unwrap_err();
-    assert!(format!("{err:?}").contains("ErrorFunctionNotFound"), "{err}");
+    for source in [
+        "let a = [1, 2, 3]; a.map(|x| x * 2)",
+        "let a = [1, 2, 3]; a.reduce(|a, v| if a == () { v } else { a + v })",
+        "let s = 0; let a = [10, 20, 30]; a.for_each(|i| s += i); s",
+    ] {
+        let ast = engine.compile(source).unwrap();
+        let program = Compiler::new().compile(&ast);
+        assert!(program.makes_fn_pointers(), "{source} must be a program a host is told to run with callbacks",);
+
+        let err = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).unwrap_err();
+        assert!(format!("{err:?}").contains("ErrorFunctionNotFound"), "{source}: {err}");
+    }
 }

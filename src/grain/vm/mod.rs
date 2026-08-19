@@ -401,6 +401,17 @@ pub struct Vm<'e> {
     /// it no longer has would address whatever took its place. Only a caller
     /// holding a [`SharedProgram`] can give it one, so this is `None` under
     /// [`Vm::eval_with_scope`], where a pointer stays late-bound by name.
+    ///
+    /// That the two entry points hand out different pointers is safe for one
+    /// reason, and it is worth stating because it is the thing that could rot:
+    /// a pointer's declared arity is read *only* when a native sizes a call
+    /// through it, a native can reach a compiled chunk *only* through the
+    /// wrappers module, and the wrappers are installed by exactly the calls
+    /// that set this field. So a pointer that cannot describe itself is also a
+    /// pointer no native can reach — such a call fails on the name instead,
+    /// which `callback.rs::without_the_wrappers_the_pointer_does_not_resolve`
+    /// pins. Register wrappers anywhere this is left `None` and that stops
+    /// being true.
     #[cfg(not(feature = "no_function"))]
     owner: Option<SharedProgram>,
     /// Whether this `Vm` started the run, and so may clear its trace.
