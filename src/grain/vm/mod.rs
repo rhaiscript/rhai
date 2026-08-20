@@ -1720,7 +1720,11 @@ impl<'e> Vm<'e> {
         let (out, changed) =
             self.walk_chain(program, chain, rest, &mut temp, operands, value, pos)?;
         if changed {
-            let _ = call(self, setter, &mut [target, &mut temp])?;
+            let _ = call(self, setter, &mut [target, &mut temp]).or_else(|err| match *err {
+                // Fail silently if the property is read-only, as Rhai does (`eval/chaining.rs:1039`).
+                EvalAltResult::ErrorDotExpr(..) => Ok(Dynamic::UNIT),
+                _ => Err(err),
+            })?;
         }
         Ok((out, changed))
     }
