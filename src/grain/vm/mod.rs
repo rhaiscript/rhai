@@ -929,9 +929,23 @@ impl<'e> Vm<'e> {
     /// [`FnPtrType::Compiled`] where the answer is unambiguous and we have the
     /// program to point into, and [`FnPtrType::Normal`] otherwise — a
     /// late-bound name, which is what every such pointer was before.
+    ///
+    /// Anonymous only, and that is the whole of what keeps a declared shape from
+    /// changing which function runs. `Fn("f")` takes a *string*: it means
+    /// whatever `f` turns out to be at the arity the caller asks for, and Rhai
+    /// resolves it by trying shapes until one dispatches. Declaring a shape
+    /// resolves it here instead, which is a different answer as soon as anything
+    /// else — a host's function, an overload the compiler could not lower — sits
+    /// at a shape Rhai would have reached first. A closure's name is the
+    /// parser's, cannot collide with one, and is the case a native callback
+    /// actually needs sized.
     #[cfg(not(feature = "no_function"))]
     fn compiled_pointer(&self, program: &Program, name_index: u32) -> FnPtrType {
-        if let Some(owner) = self.owner.as_ref() {
+        let anonymous = program
+            .name(name_index)
+            .map_or(false, crate::parser::is_anonymous_fn);
+
+        if let (Some(owner), true) = (self.owner.as_ref(), anonymous) {
             let mut found = program
                 .functions()
                 .iter()

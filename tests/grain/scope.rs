@@ -674,6 +674,28 @@ fn a_closure_pointer_carries_its_program_when_it_can() {
     assert!(owned.starts_with("Fn#(\"anon$"), "a program to carry, so its own kind: {owned}",);
 }
 
+/// A pointer to a name a script could have written stays late-bound, even with
+/// the program in hand to describe it with.
+///
+/// `Fn("f")` takes a string: it means whatever `f` is at the arity the caller
+/// asks for, and Rhai settles that by trying shapes until one dispatches. A
+/// pointer that declared a shape would settle it here instead — see
+/// `Vm::compiled_pointer` — so only an anonymous function gets one.
+#[test]
+#[cfg(not(feature = "no_function"))]
+fn a_pointer_to_a_written_name_does_not_declare_a_shape() {
+    let engine = corpus::engine();
+    let source = "fn pick(v, i) { v + i } let f = Fn(\"pick\"); f";
+
+    let ast = engine.compile(source).expect("must compile");
+    let program = Compiler::new().compile(&ast).into_shared();
+    assert_eq!(program.residual_count(), 0, "the pointer must lower");
+
+    let owned = Vm::new(&engine).eval_with_callbacks(&mut Scope::new(), &program).expect("must run");
+
+    assert!(format!("{owned:?}").starts_with("Fn(\"pick\""), "a written name must stay a bare name: {owned:?}",);
+}
+
 /// Calling a compiled function from outside, which is what a native wrapper
 /// will do once compiled chunks are registered for callbacks.
 #[test]

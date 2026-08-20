@@ -159,6 +159,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
             name,
             "block_as_argument"
                 | "error_a_skipped_function_cannot_see_the_caller"
+                | "error_map_callback_this_and_an_argument"
                 | "error_wrong_arity"
                 | "for_over_captured_array"
                 | "for_return_from_body"
@@ -218,6 +219,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
             | "error_host_index_bounds"
             | "error_index_into_an_unindexable_step"
             | "error_index_into_an_unindexable_step_deep"
+            | "error_map_callback_this_and_an_argument"
             | "error_no_function_for_the_receiver"
             | "error_property_on_a_temporary"
             | "error_temp_root_index_runs_first"
@@ -303,6 +305,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
                 | "error_const_root_method_step"
                 | "error_fn_ptr_unknown_name"
                 | "error_index_into_an_unindexable_step_deep"
+                | "error_map_callback_this_and_an_argument"
                 | "error_map_write_through_an_absent_key"
                 | "error_method_on_a_variable"
                 | "error_op_assign_undefined_for_types"
@@ -820,6 +823,11 @@ pub const CASES: &[Case] = &[
     case("closure_for_each_binds_this", "let t = 0; [1, 2, 3].for_each(|| t += this); t"),
     // And the argument form, which takes the element as a parameter instead.
     case("closure_map_takes_an_argument", "[1, 2, 3].map(|x| x * 2)"),
+    // A callback that declares a parameter *and* reads `this`. The element goes
+    // into the parameter and nothing binds the receiver, so this is
+    // `ErrorUnboundThis` — the one shape a wrapper that took its first argument
+    // as a receiver would answer instead of raising.
+    case("error_map_callback_this_and_an_argument", "[1, 2, 3].map(|x| this + x)"),
     // `type_of` has no registered implementation anywhere — Rhai answers it by
     // name — so it is reached through the same door every other call is.
     // A constant argument is folded by the optimizer and proves nothing.

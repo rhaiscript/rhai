@@ -38,11 +38,18 @@ pub enum FnPtrType {
     /// pointer escapes to the host, and a bare index into a table it no longer
     /// has would address whatever happened to be there.
     ///
-    /// What this variant is *for* is declaring the callee's shape, which only
-    /// [`FnPtr::declared_shape`] and its one caller read. Everywhere else — the
-    /// dispatch arms in `func/call.rs`, and [`FnPtr::call_raw`] — it deliberately
-    /// falls through to dispatch by name, exactly as [`Normal`][FnPtrType::Normal]
-    /// does, reaching the chunk through the wrapper the VM registered for it
+    /// Only ever an *anonymous* function. A name a script could have written is
+    /// late-bound — `Fn("f")` is whatever `f` is at the arity the caller asks
+    /// for — and declaring a shape would settle that here instead, picking a
+    /// different function from the one Rhai would have found. See
+    /// `Vm::compiled_pointer`.
+    ///
+    /// What this variant is *for* is declaring the callee's shape, and two
+    /// places read it: [`FnPtrType::declared_params`] for how many parameters the
+    /// chunk takes, and [`FnPtr::call_raw`] for whether it can be handed a
+    /// receiver. The dispatch arms in `func/call.rs` ignore it and fall through
+    /// to dispatch by name, exactly as [`Normal`][FnPtrType::Normal] does,
+    /// reaching the chunk through the wrapper the VM registered for it
     /// (`grain/vm/callback.rs`). That is not an oversight: routing a call
     /// straight into the chunk is a larger change, and leaving those sites alone
     /// keeps this variant a strict improvement on the name-only pointer rather
@@ -94,6 +101,29 @@ impl FnPtrType {
             Self::Script { num_params, hash } if *num_params == num_args => {
                 global.lib[0].get_script_fn_by_hash(*hash)
             }
+            _ => None,
+        }
+    }
+
+    /// How many parameters the callee declares.
+    ///
+    /// [`None`] where the pointer cannot say — a bare name, or a native — which
+    /// leaves the caller to guess a shape and correct itself from the resulting
+    /// `ErrorFunctionNotFound`.
+    ///
+    /// Says nothing about the receiver: whether the callee can be handed one is
+    /// [`FnPtr::call_raw`]'s to decide, and it decides the same way wherever the
+    /// call came from.
+    #[must_use]
+    fn declared_params(&self) -> Option<usize> {
+        match self {
+            #[cfg(not(feature = "no_function"))]
+            Self::Script { num_params, .. } => Some(*num_params),
+            #[cfg(all(feature = "grain", not(feature = "no_function")))]
+            Self::Compiled { program, index } => program
+                .functions()
+                .get(*index as usize)
+                .map(|f| f.params.len()),
             _ => None,
         }
     }
@@ -491,6 +521,31 @@ impl FnPtr {
             );
         }
 
+        // A compiled chunk that does not read the receiver cannot be handed one.
+        //
+        // It is reached by name, through a wrapper registered at the chunk's own
+        // arity (`grain/vm/callback.rs`), so a receiver becomes argument zero and
+        // the call is one argument too wide to resolve at all. Rhai's own pointer
+        // has nothing to decide here: a script body binds `this` whether or not
+        // it reads it.
+        //
+        // Here rather than in [`FnPtr::call_raw_with_extra_args`] because this is
+        // the entry every caller reaches — including a host's native, which can
+        // hand over a receiver without going through the argument-shaping above.
+        #[cfg(all(feature = "grain", not(feature = "no_function")))]
+        if let FnPtrType::Compiled { ref program, index } = self.typ {
+            // Read through the index rather than stored beside it: the pointer
+            // carries the program, so the answer is one bounds check away and a
+            // copy in the pointer would be a second place for it to be wrong.
+            if !program
+                .functions()
+                .get(index as usize)
+                .map_or(false, |f| f.takes_this)
+            {
+                this_ptr = None;
+            }
+        }
+
         // Embedded native Rust function?
         match self.typ {
             FnPtrType::Native(ref func) => {
@@ -602,32 +657,6 @@ impl FnPtr {
             }
         }
     }
-    /// How many parameters the callee declares, and whether it can be *handed*
-    /// the receiver rather than having it materialised into the arguments.
-    ///
-    /// [`None`] where the pointer cannot say — a bare name, or a native — which
-    /// leaves the caller to guess a shape and correct itself from the resulting
-    /// `ErrorFunctionNotFound`.
-    ///
-    /// The second half is not decoration. A script body binds `this` whether or
-    /// not it reads it, so Rhai's own pointers answer `true` unconditionally. A
-    /// compiled chunk is reached through a wrapper registered at one arity, and
-    /// only a chunk that reads the receiver is reachable that way at all
-    /// (`grain/vm/callback.rs`) — so handing one to a chunk that does not take
-    /// it means calling a wrapper with an argument too many.
-    #[must_use]
-    fn declared_shape(&self) -> Option<(usize, bool)> {
-        match self.typ {
-            #[cfg(not(feature = "no_function"))]
-            FnPtrType::Script { num_params, .. } => Some((num_params, true)),
-            #[cfg(all(feature = "grain", not(feature = "no_function")))]
-            FnPtrType::Compiled { ref program, index } => program
-                .functions()
-                .get(index as usize)
-                .map(|f| (f.params.len(), f.takes_this)),
-            _ => None,
-        }
-    }
 
     /// Make a call to a function pointer with either a specified number of arguments, or with extra
     /// arguments attached.
@@ -640,16 +669,12 @@ impl FnPtr {
         extras: [Dynamic; E],
         move_this_ptr_to_args: usize,
     ) -> RhaiResult {
-        if let Some((num_params, binds_this)) = self.declared_shape() {
+        if let Some(num_params) = self.typ.declared_params() {
             if num_params == N + self.curry().len() {
-                // `binds_this` is what separates a callee that will be *handed*
-                // the receiver from one that cannot take it. Rhai's own pointers
-                // reach a script body, which binds `this` whether or not it
-                // reads it; a compiled chunk is reached by name, and `call_raw`
-                // would splice the receiver in as argument zero — one more
-                // argument than the callee has room for.
-                let receiver = if binds_this { this_ptr } else { None };
-                return self.call_raw(ctx, receiver, args);
+                // The callee asked for no more than the arguments, so the
+                // receiver stays a receiver. Whether it can take one at all is
+                // `call_raw`'s to answer.
+                return self.call_raw(ctx, this_ptr, args);
             }
             if MOVE_PTR {
                 if let Some(this_ptr) = this_ptr.as_deref() {
@@ -683,11 +708,9 @@ impl FnPtr {
                 let mut args2 = FnArgsVec::with_capacity(args.len() + extras.len());
                 args2.extend(args);
                 args2.extend(extras);
-                // Same reasoning as the first row: the callee asked for the
-                // extras and not for the receiver, so the receiver must stay out
-                // of the argument list.
-                let receiver = if binds_this { this_ptr } else { None };
-                return self.call_raw(ctx, receiver, args2);
+                // As in the first row: the callee asked for the extras, not for
+                // the receiver materialised beside them.
+                return self.call_raw(ctx, this_ptr, args2);
             }
         }
 
