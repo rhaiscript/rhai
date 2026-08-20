@@ -155,6 +155,11 @@ required-features = ["metadata", "internals"]
 name = "grain_bench"
 required-features = ["grain"]
 
+# A disassembler, for reading what a script lowered to.
+[[example]]
+name = "grain_dump"
+required-features = ["grain"]
+
 # The grain harnesses, as one binary. `tests/mod.rs` wraps them in an inline
 # `mod grain`, which is what puts their module paths inside `tests/grain/`.
 [[test]]
