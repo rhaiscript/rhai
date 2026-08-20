@@ -2240,7 +2240,7 @@ impl<'e> Vm<'e> {
     /// Some syntactic calls can be self-implemented or short-circuited.
     fn call_syntactic(
         &mut self,
-        program: &Program,
+        #[cfg_attr(feature = "no_function", allow(unused))] program: &Program,
         name: &str,
         argc: usize,
         first: usize,
