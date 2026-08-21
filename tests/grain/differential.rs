@@ -45,18 +45,14 @@ fn run_stock(engine: &Engine, source: &str) -> Outcome {
 fn run_vm(engine: &Engine, source: &str) -> Outcome {
     let mut scope = Scope::new();
     let result = engine.compile(source).map_err(|err| format!("{err:?}")).and_then(|ast| {
-        let program = Compiler::new().compile(&ast);
+        let program = Compiler::new().compile(&ast).into_shared();
         // A program that can hand a pointer to a native has to be run the
         // way such a program is meant to be run, or the comparison is
         // against a configuration nobody would ship.
-        if program.makes_fn_pointers() {
-            let program = program.into_shared();
-            Vm::new(engine).eval_with_callbacks(&mut scope, &program)
-        } else {
-            Vm::new(engine).eval_with_scope(&mut scope, &program)
-        }
-        .map(|value| format!("{value:?}"))
-        .map_err(|err| format!("{err:?}"))
+        Vm::new(engine)
+            .eval_with_callbacks(&mut scope, &program)
+            .map(|value| format!("{value:?}"))
+            .map_err(|err| format!("{err:?}"))
     });
 
     Outcome { result, scope: snapshot_scope(&scope) }

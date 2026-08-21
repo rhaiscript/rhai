@@ -34,13 +34,8 @@ fn snapshot(scope: &Scope, result: Result<Dynamic, Box<rhai::EvalAltResult>>) ->
 /// bytes, which is the property that makes an artifact self-describing.
 fn run(engine: &Engine, program: Program) -> Outcome {
     let mut scope = Scope::new();
-    let result = if program.makes_fn_pointers() {
-        let program = program.into_shared();
-        Vm::new(engine).eval_with_callbacks(&mut scope, &program)
-    } else {
-        Vm::new(engine).eval_with_scope(&mut scope, &program)
-    };
-
+    let program = program.into_shared();
+    let result = Vm::new(engine).eval_with_callbacks(&mut scope, &program);
     snapshot(&scope, result)
 }
 
@@ -266,14 +261,8 @@ fn a_golden_artifact_written_by_an_older_build_still_runs() {
         };
         let ran = {
             let mut scope = golden_scope();
-            // Whether the program can hand a pointer to a native is read back off
-            // the bytes, so how it must be run is part of what is being checked.
-            let result = if loaded.makes_fn_pointers() {
-                let loaded = loaded.into_shared();
-                Vm::new(&engine).eval_with_callbacks(&mut scope, &loaded)
-            } else {
-                Vm::new(&engine).eval_with_scope(&mut scope, &loaded)
-            };
+            let loaded = loaded.into_shared();
+            let result = Vm::new(&engine).eval_with_callbacks(&mut scope, &loaded);
             snapshot(&scope, result)
         };
 
@@ -787,21 +776,12 @@ fn a_caught_error_leaves_no_frames_behind() {
 }
 
 /// Run a program that is expected to fail, keeping the error and the trace.
-///
-/// Mirrors [`run`]'s split on `makes_fn_pointers`: a program that hands a
-/// pointer to a native has to be shared to be run at all.
 #[cfg(not(any(feature = "no_position", feature = "unchecked", feature = "no_function")))]
 fn fail(engine: &Engine, program: Program, what: &str) -> (rhai::EvalAltResult, Vec<rhai::grain::Fault>) {
     let mut scope = Scope::new();
     let mut vm = Vm::new(engine);
-
-    let result = if program.makes_fn_pointers() {
-        let program = program.into_shared();
-        vm.eval_with_callbacks(&mut scope, &program)
-    } else {
-        vm.eval_with_scope(&mut scope, &program)
-    };
-
+    let program = program.into_shared();
+    let result = vm.eval_with_callbacks(&mut scope, &program);
     let error = result.err().unwrap_or_else(|| panic!("{what}: the case must fail"));
     (*error, vm.fault_trace())
 }

@@ -31,7 +31,7 @@ use core::mem;
 use std::prelude::v1::*;
 
 use crate::{
-    func::RhaiFunc, Dynamic, FnArgsVec, FuncRegistration, Module, NativeCallContext, Shared,
+    func::RhaiFunc, Dynamic, FnArgsVec, FuncRegistration, Module, NativeCallContext, Scope, Shared,
     SmartString,
 };
 
@@ -63,19 +63,11 @@ pub(super) fn wrappers(program: &SharedProgram) -> Module {
     }
 
     for function in program.functions() {
-        let arity = function.params.len();
+        // A compiled chunk automatically takes an additional argument
+        // for `this`, push to the very front.
+        let arity = function.params.len() + 1;
+
         if arity > MAX_PARAMS {
-            continue;
-        }
-        // A `this`-taking chunk cannot be reached this way. A wrapper is
-        // registered at one arity, and how many arguments Rhai asks for depends
-        // on what the *native* appends beside the receiver — `map` adds an
-        // index, `reduce` adds the running result — which the wrapper has no way
-        // to know. Rhai's own pointer carries the body and sizes the call from
-        // its declared arity (`types/fn_ptr.rs:501-535`); a name-only pointer,
-        // which is all a wrapper can be, cannot. So these are left to Rhai,
-        // and `Program::needs_walker` is what keeps its copy alive for them.
-        if function.takes_this {
             continue;
         }
         let Some(name) = program.name(function.name) else {
@@ -88,19 +80,26 @@ pub(super) fn wrappers(program: &SharedProgram) -> Module {
         // One closure for every arity, rather than the fixed-arity shapes
         // `Module::set_native_fn` generates. `Dynamic` parameters throughout
         // mean the types never have to line up, only the count.
+
         let wrapper = move |context: Option<NativeCallContext>, args: &mut [&mut Dynamic]| {
-            invoke(&owner, &called, context.as_ref(), args)
+            // Always extracts the first argument for `this`.
+            let (this_ptr, args) = args
+                .split_first_mut()
+                .ok_or_else(|| malformed("a callback wrapper was given no `this`".into()))?;
+
+            invoke_with_this(&owner, &called, context.as_ref(), args, Some(this_ptr))
         };
 
+        // Always register as a method.
         FuncRegistration::new(name)
             .in_internal_namespace()
             .set_into_module_raw(
                 &mut module,
                 vec![TypeId::of::<Dynamic>(); arity],
-                RhaiFunc::Pure {
+                RhaiFunc::Method {
                     func: Shared::new(wrapper),
                     has_context: true,
-                    is_pure: true,
+                    is_pure: false,
                     is_volatile: false,
                 },
             );
@@ -110,11 +109,12 @@ pub(super) fn wrappers(program: &SharedProgram) -> Module {
 }
 
 /// Run one chunk for a native that called back into us.
-fn invoke(
+fn invoke_with_this(
     program: &SharedProgram,
     name: &str,
     context: Option<&NativeCallContext>,
     args: &mut [&mut Dynamic],
+    this_ptr: Option<&mut Dynamic>,
 ) -> VmResult {
     // Registered with `has_context`, so Rhai always supplies one.
     let context =
@@ -125,11 +125,22 @@ fn invoke(
     // anything it still needs.
     let values: FnArgsVec<Dynamic> = args.iter_mut().map(|arg| mem::take(*arg)).collect();
 
-    Vm::reentrant(context).call_function(
+    let mut vm = Vm::reentrant(context);
+    // A chunk reached this way can itself build a closure, and that pointer
+    // needs the program as much as one built in the outer run does.
+    #[cfg(not(feature = "no_function"))]
+    vm.adopt(program);
+
+    let scope = &mut Scope::new();
+    vm.call_function_with_this(
         program,
         name,
         values,
         context.call_level(),
+        scope,
+        true,
         context.call_position(),
+        this_ptr.cloned(),
     )
+    .0
 }

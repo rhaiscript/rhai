@@ -387,6 +387,26 @@ pub struct Vm<'e> {
     /// caller's back on the way out, reproducing `func/call.rs:669` without a
     /// conditional anywhere.
     this: Option<Dynamic>,
+    /// Shared ownership of the running program, where the caller had some.
+    ///
+    /// A function pointer that names a compiled chunk has to carry the program
+    /// with it — it outlives the call that made it, and an index into a table
+    /// it no longer has would address whatever took its place. Only a caller
+    /// holding a [`SharedProgram`] can give it one, so this is `None` under
+    /// [`Vm::eval_with_scope`], where a pointer stays late-bound by name.
+    ///
+    /// That the two entry points hand out different pointers is safe for one
+    /// reason, and it is worth stating because it is the thing that could rot:
+    /// a pointer's declared arity is read *only* when a native sizes a call
+    /// through it, a native can reach a compiled chunk *only* through the
+    /// wrappers module, and the wrappers are installed by exactly the calls
+    /// that set this field. So a pointer that cannot describe itself is also a
+    /// pointer no native can reach — such a call fails on the name instead,
+    /// which `callback.rs::without_the_wrappers_the_pointer_does_not_resolve`
+    /// pins. Register wrappers anywhere this is left `None` and that stops
+    /// being true.
+    #[cfg(not(feature = "no_function"))]
+    owner: Option<SharedProgram>,
     /// Whether this `Vm` started the run, and so may clear its trace.
     ///
     /// False for a [`Vm::reentrant`]: a callback clearing the trace would
@@ -486,6 +506,8 @@ impl<'e> Vm<'e> {
             sizes: Vec::new(),
             unwind_floor: 0,
             this: None,
+            #[cfg(not(feature = "no_function"))]
+            owner: None,
             owns_trace: true,
             chain_step: 0,
             pending_slot: None,
@@ -529,6 +551,10 @@ impl<'e> Vm<'e> {
             // A crossing carries no receiver: Rhai binds one only where it
             // dispatches a method, and this arrives through `call_fn_raw`.
             this: None,
+            // Filled by whoever holds the program — `callback::invoke` does,
+            // and hands it over before running anything.
+            #[cfg(not(feature = "no_function"))]
+            owner: None,
             // `global` is a clone, so the trace is shared with the run that
             // called in and is not this call's to clear.
             owns_trace: false,
@@ -877,12 +903,6 @@ impl<'e> Vm<'e> {
     /// back, and `map` looks the pointer up its own way. See the `callback`
     /// module.
     ///
-    /// Only worth the owned program when [`Program::makes_fn_pointers`] says a
-    /// pointer can escape; [`eval_with_scope`](Self::eval_with_scope) is
-    /// otherwise identical and copies nothing. A program that needs this and
-    /// does not get it still runs — the pointer simply fails to resolve, as
-    /// `ErrorFunctionNotFound`, at the point the native tries to call it.
-    ///
     /// Read the `callback` module before relying on it: a crossing is slower than the
     /// walker, and a *capturing* closure handed to a native that binds `this`
     /// arrives with its arguments rotated.
@@ -897,7 +917,50 @@ impl<'e> Vm<'e> {
     pub fn eval_with_callbacks(&mut self, scope: &mut Scope, program: &SharedProgram) -> VmResult {
         let wrappers =
             (!program.functions().is_empty()).then(|| callback::wrappers(program).into());
-        self.run_with(program, scope, wrappers)
+        #[cfg(not(feature = "no_function"))]
+        let restore = self.adopt(program);
+        let result = self.run_with(program, scope, wrappers);
+        #[cfg(not(feature = "no_function"))]
+        self.release(restore);
+        result
+    }
+
+    /// Take shared ownership of `program` for the duration of a run, returning
+    /// what was there to be put back.
+    ///
+    /// A `Vm` outlives a single run, so this is saved and restored rather than
+    /// assigned: a second run of a different program must not hand out pointers
+    /// into the first.
+    #[cfg(not(feature = "no_function"))]
+    pub(super) fn adopt(&mut self, program: &SharedProgram) -> Option<SharedProgram> {
+        self.owner.replace(program.clone())
+    }
+
+    /// Put back what [`Vm::adopt`] displaced.
+    #[cfg(not(feature = "no_function"))]
+    pub(super) fn release(&mut self, previous: Option<SharedProgram>) {
+        self.owner = previous;
+    }
+
+    /// How a pointer to the function named `name_index` should describe itself.
+    ///
+    /// [`FnPtrType::Compiled`] where the answer is unambiguous and we have the
+    /// program to point into, and [`FnPtrType::Normal`] otherwise — a
+    /// late-bound name, which is what every such pointer was before.
+    #[cfg(not(feature = "no_function"))]
+    fn compiled_pointer(&self, program: &Program, name_index: u32) -> FnPtrType {
+        if self.owner.is_some() {
+            let mut found = program
+                .functions()
+                .iter()
+                .filter(|f| f.name == name_index && f.this_type.is_none());
+
+            if let (Some(_), None) = (found.next(), found.next()) {
+                return FnPtrType::Compiled;
+            }
+        }
+
+        FnPtrType::Normal
     }
 
     fn run_with(
@@ -934,15 +997,8 @@ impl<'e> Vm<'e> {
         #[cfg(not(feature = "no_function"))]
         let orig_lib_len = self.global.lib.len();
         #[cfg(not(feature = "no_function"))]
-        {
-            if let Some(lib) = program.lib() {
-                self.global.lib.push(lib.clone());
-            }
-            // Last, so the search — which runs in reverse — reaches a compiled
-            // function before whatever the compiler left Rhai to interpret.
-            if let Some(wrappers) = wrappers {
-                self.global.lib.push(wrappers);
-            }
+        if let Some(wrappers) = wrappers {
+            self.global.lib.push(wrappers);
         }
         // Without script functions there is no library to stack them in, and
         // `wrappers` is `None` for want of anything to wrap.
@@ -4053,6 +4109,22 @@ impl<'e> Vm<'e> {
                     let name = program
                         .name(index)
                         .ok_or_else(|| malformed(format!("no name {index}")))?;
+                    // A pointer that can answer its own shape, where the caller
+                    // gave us the program to answer from. Rhai's natives size a
+                    // callback from the pointer's declared arity, and a
+                    // name-only pointer leaves them guessing — which is how
+                    // `reduce` came to bind its accumulator and its element the
+                    // wrong way round (`types/fn_ptr.rs`).
+                    //
+                    // Only where exactly one compiled function bears the name:
+                    // this instruction also serves `Fn("f")` folded to a
+                    // constant, and a name with two arities has no one shape to
+                    // declare. Ambiguity stays late-bound.
+                    #[cfg(not(feature = "no_function"))]
+                    let typ = self.compiled_pointer(program, index);
+                    #[cfg(feature = "no_function")]
+                    let typ = FnPtrType::Normal;
+
                     // Non-validated, because `anon$…` is not a name a script could
                     // have written and the validating constructors refuse it.
                     // Nothing unsound rides on that check — a name that will
@@ -4063,7 +4135,7 @@ impl<'e> Vm<'e> {
                             curry: Default::default(),
                             #[cfg(not(feature = "no_function"))]
                             env: None,
-                            typ: FnPtrType::Normal,
+                            typ,
                         }
                         .into(),
                     );
@@ -4367,7 +4439,6 @@ mod tests {
                 name: index as u32,
                 params: Vec::new(),
                 this_type: None,
-                takes_this: false,
                 chunk: Chunk::new(end_of(span.start), end_of(span.end), 8),
             })
             .collect();
@@ -4386,7 +4457,6 @@ mod tests {
                 assign_ops: Vec::new(),
                 chains,
                 switches: Vec::new(),
-                lib: None,
                 #[cfg(not(feature = "no_module"))]
                 resolver: None,
                 source: None,

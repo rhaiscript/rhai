@@ -43,7 +43,6 @@ fn lowered(source: &str) {
     let ast = engine.compile(source).unwrap();
     let program = Compiler::new().compile(&ast);
     assert!(program.residual_count() == 0, "{source} still fragments, so it does not test the callback path",);
-    assert!(program.makes_fn_pointers(), "{source}");
 }
 
 #[test]
@@ -51,6 +50,13 @@ fn a_native_can_call_a_closure_back() {
     lowered("let a = [1, 2, 3]; a.map(|x| x * 2)");
     agree("let a = [1, 2, 3]; a.map(|x| x * 2)");
     agree("let a = [1, 2, 3, 4]; a.filter(|x| x % 2 == 0)");
+}
+
+#[test]
+fn a_native_can_call_a_closure_back_with_this() {
+    agree("let t = 0; [1, 2, 3].for_each(|| t += this); t");
+    agree("[1, 2, 3].map(|| this * this)");
+    agree("[1, 2, 3].reduce(|sum| if sum == () { this } else { sum + this })");
 }
 
 #[test]

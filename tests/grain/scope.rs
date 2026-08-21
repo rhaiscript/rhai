@@ -643,6 +643,32 @@ fn a_closure_pointer_is_late_bound() {
     assert_ne!(ours, walker, "if these ever match, delete this test");
 }
 
+/// The same closure, run the way a program that hands pointers out must be run.
+///
+/// Rendered apart from both of Rhai's kinds on purpose. `Fn` would hide that the
+/// pointer knows its own shape and `Fn*` would claim an AST body it does not
+/// have. `Fn#` is the one that says "this is a compiled chunk, and it knows its
+/// own shape".
+#[test]
+#[cfg(not(feature = "no_function"))]
+fn a_closure_pointer_is_identified_to_rhai_as_compiled() {
+    let engine = corpus::engine();
+    let source = "let n = 1; let f = |x| x + n; f";
+
+    let ast = engine.compile(source).expect("must compile");
+    let program = Compiler::new().compile(&ast);
+    assert_eq!(program.residual_count(), 0, "the closure must lower");
+
+    let borrowed = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).expect("must run");
+
+    let shared = program.into_shared();
+    let owned = Vm::new(&engine).eval_with_callbacks(&mut Scope::new(), &shared).expect("must run");
+
+    let (borrowed, owned) = (format!("{borrowed:?}"), format!("{owned:?}"));
+    assert!(borrowed.starts_with("Fn(\"anon$"), "a bare name: {borrowed}",);
+    assert!(owned.starts_with("Fn#(\"anon$"), "compiled chunk: {owned}",);
+}
+
 /// Calling a compiled function from outside, which is what a native wrapper
 /// will do once compiled chunks are registered for callbacks.
 #[test]
@@ -716,41 +742,6 @@ fn call_fn_mirrors_the_engines() {
     // And a missing name still misses.
     let err = vm.call_fn::<INT>(&mut scope, &program, "nope", (1 as INT,)).expect_err("no such function");
     assert!(matches!(*err, rhai::EvalAltResult::ErrorFunctionNotFound(..)), "got {err:?}",);
-}
-
-/// The flag a host uses to decide whether a program has to be owned.
-///
-/// Registering compiled functions so a native can call one back requires a
-/// `'static` wrapper, which means owning the program and giving up the
-/// borrowed-from-the-artifact loading. Nobody should have to read a script to
-/// find out whether that is needed — and the answer must be the same for a
-/// compiled program and for the same program read back, or one of the two
-/// paths quietly loses its callbacks.
-#[test]
-#[cfg(not(any(feature = "no_function", feature = "no_object")))]
-fn the_compiler_says_whether_a_program_makes_function_pointers() {
-    let engine = corpus::engine();
-
-    for (source, expected) in [
-        ("let a = 1; a + 2", false),
-        ("fn f(x) { x } f(1)", false),
-        ("let s = 0; for i in 0..3 { s += i; } s", false),
-        // Every shape that produces one.
-        ("let n = \"ab\" + \"s\"; Fn(n)", true),
-        ("let n = 1; let f = |x| x + n; f.call(2)", true),
-        ("fn t(x) { x } let f = Fn(\"t\"); f.call(1)", true),
-        ("fn a(x, y) { x } let n = \"a\"; Fn(n).curry(1)", true),
-    ] {
-        let ast = engine.compile(source).expect("must compile");
-        let program = Compiler::new().compile(&ast);
-        assert_eq!(program.makes_fn_pointers(), expected, "for {source:?}",);
-
-        // Read off the code, so an artifact answers the same.
-        if let Ok(bytes) = program.write() {
-            let reloaded = rhai::grain::Program::read(&bytes).expect("must load");
-            assert_eq!(reloaded.makes_fn_pointers(), expected, "after a round trip, for {source:?}",);
-        }
-    }
 }
 
 /// The whole reason for the opcode: these now cross a wire.

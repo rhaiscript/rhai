@@ -7,8 +7,8 @@ use crate::module_resolvers::StaticModuleResolver;
 use crate::{ast::Expr, ast::Stmt, tokenizer::Token, Dynamic, ImmutableString, Module, Shared};
 
 use crate::grain::bytecode::{
-    site_to_position, sites, AssignOp, Chain, Chunk, Code, Op, Pools, Positions, Root, Strings,
-    Switch, TableError,
+    site_to_position, sites, AssignOp, Chain, Chunk, Code, Pools, Positions, Strings, Switch,
+    TableError,
 };
 use crate::grain::format::Sidecar;
 
@@ -47,12 +47,6 @@ pub struct Function {
     ///
     /// `None` for an ordinary function, which is nearly all of them.
     pub this_type: Option<u32>,
-    /// Whether the body reads or writes the frame's receiver.
-    ///
-    /// Derived from the chunk rather than encoded — see [`takes_this`]. It is
-    /// what keeps such a function reachable by Rhai, which needs the body to
-    /// size a call a native makes through a pointer.
-    pub takes_this: bool,
     pub chunk: Chunk,
 }
 
@@ -86,10 +80,6 @@ pub struct Program<'a> {
 
     /// The deepest chunk's operand-stack need, cached.
     max_stack: u16,
-
-    /// Whether the program can hand a function pointer to something that
-    /// might call it back. See [`Program::makes_fn_pointers`].
-    makes_fn_pointers: bool,
 
     /// Whether any function was declared for a receiver type.
     ///
@@ -147,15 +137,6 @@ pub struct Program<'a> {
     /// hasher that would disagree with it.
     switches: Vec<Switch>,
 
-    /// Script functions the compiler did not lower, as Rhai's own library, so
-    /// a fragment can still call one the ordinary way.
-    ///
-    /// `None` when the script declared none, which is every program that came
-    /// from an artifact. An empty `Module` is 264 bytes and a reference count,
-    /// which is a fifth of what loading a small program retains — worth not
-    /// allocating for something nothing will look in.
-    lib: Option<SharedModule>,
-
     /// Reinstated on the runtime state at each run, mirroring
     /// `Engine::eval_ast_with_scope_raw`, so `import` resolves as it would have.
     #[cfg(not(feature = "no_module"))]
@@ -178,10 +159,6 @@ impl core::fmt::Debug for Program<'_> {
             .field("names", &self.names.len())
             .field("residuals", &self.residuals.len())
             .field("compiled_fns", &self.functions.len())
-            .field(
-                "walked_fns",
-                &self.lib.as_ref().map_or(0, |lib| lib.count().1),
-            )
             .field("positions", &!self.positions.is_stripped())
             .finish()
     }
@@ -224,63 +201,6 @@ fn node_position(node: &ASTNode) -> rhai::Position {
     }
 }
 
-/// Whether any instruction in `code` produces a function pointer.
-///
-/// Read off the bytes rather than tracked while lowering, because a program
-/// read from an artifact has no lowering to have tracked it — and the answer
-/// has to be the same either way or one of the two paths silently loses its
-/// callbacks.
-///
-/// Deliberately over-broad: it says yes to a pointer that is only ever called
-/// directly. Narrowing it would mean deciding where a pointer *goes*, which is
-/// a dataflow question over values that outlive the instruction that made
-/// them. Being wrong the other way loses a call at run time.
-pub(crate) fn makes_fn_pointers(code: &[u8]) -> bool {
-    use crate::grain::bytecode::code::tag;
-
-    crate::grain::bytecode::disassemble(code)
-        .any(|(at, ..)| matches!(code[at], tag::MAKE_CLOSURE | tag::MAKE_FN_PTR | tag::CURRY))
-}
-
-/// Whether a chunk reads or writes the frame's receiver.
-///
-/// Read off the bytes for [`makes_fn_pointers`]'s reason: a program loaded from
-/// an artifact never saw the body it came from.
-///
-/// It decides whether Rhai has to be able to reach the function itself. A
-/// pointer to a `this`-taking chunk cannot go through a native wrapper — the
-/// wrapper is registered at one arity, and how many arguments Rhai will ask for
-/// depends on what the *native* appends, which the wrapper cannot know. So such
-/// a function is left to Rhai, which has the body and can size the call itself.
-pub(crate) fn takes_this(code: &[u8], chunk: Chunk, chains: &[Chain]) -> bool {
-    use crate::grain::bytecode::code::tag;
-
-    let (entry, end) = (chunk.entry() as usize, chunk.end() as usize);
-    if end > code.len() || entry > end {
-        return false;
-    }
-
-    crate::grain::bytecode::disassemble(&code[entry..end]).any(|(at, op)| {
-        match code[entry + at] {
-            tag::LOAD_THIS
-            | tag::LOAD_THIS_SHARED
-            | tag::REQUIRE_THIS
-            | tag::ASSIGN_THIS
-            | tag::ASSIGN_THIS_OP
-            | tag::CALL_THIS_REF
-            | tag::CALL_FN_PTR_ON_THIS => true,
-            // A chain says where it is rooted in the pool, not in the code.
-            tag::CHAIN => match op {
-                Op::Chain(index) => chains
-                    .get(index as usize)
-                    .map_or(false, |chain| matches!(chain.root, Root::This { .. })),
-                _ => false,
-            },
-            _ => false,
-        }
-    })
-}
-
 /// Everything a program holds besides its code, gathered so the constructor
 /// does not take ten positional arguments.
 pub(crate) struct Parts<'a> {
@@ -298,7 +218,6 @@ pub(crate) struct Parts<'a> {
     pub assign_ops: Vec<AssignOp>,
     pub chains: Vec<Chain>,
     pub switches: Vec<Switch>,
-    pub lib: Option<SharedModule>,
     #[cfg(not(feature = "no_module"))]
     pub resolver: Option<Shared<StaticModuleResolver>>,
     pub source: Option<ImmutableString>,
@@ -311,15 +230,7 @@ impl<'a> Program<'a> {
         functions: Vec<Function>,
         parts: Parts<'a>,
     ) -> Self {
-        let makes_fn_pointers = makes_fn_pointers(&code);
         let has_typed_methods = functions.iter().any(|f| f.this_type.is_some());
-
-        // Derived here so a program means the same whether it was compiled or
-        // loaded, and so the flag cannot disagree with the bytes it describes.
-        let mut functions = functions;
-        for function in &mut functions {
-            function.takes_this = takes_this(&code, function.chunk, &parts.chains);
-        }
 
         // Derived from the diagnostics it was built with, unless a loader
         // supplied the artifact's.
@@ -335,7 +246,6 @@ impl<'a> Program<'a> {
             main,
             functions,
             max_stack: 0,
-            makes_fn_pointers,
             has_typed_methods,
             positions: parts.positions,
             debug_id,
@@ -346,7 +256,6 @@ impl<'a> Program<'a> {
             assign_ops: parts.assign_ops,
             chains: parts.chains,
             switches: parts.switches,
-            lib: parts.lib,
             #[cfg(not(feature = "no_module"))]
             resolver: parts.resolver,
             source: parts.source,
@@ -366,7 +275,6 @@ impl<'a> Program<'a> {
             main: self.main,
             functions: self.functions,
             max_stack: self.max_stack,
-            makes_fn_pointers: self.makes_fn_pointers,
             has_typed_methods: self.has_typed_methods,
             positions: self.positions,
             debug_id: self.debug_id,
@@ -377,7 +285,6 @@ impl<'a> Program<'a> {
             assign_ops: self.assign_ops,
             chains: self.chains,
             switches: self.switches,
-            lib: self.lib,
             #[cfg(not(feature = "no_module"))]
             resolver: self.resolver,
             source: self.source,
@@ -386,10 +293,6 @@ impl<'a> Program<'a> {
 
     /// Give up the artifact and share the program, so a native can be handed a
     /// way back into it.
-    ///
-    /// What [`Vm::eval_with_callbacks`](crate::grain::Vm::eval_with_callbacks) takes.
-    /// Worth the copy only when [`makes_fn_pointers`](Self::makes_fn_pointers)
-    /// says a pointer can escape.
     #[must_use]
     pub fn into_shared(self) -> SharedProgram {
         Shared::new(self.into_owned())
@@ -512,23 +415,6 @@ impl<'a> Program<'a> {
         self.functions.iter().find(|f| {
             f.params.len() == argc && f.this_type.is_none() && self.name(f.name) == Some(name)
         })
-    }
-
-    /// Whether this program can hand a function pointer to something that
-    /// might call it back.
-    ///
-    /// A compiled function lives in this program's own table and nowhere Rhai
-    /// can see, so a native that calls a pointer — `map`, `filter` — cannot
-    /// reach one. Making it reachable means registering a wrapper, and Rhai
-    /// requires a registered function to be `'static`, so the wrapper has to
-    /// own the program: [`Program::into_owned`] first, at the cost of the
-    /// borrowed-from-the-artifact loading that is the point of the format.
-    ///
-    /// This is how a host decides whether to pay that, without having to read
-    /// the script. False is the common answer and costs nothing.
-    #[must_use]
-    pub fn makes_fn_pointers(&self) -> bool {
-        self.makes_fn_pointers
     }
 
     /// How much operand stack the deepest chunk needs.
@@ -757,10 +643,6 @@ impl<'a> Program<'a> {
         })
     }
 
-    pub(crate) fn lib(&self) -> Option<&SharedModule> {
-        self.lib.as_ref()
-    }
-
     #[cfg(not(feature = "no_module"))]
     pub(crate) fn resolver(&self) -> Option<&Shared<StaticModuleResolver>> {
         self.resolver.as_ref()
@@ -788,7 +670,6 @@ mod tests {
                 name,
                 params: vec![0; argc],
                 this_type,
-                takes_this: false,
                 chunk: whole,
             })
             .collect();
@@ -807,7 +688,6 @@ mod tests {
                 assign_ops: Vec::new(),
                 chains: Vec::new(),
                 switches: Vec::new(),
-                lib: None,
                 #[cfg(not(feature = "no_module"))]
                 resolver: None,
                 source: None,

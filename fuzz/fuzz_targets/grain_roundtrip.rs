@@ -87,18 +87,12 @@ fuzz_target!(|source: String| {
         return;
     };
 
-    let program = Compiler::new().compile(&ast);
+    let program = Compiler::new().compile(&ast).into_shared();
 
     let expected = outcome(|scope| engine.eval_ast_with_scope::<Dynamic>(scope, &ast));
     // A program that can hand a pointer to a native has to be run the way such
     // a program is meant to be run, or every one of them reads as a divergence.
-    let shared = program
-        .makes_fn_pointers()
-        .then(|| Compiler::new().compile(&ast).into_shared());
-    let run = |scope: &mut Scope| match &shared {
-        Some(shared) => Vm::new(&engine).eval_with_callbacks(scope, shared),
-        None => Vm::new(&engine).eval_with_scope(scope, &program),
-    };
+    let run = |scope: &mut Scope| Vm::new(&engine).eval_with_callbacks(scope, program);
 
     let direct = outcome(run);
     if expected == "budget" || direct == "budget" {

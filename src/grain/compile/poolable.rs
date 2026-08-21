@@ -23,6 +23,17 @@ use rust_decimal::Decimal;
 /// created against. Keeping it out of the pool leaves it as a fragment, which
 /// evaluates through the path that does the attaching.
 pub(crate) fn is_poolable(value: &Dynamic) -> bool {
+    // A shared cell first, because every question below sees through one:
+    // `is_array` and friends unwrap `Union::Shared`, so a shared array of ints
+    // would answer yes and be pooled by cloning the `Rc` — leaving the pool
+    // aliasing a cell the host can still write to. Nothing a `Program` owns may
+    // alias mutable state: the pool is immutable after `Program::new`, and that
+    // is what makes the reference graph among programs acyclic.
+    #[cfg(not(feature = "no_closure"))]
+    if value.is_shared() {
+        return false;
+    }
+
     // Under `no_float` Rhai has no float type and no `is_float` to ask, so
     // there is nothing here for the question to be about.
     #[cfg(not(feature = "no_float"))]

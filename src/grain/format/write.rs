@@ -100,9 +100,6 @@ pub(super) fn write(program: &Program, positions: Positions) -> Result<Vec<u8>, 
             pos,
         });
     }
-    if program.lib().is_some() {
-        return Err(WriteError::HasScriptFunctions);
-    }
 
     let mut out = Vec::new();
     out.extend_from_slice(&MAGIC);

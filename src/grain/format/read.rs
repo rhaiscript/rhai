@@ -207,9 +207,6 @@ pub(super) fn read(bytes: &[u8]) -> Result<Program<'_>, ReadError> {
             name,
             this_type,
             params,
-            // Not encoded: derived from the chunk by `Program::new`, so a loaded
-            // program and a compiled one cannot disagree about it.
-            takes_this: false,
             chunk: get_chunk(&mut cursor)?,
         });
     }
@@ -248,9 +245,6 @@ pub(super) fn read(bytes: &[u8]) -> Result<Program<'_>, ReadError> {
             assign_ops,
             chains,
             switches,
-            // Script functions are still ASTs, so `write` refuses a program
-            // that has any and a loaded one never does.
-            lib: None,
             #[cfg(not(feature = "no_module"))]
             resolver: None,
             source,

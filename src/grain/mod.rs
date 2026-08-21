@@ -149,5 +149,5 @@ mod vm;
 
 pub use compile::Compiler;
 pub use format::{Sidecar, Stripped};
-pub use program::Program;
+pub use program::{Program, SharedProgram};
 pub use vm::{Fault, Vm};

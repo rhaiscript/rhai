@@ -26,6 +26,9 @@ pub enum FnPtrType {
     /// Pre-calculated hash of a script-defined function.
     #[cfg(not(feature = "no_function"))]
     Script { num_params: usize, hash: u64 },
+    /// A function the Grain VM compiled.
+    #[cfg(all(feature = "grain", not(feature = "no_function")))]
+    Compiled,
     /// Embedded native Rust function.
     #[cfg(not(feature = "sync"))]
     Native(Shared<dyn Fn(NativeCallContext, &mut FnCallArgs) -> RhaiResult + 'static>),
@@ -43,6 +46,8 @@ impl fmt::Display for FnPtrType {
             Self::Normal => f.write_str("Fn"),
             #[cfg(not(feature = "no_function"))]
             Self::Script { .. } => f.write_str("Fn*"),
+            #[cfg(all(feature = "grain", not(feature = "no_function")))]
+            Self::Compiled => f.write_str("Fn#"),
             Self::Native(..) => f.write_str("Fn"),
         }
     }
@@ -428,6 +433,9 @@ impl FnPtr {
         let mut arg_values = arg_values.as_mut();
         let mut args_data;
 
+        #[cfg(all(feature = "grain", not(feature = "no_function")))]
+        let mut dummy = Dynamic::UNIT;
+
         if self.is_curried() {
             args_data = FnArgsVec::with_capacity(self.curry().len() + arg_values.len());
             args_data.extend(self.curry().iter().cloned());
@@ -460,8 +468,8 @@ impl FnPtr {
             );
         }
 
-        // Embedded native Rust function?
         match self.typ {
+            // Embedded native Rust function
             FnPtrType::Native(ref func) => {
                 let mut cloned_this_ptr;
                 let args = &mut StaticVec::with_capacity(arg_values.len() + 1);
@@ -487,6 +495,19 @@ impl FnPtr {
                 return func(context, args)
                     .and_then(|r| engine.check_data_size(r, pos))
                     .map_err(|err| err.fill_position(pos));
+            }
+            #[cfg(all(feature = "grain", not(feature = "no_function")))]
+            // VM-compiled chunk which may use the `this` pointer.
+            FnPtrType::Compiled => {
+                // Since the chunk is actually a script-ed function, the `this` pointer goes into
+                // the first position.
+                let args = &mut arg_values.iter_mut().collect::<FnArgsVec<_>>();
+                if let Some(this_ptr) = this_ptr.as_deref_mut() {
+                    args.insert(0, this_ptr);
+                } else {
+                    args.insert(0, &mut dummy);
+                }
+                return context.call_native_fn_raw(self.fn_name(), true, args);
             }
             _ => (),
         }

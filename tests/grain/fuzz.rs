@@ -294,14 +294,9 @@ fn generated_scripts_agree_with_the_walker() {
             valued += 1;
         }
 
-        let program = Compiler::new().compile(&ast);
+        let program = Compiler::new().compile(&ast).into_shared();
         let mut vm_scope = Scope::new();
-        let ours = if program.makes_fn_pointers() {
-            let program = program.into_shared();
-            Vm::new(&engine).eval_with_callbacks(&mut vm_scope, &program)
-        } else {
-            Vm::new(&engine).eval_with_scope(&mut vm_scope, &program)
-        };
+        let ours = Vm::new(&engine).eval_with_callbacks(&mut vm_scope, &program);
         let ours = snapshot(&vm_scope, ours);
 
         if hit_a_limit(&ours) {

@@ -111,12 +111,7 @@ fn compare(engine: &Engine, source: &str) -> Option<(String, String)> {
 
     let program = Compiler::new().compile(&ast);
     let mut vm_scope = Scope::new();
-    let ours = if program.makes_fn_pointers() {
-        let program = program.into_shared();
-        Vm::new(engine).eval_with_callbacks(&mut vm_scope, &program)
-    } else {
-        Vm::new(engine).eval_with_scope(&mut vm_scope, &program)
-    };
+    let ours = Vm::new(engine).eval_with_callbacks(&mut vm_scope, &program);
     Some((outcome(&vm_scope, ours)?, expected))
 }
 
