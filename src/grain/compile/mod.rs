@@ -22,6 +22,7 @@ use crate::grain::bytecode::{
 };
 use crate::grain::compile::poolable::is_poolable;
 use crate::grain::compile::slots::Slots;
+use crate::grain::format::Caps;
 use crate::grain::program::{Function, Parts, Program};
 
 /// Whether a variable reference is module-qualified, as in `foo::bar`.
@@ -94,18 +95,20 @@ impl Compiler {
             .collect();
         #[cfg(feature = "no_function")]
         let script_fns: Vec<ImmutableString> = Vec::new();
-        let fresh = || Lowering {
+
+        let fresh = |caps| Lowering {
             script_fns: script_fns.clone(),
+            caps,
             ..Lowering::default()
         };
 
-        let mut lowering = fresh();
+        let mut lowering = fresh(Caps::empty());
 
         // Anything the slot model cannot account for costs the whole program
         // its lowering rather than risking a scope it resolved slots against
         // being a different shape at runtime. Coverage is preserved either way.
         if !lowering.program(ast.statements(), true) {
-            lowering = fresh();
+            lowering = fresh(lowering.caps);
             lowering.whole_program_residual(ast.statements());
         }
         let main_ops = lowering.code.len();
@@ -135,7 +138,7 @@ impl Compiler {
         let (code, offsets, main_ops, functions, skipped) = match assembled {
             Some((code, offsets)) => (code, offsets, main_ops, functions, skipped),
             None => {
-                lowering = fresh();
+                lowering = fresh(lowering.caps);
                 lowering.whole_program_residual(ast.statements());
                 let (code, offsets) =
                     assemble(&lowering.code).expect("the fallback is one instruction");
@@ -198,6 +201,7 @@ impl Compiler {
         };
 
         let mut program = Program::new(
+            lowering.caps,
             code.into(),
             main,
             functions,
@@ -281,6 +285,10 @@ struct LoweredFn {
 
 #[derive(Default)]
 struct Lowering {
+    /// Capabilities required by the instructions emitted so far.
+    /// The compiler does not know what the caller will do with the output,
+    /// so it has to assume the worst and report everything it uses.
+    caps: Caps,
     code: Vec<Op>,
     /// One per instruction, parallel to `code`. Most are `NONE`; the dense
     /// shape is what makes a lookup an index, and it compacts on the way out.
@@ -370,7 +378,7 @@ impl Lowering {
     /// nested node's `lhs` is the *current* step's operand and its `rhs` is the
     /// continuation. [`flatten_chain`] unpicks that into steps.
     fn chain(&mut self, expr: &Expr, tail: Tail, value: Option<&Expr>) -> bool {
-        let Some((root, steps)) = flatten_chain(expr) else {
+        let Some((root, steps)) = flatten_chain(self, expr) else {
             return false;
         };
 
@@ -402,7 +410,10 @@ impl Lowering {
                 },
                 None => return false,
             },
-            Expr::ThisPtr(pos) => Root::This { pos: *pos },
+            Expr::ThisPtr(pos) => {
+                self.caps.insert(Caps::THIS);
+                Root::This { pos: *pos }
+            }
             // A qualified root resolves against imported modules, which need
             // `import` — the escape hatch's job.
             Expr::Variable(..) => return false,
@@ -458,6 +469,7 @@ impl Lowering {
         for step in &steps {
             match step {
                 ChainStep::Index(index, bracket, flags) => {
+                    self.caps.insert(Caps::INDEXING);
                     self.expression(index);
                     lowered.push(Step::Index {
                         operand: operands,
@@ -468,6 +480,7 @@ impl Lowering {
                     operands += 1;
                 }
                 ChainStep::Property(prop, pos, flags) => {
+                    self.caps.insert(Caps::PROPERTY);
                     let (getter, setter, name) = &**prop;
                     lowered.push(Step::Property {
                         name: self.push_name(name.clone()),
@@ -478,6 +491,7 @@ impl Lowering {
                     });
                 }
                 ChainStep::Method(call, pos, flags) => {
+                    self.caps.insert(Caps::METHOD);
                     if !self.is_lowerable_call(call) {
                         if value_slot.is_some() {
                             self.rewind(rewind_mark);
@@ -1004,6 +1018,8 @@ impl Lowering {
             // parser puts it there too (`parser.rs:2002`), and because the
             // chain arm below would otherwise take `this.x = 1`'s sibling.
             Stmt::Assignment(payload) if matches!(&payload.1.lhs, Expr::ThisPtr(..)) => {
+                self.caps.insert(Caps::THIS);
+
                 let (op_info, binary) = &**payload;
 
                 // Before the right-hand side, not after. Rhai checks that
@@ -1075,6 +1091,12 @@ impl Lowering {
             Stmt::Assignment(payload)
                 if matches!(&payload.1.lhs, Expr::Dot(..) | Expr::Index(..)) =>
             {
+                if matches!(&payload.1.lhs, Expr::Dot(..)) {
+                    self.caps.insert(Caps::PROPERTY);
+                } else {
+                    self.caps.insert(Caps::INDEXING);
+                }
+
                 let (op_info, binary) = &**payload;
                 let op = self.op_assignment(op_info);
 
@@ -1096,6 +1118,8 @@ impl Lowering {
             // closure's captures (`parser.rs:3707`).
             #[cfg(not(feature = "no_closure"))]
             Stmt::Share(names) => {
+                self.caps.insert(Caps::SHARING);
+
                 for (ident, ..) in names.iter() {
                     match self.slots.resolve(&ident.name) {
                         Some(slot) => self.emit_at(Op::Share(slot), ident.pos),
@@ -1425,7 +1449,10 @@ impl Lowering {
             // fragment. Refusing the lowering hands the body to the walker
             // whole, which is where the alias lives long enough to be used.
             #[cfg(not(feature = "no_module"))]
-            Stmt::Import(..) => false,
+            Stmt::Import(..) => {
+                self.caps.insert(Caps::IMPORT);
+                false
+            }
 
             // Not lowered yet, and listed rather than matched with `_` on
             // purpose. A wildcard here silently turned `import` and `eval`
@@ -1452,6 +1479,7 @@ impl Lowering {
 
             #[cfg(not(feature = "no_module"))]
             other @ Stmt::Export(..) => {
+                self.caps.insert(Caps::EXPORT);
                 let residual = self.push_residual(wrap_statements(vec![other.clone()]));
                 self.emit(Op::EvalAst {
                     residual,
@@ -1474,7 +1502,10 @@ impl Lowering {
             // Rhai has no float literal to parse under `no_float`, so there is
             // no variant to match.
             #[cfg(not(feature = "no_float"))]
-            Expr::FloatConstant(value, ..) => self.constant(Dynamic::from(**value)),
+            Expr::FloatConstant(value, ..) => {
+                self.caps.insert(Caps::FLOAT);
+                self.constant(Dynamic::from(**value))
+            }
             // Folded by the optimizer, so it can hold anything a constant call
             // returned — including a function pointer, which must not be
             // copied out of a pool. See `poolable`.
@@ -1513,6 +1544,22 @@ impl Lowering {
             }
 
             Expr::DynamicConstant(value, ..) if is_poolable(value) => {
+                #[cfg(not(feature = "no_index"))]
+                if value.is_array() {
+                    self.caps.insert(Caps::ARRAY);
+                }
+                #[cfg(not(feature = "no_index"))]
+                if value.is_blob() {
+                    self.caps.insert(Caps::BLOB);
+                }
+                #[cfg(not(feature = "no_object"))]
+                if value.is_map() {
+                    self.caps.insert(Caps::MAP);
+                }
+                #[cfg(feature = "decimal")]
+                if value.is_decimal() {
+                    self.caps.insert(Caps::DECIMAL);
+                }
                 self.constant((**value).clone());
             }
 
@@ -1562,7 +1609,10 @@ impl Lowering {
             // A literal whose elements are all constant never reaches here —
             // Rhai's optimizer folds it into a `DynamicConstant` first — so
             // this is the one that has to be built at run time.
+            #[cfg(not(feature = "no_index"))]
             Expr::Array(elements, ..) if elements.len() <= u16::MAX as usize => {
+                self.caps.insert(Caps::ARRAY);
+
                 for (index, element) in elements.iter().enumerate() {
                     self.expression(element);
                     // Positioned at the element, because that is what Rhai
@@ -1587,6 +1637,8 @@ impl Lowering {
             // one with a single computed value does, and used to fragment.
             #[cfg(not(feature = "no_object"))]
             Expr::Map(entries, ..) if entries.0.len() <= u16::MAX as usize => {
+                self.caps.insert(Caps::MAP);
+
                 let (computed, template) = &**entries;
                 let template = Dynamic::from_map(template.clone());
                 // A template whose constants the pool cannot hold is a program
@@ -1644,6 +1696,8 @@ impl Lowering {
                     if matches!(m.name.as_str(), "call" | "curry")
                         && m.args.len() <= u8::MAX as usize) =>
             {
+                self.caps.insert(Caps::METHOD);
+
                 let Expr::MethodCall(method, ..) = &binary.rhs else {
                     unreachable!("checked by the guard");
                 };
@@ -1693,6 +1747,12 @@ impl Lowering {
             }
 
             Expr::Dot(..) | Expr::Index(..) => {
+                if matches!(expr, Expr::Dot(..)) {
+                    self.caps.insert(Caps::PROPERTY);
+                } else {
+                    self.caps.insert(Caps::INDEXING);
+                }
+
                 // A chain emits its own operands, so a failed attempt has to
                 // leave nothing behind.
                 let mark = self.mark();
@@ -1725,7 +1785,10 @@ impl Lowering {
             // The frame's receiver, flattened as every consumer but three
             // wants it — see [`Op::LoadThis`] and `unflattened` below. Its own
             // position, because that is what `ErrorUnboundThis` carries.
-            Expr::ThisPtr(pos) => self.emit_at(Op::LoadThis, *pos),
+            Expr::ThisPtr(pos) => {
+                self.caps.insert(Caps::THIS);
+                self.emit_at(Op::LoadThis, *pos)
+            }
 
             Expr::MethodCall(..)
             | Expr::Property(..)
@@ -1743,7 +1806,10 @@ impl Lowering {
     /// mutates a copy in the walker too, so there is nothing to carry back.
     fn fn_ptr_receiver(&mut self, receiver: &Expr) -> Option<Receiver> {
         match receiver {
-            Expr::ThisPtr(..) => Some(Receiver::This),
+            Expr::ThisPtr(..) => {
+                self.caps.insert(Caps::THIS);
+                Some(Receiver::This)
+            }
             Expr::Variable(payload, ..) if !has_namespace!(payload) => {
                 match self.slots.resolve(&payload.1) {
                     Some(slot) => Some(Receiver::Local(slot)),
@@ -1775,6 +1841,7 @@ impl Lowering {
         // reach this instruction because `call`/`curry` go through
         // `Op::CallFnPtr` and `is_lowerable_call` refuses them here.
         if let Some(Expr::ThisPtr(..)) = call.args.first() {
+            self.caps.insert(Caps::THIS);
             return Some(Receiver::This);
         }
 
@@ -1913,7 +1980,10 @@ impl Lowering {
             // The receiver can be a shared cell too — a closure capturing the
             // variable a method was called on — and the three readers that come
             // through here have to see the cell rather than what it holds.
-            Expr::ThisPtr(pos) => self.emit_at(Op::LoadThisShared, *pos),
+            Expr::ThisPtr(pos) => {
+                self.caps.insert(Caps::THIS);
+                self.emit_at(Op::LoadThisShared, *pos)
+            }
             other => self.expression(other),
         }
     }
@@ -1940,6 +2010,7 @@ impl Lowering {
             // fails it. Lowering it would answer a question Rhai refuses.
             #[cfg(not(feature = "no_closure"))]
             (crate::engine::KEYWORD_IS_SHARED, 1) => {
+                self.caps.insert(Caps::SHARING);
                 self.unflattened(&call.args[0]);
                 self.emit_at(Op::IsShared, pos);
             }
@@ -2342,18 +2413,30 @@ enum ChainStep<'a> {
 /// steps (`eval/chaining.rs:698`).
 ///
 /// Returns `None` for a dot onto anything but a property or a method.
-fn flatten_chain(expr: &Expr) -> Option<(&Expr, Vec<ChainStep<'_>>)> {
+fn flatten_chain<'a>(
+    lowering: &mut Lowering,
+    expr: &'a Expr,
+) -> Option<(&'a Expr, Vec<ChainStep<'a>>)> {
     /// A chain node's parts: operand side, continuation side, and whether the
     /// step it introduces is a property rather than an index.
-    fn parts(expr: &Expr) -> Option<(&Expr, &Expr, ASTFlags, bool)> {
+    fn parts<'a>(
+        lowering: &mut Lowering,
+        expr: &'a Expr,
+    ) -> Option<(&'a Expr, &'a Expr, ASTFlags, bool)> {
         match expr {
-            Expr::Dot(binary, flags, ..) => Some((&binary.lhs, &binary.rhs, *flags, true)),
-            Expr::Index(binary, flags, ..) => Some((&binary.lhs, &binary.rhs, *flags, false)),
+            Expr::Dot(binary, flags, ..) => {
+                lowering.caps.insert(Caps::METHOD);
+                Some((&binary.lhs, &binary.rhs, *flags, true))
+            }
+            Expr::Index(binary, flags, ..) => {
+                lowering.caps.insert(Caps::INDEXING);
+                Some((&binary.lhs, &binary.rhs, *flags, false))
+            }
             _ => None,
         }
     }
 
-    let (root, mut rest, mut flags, mut dotted) = parts(expr)?;
+    let (root, mut rest, mut flags, mut dotted) = parts(lowering, expr)?;
     let mut steps = Vec::new();
     // Rhai's `op_pos`, which is the position of the chain node the step is
     // being taken *inside* rather than of the step's operand, and which walks
@@ -2371,7 +2454,7 @@ fn flatten_chain(expr: &Expr) -> Option<(&Expr, Vec<ChainStep<'_>>)> {
         // node is not marked as the last one. Otherwise it is this step's own
         // operand — the index expression, or the property being read.
         let next = (!flags.contains(ASTFlags::BREAK))
-            .then(|| parts(rest))
+            .then(|| parts(lowering, rest))
             .flatten();
 
         let (operand, following) = match next {
@@ -2380,18 +2463,27 @@ fn flatten_chain(expr: &Expr) -> Option<(&Expr, Vec<ChainStep<'_>>)> {
         };
 
         steps.push(match (dotted, operand) {
-            (true, Expr::Property(prop, pos)) => ChainStep::Property(prop, *pos, step_flags),
-            (true, Expr::MethodCall(call, pos)) => ChainStep::Method(call, *pos, step_flags),
+            (true, Expr::Property(prop, pos)) => {
+                lowering.caps.insert(Caps::PROPERTY);
+                ChainStep::Property(prop, *pos, step_flags)
+            }
+            (true, Expr::MethodCall(call, pos)) => {
+                lowering.caps.insert(Caps::METHOD);
+                ChainStep::Method(call, *pos, step_flags)
+            }
             // `a.(expr)` is not syntax, so a dot onto anything else is a shape
             // the parser only makes for something handled elsewhere.
             (true, _) => return None,
-            (false, index) => ChainStep::Index(index, bracket, step_flags),
+            (false, index) => {
+                lowering.caps.insert(Caps::INDEXING);
+                ChainStep::Index(index, bracket, step_flags)
+            }
         });
 
         match following {
             Some(node) => {
                 let (_, next_rest, next_flags, next_dotted) =
-                    parts(node).expect("checked by `next`");
+                    parts(lowering, node).expect("checked by `next`");
                 rest = next_rest;
                 flags = next_flags;
                 dotted = next_dotted;

@@ -10,7 +10,7 @@
 
 use super::corpus;
 
-use rhai::grain::format::{ReadError, WriteError};
+use rhai::grain::format::{Abi, ReadError, WriteError};
 use rhai::grain::{Compiler, Program, Vm};
 use rhai::{Dynamic, Engine, Scope, INT};
 
@@ -186,7 +186,7 @@ fn a_golden_artifact_written_by_an_older_build_still_runs() {
     // the fixture was not written for, this would test the guard rather than
     // the encoding.
     if !GOLDEN_APPLIES {
-        println!("skipped: the golden source uses syntax this build does not have");
+        println!("skipped: the golden Rhai source requires features this build does not have to compile");
         return;
     }
 
@@ -204,24 +204,30 @@ fn a_golden_artifact_written_by_an_older_build_still_runs() {
             return;
         }
 
+        println!("host caps: {:?}", Abi::host());
+
         let bytes = std::fs::read(GOLDEN_ARTIFACT).expect("the golden artifact is checked in");
+
         let loaded = match Program::read(&bytes) {
             Ok(loaded) => loaded,
             // The header records the ABI the fixture was written under, and a build
-            // with different numeric widths or restriction flags refuses it *by
-            // design* — that refusal is what `abi.rs` is for. The fixture is one
-            // build's bytes, so it can only be checked on that build; anywhere else
-            // this would be testing the ABI guard rather than the encoding.
-            Err(err) if format!("{err}").contains("written with") => {
-                println!("skipped: the golden fixture is a default-build artifact ({err})");
+            // with different numeric widths or capability flags refuses it *by design*
+            // — that refusal is what `abi.rs` is for. The fixture is the bytes of the
+            // default build, so it can only be checked on a compatible build; anywhere
+            // else this would be testing the ABI guard rather than the encoding.
+            Err(err) if format!("{err}").contains("artifact cannot load") => {
+                println!("skipped: the golden fixture is a default-build artifact and cannot load ({err})");
                 return;
             }
             Err(err) => panic!(
-                "the golden artifact no longer loads: {err}\n\
-             The format moved. If that was deliberate, regenerate the fixture with \
-             `REGENERATE_GOLDEN=1 cargo test --features grain --test grain golden`.",
+                "the golden artifact no longer loads:\n{err}\n\n\
+                The format probably has moved.\n\
+                If that was deliberate, regenerate the fixture with:\n\
+                REGENERATE_GOLDEN=1 cargo test --features grain --test grain golden",
             ),
         };
+
+        println!("artifact requires caps: {:?}", loaded.caps());
 
         // A fixture only pins what it contains, and narrowing one while editing the
         // source is easy and silent. These are read off the *artifact*, so they say
@@ -505,6 +511,7 @@ fn a_future_format_version_is_refused_rather_than_guessed_at() {
 /// The fingerprint is the difference between a clean failure and integers
 /// decoded as the wrong type, so the error must name the flag.
 #[test]
+#[cfg(not(feature = "no_index"))]
 fn a_different_value_representation_is_refused_by_name() {
     let engine = corpus::engine();
 
@@ -514,12 +521,16 @@ fn a_different_value_representation_is_refused_by_name() {
     let half = narrow[6] / 2; // INT width
     narrow[6] = half;
     let message = Program::read(&narrow).unwrap_err().to_string();
-    assert!(message.contains("INT") && message.contains(&half.to_string()), "the message must name the width: {message}",);
+    assert!(message.contains("integer") && message.contains(&half.to_string()), "the message must name the width: {message}",);
 
     let mut restricted = sample(&engine);
-    restricted[8] ^= 0b100; // the `no_index` bit
+    let bits: [u8; 4] = restricted[8..12].try_into().expect("the caps is 4 bytes");
+    let mut caps = rhai::grain::format::Caps::from_bits_retain(u32::from_le_bytes(bits));
+    // Remove the indexing caps.
+    caps -= rhai::grain::format::Caps::INDEXING;
+    restricted[8..12].copy_from_slice(&caps.bits().to_le_bytes());
     let message = Program::read(&restricted).unwrap_err().to_string();
-    assert!(message.contains("no_index"), "the message must name the flag: {message}",);
+    assert!(message.contains("indexing"), "the message must name `indexing`: {message}",);
 }
 
 /// A `switch` carries hashes Rhai's parser computed, and Rhai seeds its hasher

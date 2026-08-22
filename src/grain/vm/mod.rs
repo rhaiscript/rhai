@@ -4310,6 +4310,7 @@ impl<'e> Vm<'e> {
 mod tests {
     use super::*;
     use crate::grain::bytecode::{assemble, Chain, Chunk, Op, Positions, Step, Strings, Tail};
+    use crate::grain::format::Abi;
     use crate::grain::program::{Function, Parts};
     use crate::{CallFnOptions, Engine, Scope, INT};
 
@@ -4373,6 +4374,7 @@ mod tests {
             .collect();
 
         Program::new(
+            Abi::host().caps,
             code.into(),
             Chunk::new(0, end_of(2), 8),
             functions,

@@ -1,49 +1,129 @@
-//! What a `Dynamic` is, on the machine that wrote the artifact.
-//!
-//! Rhai's feature flags change the value representation rather than just what
-//! is available: `f32_float` makes `FLOAT` an `f32`, `only_i32` narrows `INT`,
-//! `sync` swaps `Rc` for `Arc`. Loading an artifact across one of those is not
-//! a missing feature, it is a value decoded as the wrong type — so the header
-//! carries a fingerprint and the loader refuses a mismatch by name.
-//!
-//! ## What the fingerprint can and cannot see
-//!
-//! Widths are *measured*, so they are right no matter how Rhai was configured.
-//! The booleans are read from this crate's own features, which is why the
-//! manifest mirrors them — `cfg!(feature = "no_object")` here does not consult
-//! Rhai's manifest.
-//!
-//! That leaves one gap: enabling a restriction on Rhai directly, bypassing the
-//! mirror. The cross-checks below close it wherever rust can prove the
-//! disagreement, turning it into a compile error rather than a wrong
-//! fingerprint. They cannot close it everywhere, which is what the mirror is
-//! documented for.
+//! Capabilities that a script requires to run.
 
-/// Restrictions that are not visible in a width.
-///
-/// Order is the wire order and must never change; append only. A flag's name
-/// is what the loader reports, so it has to match Rhai's own spelling.
-const FLAGS: &[(&str, bool)] = &[
-    ("sync", cfg!(feature = "sync")),
-    ("decimal", cfg!(feature = "decimal")),
-    ("no_index", cfg!(feature = "no_index")),
-    ("no_object", cfg!(feature = "no_object")),
-    ("no_closure", cfg!(feature = "no_closure")),
-    ("no_function", cfg!(feature = "no_function")),
-    ("no_module", cfg!(feature = "no_module")),
-    ("no_position", cfg!(feature = "no_position")),
-    ("no_custom_syntax", cfg!(feature = "no_custom_syntax")),
-    ("no_time", cfg!(feature = "no_time")),
-    ("unchecked", cfg!(feature = "unchecked")),
+use bitflags::bitflags;
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
+
+bitflags! {
+    /// Capability flags.
+    ///
+    /// Order is the wire order and must never change; append only.
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct Caps: u32 {
+        /// The script uses floating-point numbers, which are not available under `no_float`.
+        const FLOAT = 1<<0;
+        /// The script uses arrays, which are not available under `no_index`.
+        const ARRAY = 1<<1;
+        /// The script uses BLOB's, which are not available under `no_index`.
+        const BLOB = 1<<2;
+        /// The script uses object maps, which are not available under `no_object`.
+        const MAP = 1<<3;
+        /// The script uses decimal numbers, which are only available under `decimal`.
+        const DECIMAL = 1<<4;
+        /// The script defines functions, which are not available under `no_function`.
+        const DEFINE_FUNCTION = 1<<5;
+        /// The script employs indexing, which is not available under `no_index`.
+        const INDEXING = 1<<6;
+        /// The script accesses properties, which are not available under `no_object`.
+        const PROPERTY = 1<<7;
+        /// The script uses method calling style, which is not available under `no_object`.
+        const METHOD = 1<<8;
+        /// The script uses `this`, which is not available under `no_function`.
+        const THIS = 1<<9;
+        /// The script uses shared values, which is not available under `no_closure`.
+        const SHARING = 1<<10;
+        /// The script uses the `import` statement to import modules, which is not available under `no_module`.
+        const IMPORT = 1<<11;
+        /// The script uses the `export` statement to export in modules, which is not available under `no_module`.
+        const EXPORT = 1<<12;
+        /// The script uses the custom syntax, which is not available under `no_custom_syntax`.
+        const CUSTOM_SYNTAX = 1<<13;
+    }
+}
+
+impl std::fmt::Display for Caps {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let description = CAP_FLAGS
+            .iter()
+            .filter(|(cap, _, _)| self.contains(*cap))
+            .map(|(_, name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        f.write_str(&description)?;
+
+        // A bit not in the table means the writer knows a capability this build does not.
+        // Reporting it as unknown.
+        if !(*self - Self::all()).is_empty() {
+            if !description.is_empty() {
+                f.write_str(", ")?;
+            }
+            f.write_str("requires an unknown capability")?;
+        }
+
+        if description.is_empty() {
+            f.write_str("requires nothing")?;
+        }
+
+        Ok(())
+    }
+}
+
+/// A table of all capabilities, their human-readable names,
+/// and whether this build has them.
+const CAP_FLAGS: &[(Caps, &'static str, bool)] = &[
+    (
+        Caps::FLOAT,
+        "uses floating-point numbers",
+        !cfg!(feature = "no_float"),
+    ),
+    (Caps::ARRAY, "uses arrays", !cfg!(feature = "no_index")),
+    (Caps::BLOB, "uses BLOB's", !cfg!(feature = "no_index")),
+    (Caps::MAP, "uses object maps", !cfg!(feature = "no_object")),
+    (
+        Caps::DECIMAL,
+        "uses decimal numbers",
+        cfg!(feature = "decimal"),
+    ),
+    (
+        Caps::DEFINE_FUNCTION,
+        "defines functions",
+        !cfg!(feature = "no_function"),
+    ),
+    (Caps::INDEXING, "uses indexing", !cfg!(feature = "no_index")),
+    (
+        Caps::PROPERTY,
+        "accesses properties",
+        !cfg!(feature = "no_object"),
+    ),
+    (
+        Caps::METHOD,
+        "uses method calling style",
+        !cfg!(feature = "no_object"),
+    ),
+    (Caps::THIS, "uses `this`", !cfg!(feature = "no_function")),
+    (
+        Caps::SHARING,
+        "uses shared values",
+        !cfg!(feature = "no_closure"),
+    ),
+    (
+        Caps::IMPORT,
+        "imports modules",
+        !cfg!(feature = "no_module"),
+    ),
+    (
+        Caps::EXPORT,
+        "exports data in modules",
+        !cfg!(feature = "no_module"),
+    ),
+    (
+        Caps::CUSTOM_SYNTAX,
+        "uses custom syntax",
+        // Unsupported syntax is not yet supported
+        false && !cfg!(feature = "no_custom_syntax"),
+    ),
 ];
-
-/// `Engine` is only `Send + Sync` when Rhai is built with `sync`, so claiming
-/// the flag without Rhai agreeing fails to compile.
-#[cfg(feature = "sync")]
-const _: () = {
-    const fn assert_sync<T: Send + Sync>() {}
-    let _ = assert_sync::<rhai::Engine>;
-};
 
 /// The value representation an artifact was written against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,8 +133,8 @@ pub struct Abi {
     pub int_bytes: u8,
     /// `size_of::<rhai::FLOAT>()`, or 0 under `no_float`.
     pub float_bytes: u8,
-    /// `FLAGS` as a bitmask, low bit first.
-    pub flags: u32,
+    /// current build's feature flags.
+    pub caps: Caps,
 }
 
 /// How two fingerprints differ.
@@ -64,7 +144,7 @@ pub struct Abi {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AbiMismatch {
     /// A width differs, which means integers or floats would decode wrong.
-    Width {
+    DataWidth {
         /// Which width differs
         what: &'static str,
         /// What the writer used
@@ -72,35 +152,30 @@ pub enum AbiMismatch {
         /// What this build uses
         host: u8,
     },
-    /// A restriction differs. `artifact` is whether the writer had it on.
-    Flag {
-        /// Which flag differs
-        flag: &'static str,
-        /// Whether the writer had it on
-        artifact: bool,
+    /// Missing capabilities, which means the artifact uses features this build does not have.
+    MissingCaps {
+        /// Which capabilities are missing.
+        caps: String,
     },
 }
 
 impl core::fmt::Display for AbiMismatch {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Width {
+            Self::DataWidth {
                 what,
                 artifact,
                 host,
             } => write!(
                 f,
-                "artifact was written with a {artifact}-byte {what}, but this build has {host}"
+                "artifact cannot load because it was written with a {artifact}-byte {what}, but this build has {host}"
             ),
-            Self::Flag { flag, artifact } => {
-                let (writer, reader) = if *artifact {
-                    ("on", "off")
-                } else {
-                    ("off", "on")
-                };
+            Self::MissingCaps {
+                caps: capability,
+            } => {
                 write!(
                     f,
-                    "artifact was written with `{flag}` {writer}, but this build has it {reader}"
+                    "artifact cannot load because {capability}, but this build does not have the necessary features enabled"
                 )
             }
         }
@@ -111,22 +186,19 @@ impl Abi {
     /// The fingerprint of the running build.
     #[must_use]
     pub fn host() -> Self {
-        #[cfg(not(feature = "no_float"))]
-        let float_bytes = core::mem::size_of::<rhai::FLOAT>() as u8;
-        #[cfg(feature = "no_float")]
-        let float_bytes = 0u8;
+        let mut caps = Caps::empty();
 
-        let mut flags = 0u32;
-        for (bit, (_, on)) in FLAGS.iter().enumerate() {
-            if *on {
-                flags |= 1 << bit;
-            }
-        }
+        CAP_FLAGS
+            .iter()
+            .for_each(|(flag, _, on)| caps.set(*flag, *on));
 
         Self {
             int_bytes: core::mem::size_of::<rhai::INT>() as u8,
-            float_bytes,
-            flags,
+            #[cfg(not(feature = "no_float"))]
+            float_bytes: core::mem::size_of::<rhai::FLOAT>() as u8,
+            #[cfg(feature = "no_float")]
+            float_bytes: 0,
+            caps,
         }
     }
 
@@ -135,33 +207,26 @@ impl Abi {
     /// Widths first: they are measured rather than declared, so they are the
     /// claim least likely to be lying.
     #[must_use]
-    pub fn incompatible_with(self, host: Self) -> Option<AbiMismatch> {
+    pub fn is_incompatible_with(self, host: Self) -> Option<AbiMismatch> {
         if self.int_bytes != host.int_bytes {
-            return Some(AbiMismatch::Width {
-                what: "INT",
+            return Some(AbiMismatch::DataWidth {
+                what: "integer",
                 artifact: self.int_bytes,
                 host: host.int_bytes,
             });
         }
         if self.float_bytes != host.float_bytes {
-            return Some(AbiMismatch::Width {
-                what: "FLOAT",
+            return Some(AbiMismatch::DataWidth {
+                what: "floating-point number",
                 artifact: self.float_bytes,
                 host: host.float_bytes,
             });
         }
 
-        let differing = self.flags ^ host.flags;
-        if differing != 0 {
-            let bit = differing.trailing_zeros() as usize;
-            // A bit past the table means the writer knew a flag this build does
-            // not. Reporting it as unknown beats indexing out of bounds.
-            let flag = FLAGS
-                .get(bit)
-                .map_or("an unknown restriction", |(name, _)| *name);
-            return Some(AbiMismatch::Flag {
-                flag,
-                artifact: self.flags & (1 << bit) != 0,
+        let missing = self.caps - host.caps;
+        if !missing.is_empty() {
+            return Some(AbiMismatch::MissingCaps {
+                caps: missing.to_string(),
             });
         }
 
@@ -175,7 +240,7 @@ mod tests {
 
     #[test]
     fn a_build_can_load_its_own_artifacts() {
-        assert_eq!(Abi::host().incompatible_with(Abi::host()), None);
+        assert_eq!(Abi::host().is_incompatible_with(Abi::host()), None);
     }
 
     #[test]
@@ -204,9 +269,9 @@ mod tests {
             ..host
         };
         assert_eq!(
-            narrow.incompatible_with(host),
-            Some(AbiMismatch::Width {
-                what: "INT",
+            narrow.is_incompatible_with(host),
+            Some(AbiMismatch::DataWidth {
+                what: "integer",
                 artifact: host.int_bytes / 2,
                 host: host.int_bytes,
             }),
@@ -216,31 +281,42 @@ mod tests {
     /// The message has to name the flag; that is the difference between an
     /// error a user can act on and one they cannot.
     #[test]
+    #[cfg(not(feature = "no_object"))]
     fn a_differing_restriction_is_refused_by_name() {
-        let host = Abi::host();
-        let restricted = Abi {
-            flags: host.flags ^ (1 << 3),
-            ..host
+        let cap = Caps::MAP;
+        let desc = CAP_FLAGS
+            .iter()
+            .find(|(flag, _, _)| *flag == cap)
+            .expect("the test is broken")
+            .1;
+
+        // Let's say we need all caps on the host.
+        let needed = Abi::host();
+
+        // But the host has one less than we need, so it cannot load the artifact.
+        let host = Abi {
+            caps: needed.caps - cap,
+            ..needed
         };
 
-        let Some(mismatch @ AbiMismatch::Flag { flag, .. }) = restricted.incompatible_with(host)
+        let Some(AbiMismatch::MissingCaps { caps: missing, .. }) =
+            needed.is_incompatible_with(host)
         else {
-            panic!("a differing flag must be refused");
+            panic!("a missing cap must be refused");
         };
-        assert_eq!(flag, "no_object");
-        assert!(mismatch.to_string().contains("no_object"));
+        assert_eq!(missing, desc);
     }
 
     #[test]
     fn a_flag_this_build_has_never_heard_of_does_not_panic() {
         let host = Abi::host();
         let future = Abi {
-            flags: host.flags ^ (1 << 31),
+            caps: host.caps ^ Caps::from_bits_retain(1_u32 << 31),
             ..host
         };
         assert!(matches!(
-            future.incompatible_with(host),
-            Some(AbiMismatch::Flag { .. }),
+            future.is_incompatible_with(host),
+            Some(AbiMismatch::MissingCaps { .. }),
         ));
     }
 }
