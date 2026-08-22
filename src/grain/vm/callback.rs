@@ -75,6 +75,14 @@ pub(super) fn wrappers(program: &SharedProgram) -> Module {
         // its declared arity (`types/fn_ptr.rs:501-535`); a name-only pointer,
         // which is all a wrapper can be, cannot. So these are left to Rhai,
         // and `Program::needs_walker` is what keeps its copy alive for them.
+        //
+        // Registering one arity wider and taking the first argument as the
+        // receiver does not rescue it, and fails quietly. The receiver is not
+        // argument zero: for a *curried* pointer Rhai splices the captures in
+        // first and inserts the receiver after them (`types/fn_ptr.rs`, "curry +
+        // this_ptr + args"), so `for_each(|| t += this)` hands such a wrapper
+        // `[t, element]` and binding argument zero writes the sum into the
+        // capture's place. The corpus case of that name is what catches it.
         if function.takes_this {
             continue;
         }
@@ -125,7 +133,13 @@ fn invoke(
     // anything it still needs.
     let values: FnArgsVec<Dynamic> = args.iter_mut().map(|arg| mem::take(*arg)).collect();
 
-    Vm::reentrant(context).call_function(
+    let mut vm = Vm::reentrant(context);
+    // A chunk reached this way can itself build a closure, and that pointer
+    // needs the program as much as one built in the outer run does.
+    #[cfg(not(feature = "no_function"))]
+    vm.adopt(program);
+
+    vm.call_function(
         program,
         name,
         values,

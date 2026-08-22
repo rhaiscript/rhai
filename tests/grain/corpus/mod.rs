@@ -191,6 +191,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
             name,
             "block_as_argument"
                 | "error_a_skipped_function_cannot_see_the_caller"
+                | "error_map_callback_this_and_an_argument"
                 | "error_wrong_arity"
                 | "for_over_captured_array"
                 | "for_return_from_body"
@@ -235,7 +236,10 @@ pub fn applies_to_this_build(name: &str) -> bool {
             | "closure_filter_binds_this"
             | "closure_for_each_binds_this"
             | "closure_in_filter"
+            | "closure_in_for_each_index"
             | "closure_in_map"
+            | "closure_in_reduce"
+            | "closure_in_reduce_rev"
             | "closure_map_binds_this"
             | "closure_map_takes_an_argument"
             | "closure_shared_chain_root"
@@ -247,6 +251,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
             | "error_host_index_bounds"
             | "error_index_into_an_unindexable_step"
             | "error_index_into_an_unindexable_step_deep"
+            | "error_map_callback_this_and_an_argument"
             | "error_no_function_for_the_receiver"
             | "error_property_on_a_temporary"
             | "error_temp_root_index_runs_first"
@@ -322,7 +327,12 @@ pub fn applies_to_this_build(name: &str) -> bool {
                 | "closure_filter_binds_this"
                 | "closure_for_each_binds_this"
                 | "closure_in_filter"
+                | "closure_in_for_each_index"
                 | "closure_in_map"
+                | "closure_in_map_filter"
+                | "closure_in_map_retain"
+                | "closure_in_reduce"
+                | "closure_in_reduce_rev"
                 | "closure_map_binds_this"
                 | "closure_map_takes_an_argument"
                 | "closure_shared_op_assign"
@@ -332,6 +342,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
                 | "error_const_root_method_step"
                 | "error_fn_ptr_unknown_name"
                 | "error_index_into_an_unindexable_step_deep"
+                | "error_map_callback_this_and_an_argument"
                 | "error_map_write_through_an_absent_key"
                 | "error_method_on_a_variable"
                 | "error_op_assign_undefined_for_types"
@@ -612,6 +623,20 @@ pub const CASES: &[Case] = &[
     case("is_shared_after_capture", "let x = 1; let r = false; { let f = || x; r = is_shared(f); } [is_shared(x), r]"),
     case("closure_in_map", "[1, 2, 3].map(|x| x * 2)"),
     case("closure_in_filter", "[1, 2, 3, 4].filter(|x| x % 2 == 0)"),
+    // Every native taking a callback offers it a menu of argument shapes and
+    // picks by the pointer's declared arity. `map` and `filter` want the element
+    // at index zero, which is also where a pointer that declares nothing ends up
+    // putting it — so they agree by luck and cover none of the rest.
+    //
+    // These four do not. `reduce` wants the element at index *one*, after the
+    // accumulator; `Map` hands the key as an argument and the value as the
+    // receiver; and `for_each` wants the index and the element as `this`, so a
+    // receiver spliced into the arguments is one too many.
+    case("closure_in_reduce", r#"[1, 2, 3].reduce(|a, v| if a == () { v } else { a + v })"#),
+    case("closure_in_reduce_rev", r#"[1, 2, 3].reduce_rev(|a, v| if a == () { v } else { a + v })"#),
+    case("closure_in_map_filter", r#"#{ a: 1, b: 2 }.filter(|k, v| v > 1).len()"#),
+    case("closure_in_map_retain", r#"let m = #{ a: 1, b: 2 }; m.retain(|k, v| v > 1); m.len()"#),
+    case("closure_in_for_each_index", "let s = 0; [10, 20, 30].for_each(|i| s += i); s"),
     // --- chained lvalues --------------------------------------------------
     // Each of these needs a different `Target` variant and its write-back.
     case("index_assign_array", "let a = [1, 2, 3]; a[1] = 99; a"),
@@ -854,6 +879,11 @@ pub const CASES: &[Case] = &[
     case("closure_for_each_binds_this", "let t = 0; [1, 2, 3].for_each(|| t += this); t"),
     // And the argument form, which takes the element as a parameter instead.
     case("closure_map_takes_an_argument", "[1, 2, 3].map(|x| x * 2)"),
+    // A callback that declares a parameter *and* reads `this`. The element goes
+    // into the parameter and nothing binds the receiver, so this is
+    // `ErrorUnboundThis` — the one shape a wrapper that took its first argument
+    // as a receiver would answer instead of raising.
+    case("error_map_callback_this_and_an_argument", "[1, 2, 3].map(|x| this + x)"),
     // `type_of` has no registered implementation anywhere — Rhai answers it by
     // name — so it is reached through the same door every other call is.
     // A constant argument is folded by the optimizer and proves nothing.

@@ -11,7 +11,7 @@
 use super::corpus;
 
 use rhai::grain::{Compiler, Vm};
-use rhai::{Dynamic, Engine, Scope};
+use rhai::{Dynamic, Engine, Scope, INT};
 
 /// Run a source through the VM with the callback wrappers installed.
 fn run(engine: &Engine, source: &str) -> Result<String, String> {
@@ -71,6 +71,67 @@ fn a_bare_function_name_is_a_pointer() {
     agree("fn double(x) { x * 2 } fn apply(f, v) { f.call(v) } apply(double, 4)");
     // A variable of the same name still wins over the function.
     agree("fn double(x) { x * 2 } let double = 7; double");
+}
+
+/// A native that hands a receiver straight to `FnPtr::call_raw`.
+///
+/// Every callback in Rhai's own library shapes its arguments first, and that is
+/// where a receiver meant for a chunk that cannot take one gets dropped. A
+/// host's native has no reason to: `call_raw` is public and takes an
+/// `Option<&mut Dynamic>`, so this is the shortest route from a receiver to a
+/// compiled chunk, and the drop has to happen there too.
+#[cfg(not(feature = "no_object"))]
+fn engine_that_hands_over_a_receiver() -> Engine {
+    let mut engine = corpus::engine();
+    engine.register_fn("apply_to", |ctx: rhai::NativeCallContext, receiver: &mut Dynamic, f: rhai::FnPtr| f.call_raw(&ctx, Some(receiver), []));
+    engine
+}
+
+#[test]
+#[cfg(not(feature = "no_object"))]
+fn a_native_can_hand_a_receiver_to_a_chunk_that_ignores_it() {
+    let engine = engine_that_hands_over_a_receiver();
+
+    // The chunk reads no receiver, so the wrapper is registered at no arguments
+    // and the one it is offered would make the call unresolvable.
+    let source = "let v = 21; v.apply_to(|| 42)";
+    assert_eq!(walk(&engine, source), Ok("42".to_string()));
+    assert_eq!(run(&engine, source), walk(&engine, source), "{source}");
+
+    // And one that does read it still gets it.
+    let source = "let v = 21; v.apply_to(|| this * 2)";
+    assert_eq!(walk(&engine, source), Ok("42".to_string()));
+    assert_eq!(run(&engine, source), walk(&engine, source), "{source}");
+}
+
+/// A pointer to a written name reaches the function Rhai reaches, which is
+/// whichever one fits the arity the caller settles on.
+///
+/// The engine here has a one-parameter `pick` beside the script's
+/// two-parameter one, so *which* of them a spelling reaches is visible in the
+/// answer. Without the collision every spelling agrees for free and the test
+/// says nothing, which is what the last assertion guards.
+///
+/// `Fn("pick")` is the late-bound spelling: Rhai tries shapes until one
+/// dispatches, and the one-parameter native is reached first. A compiled pointer
+/// that declared its chunk's arity would answer with the script function
+/// instead — right, arguably, and not what the walker does. See
+/// `Vm::compiled_pointer`.
+#[test]
+fn a_written_name_reaches_the_function_the_walker_reaches() {
+    let mut engine = corpus::engine();
+    engine.register_fn("pick", |_x: INT| -1 as INT);
+
+    const DECLARED: &str = "fn pick(v, i) { v + i } let a = [10, 20]; ";
+
+    for tail in ["a.map(Fn(\"pick\"))", "a.map(pick)", "a.map(|v, i| pick(v, i))"] {
+        let source = &format!("{DECLARED}{tail}");
+        assert_eq!(walk(&engine, source), run(&engine, source), "{source}");
+    }
+
+    let late = &format!("{DECLARED}a.map(Fn(\"pick\"))");
+    let early = &format!("{DECLARED}a.map(|v, i| pick(v, i))");
+    assert_ne!(run(&engine, late), run(&engine, early), "both spellings reached the same function, so the collision this rests on is gone",);
 }
 
 /// A capture arrives, and has the right value.
@@ -164,16 +225,33 @@ fn a_callback_costs_more_call_levels() {
     }
 }
 
+/// The whole reason `eval_with_callbacks` exists. A plain eval leaves Rhai
+/// nowhere to look, and the failure is a lookup failure rather than anything
+/// worse.
+///
+/// It is also what keeps the two entry points from meaning different things.
+/// `eval_with_scope` borrows the program, so a pointer it builds has no shared
+/// ownership to carry and cannot declare how many parameters its chunk takes —
+/// which is what the natives above size their calls from. That weakness is
+/// unreachable rather than merely unlikely: the only route from a native to a
+/// compiled chunk is a wrapper, and the run that installs no wrappers is the
+/// same run that hands out the weaker pointer. The call dies on the name before
+/// an argument list is ever built.
+///
+/// Every shape the wrappers path had to be taught is checked, not just `map`:
+/// if one of them ever *did* resolve here it would be answering with whatever
+/// order a pointer that cannot describe itself happens to produce, which is the
+/// silent-wrong-answer case nothing else would catch.
 #[test]
 fn without_the_wrappers_the_pointer_does_not_resolve() {
-    // The whole reason `eval_with_callbacks` exists. A plain eval leaves Rhai
-    // nowhere to look, and the failure is a lookup failure rather than
-    // anything worse.
     let engine = corpus::engine();
-    let source = "let a = [1, 2, 3]; a.map(|x| x * 2)";
-    let ast = engine.compile(source).unwrap();
-    let program = Compiler::new().compile(&ast);
 
-    let err = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).unwrap_err();
-    assert!(format!("{err:?}").contains("ErrorFunctionNotFound"), "{err}");
+    for source in ["let a = [1, 2, 3]; a.map(|x| x * 2)", "let a = [1, 2, 3]; a.reduce(|a, v| if a == () { v } else { a + v })", "let s = 0; let a = [10, 20, 30]; a.for_each(|i| s += i); s"] {
+        let ast = engine.compile(source).unwrap();
+        let program = Compiler::new().compile(&ast);
+        assert!(program.makes_fn_pointers(), "{source} must be a program a host is told to run with callbacks",);
+
+        let err = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).unwrap_err();
+        assert!(format!("{err:?}").contains("ErrorFunctionNotFound"), "{source}: {err}");
+    }
 }
