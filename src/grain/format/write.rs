@@ -111,7 +111,7 @@ pub(super) fn write(program: &Program, positions: Positions) -> Result<Vec<u8>, 
     let abi = Abi::host();
     out.push(abi.int_bytes);
     out.push(abi.float_bytes);
-    out.extend_from_slice(&abi.flags.to_le_bytes());
+    out.extend_from_slice(&program.caps().bits().to_le_bytes());
 
     // All artifacts must know their debug ID in case they are stripped
     out.extend_from_slice(&program.debug_id().to_le_bytes());

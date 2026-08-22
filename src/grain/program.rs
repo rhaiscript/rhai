@@ -10,7 +10,7 @@ use crate::grain::bytecode::{
     site_to_position, sites, AssignOp, Chain, Chunk, Code, Op, Pools, Positions, Root, Strings,
     Switch, TableError,
 };
-use crate::grain::format::Sidecar;
+use crate::grain::format::{Caps, Sidecar};
 
 /// Rhai's own `SharedModule`, which it does not re-export.
 pub(crate) type SharedModule = Shared<Module>;
@@ -73,6 +73,9 @@ pub struct Function {
 /// artifact format refuses to write a `Program` that has any, so nothing
 /// reaching a device can depend on them.
 pub struct Program<'a> {
+    /// The capabilities required by this program's instructions.
+    caps: Caps,
+
     /// Every chunk's instructions, concatenated: main first, then each
     /// function. One buffer means one position table and one instruction
     /// address, so a device that fails reports a single number.
@@ -306,6 +309,7 @@ pub(crate) struct Parts<'a> {
 
 impl<'a> Program<'a> {
     pub(crate) fn new(
+        caps: Caps,
         code: Code<'a>,
         main: Chunk,
         functions: Vec<Function>,
@@ -331,6 +335,7 @@ impl<'a> Program<'a> {
         });
 
         let mut program = Self {
+            caps,
             code,
             main,
             functions,
@@ -363,6 +368,7 @@ impl<'a> Program<'a> {
     pub fn into_owned(self) -> Program<'static> {
         Program {
             code: Code::Owned(self.code.into_owned()),
+            caps: self.caps,
             main: self.main,
             functions: self.functions,
             max_stack: self.max_stack,
@@ -401,7 +407,7 @@ impl<'a> Program<'a> {
     /// Cheap enough to run on every compile, and the gate an artifact loaded
     /// from a wire has to pass before the VM will touch it.
     pub fn verify(&self) -> Result<Vec<u16>, crate::grain::bytecode::VerifyError> {
-        crate::grain::bytecode::verify(&self.code, &self.chunks(), self.pools())
+        crate::grain::bytecode::verify(self.caps, &self.code, &self.chunks(), &self.pools())
     }
 
     /// Every chunk, main first, in the order they sit in the code.
@@ -448,6 +454,12 @@ impl<'a> Program<'a> {
     #[must_use]
     pub fn code(&self) -> &[u8] {
         &self.code
+    }
+
+    /// The capabilities required by every chunk's instructions.
+    #[must_use]
+    pub fn caps(&self) -> Caps {
+        self.caps
     }
 
     /// The compiled script functions.
@@ -794,6 +806,7 @@ mod tests {
             .collect();
 
         Program::new(
+            Caps::empty(),
             code.into(),
             whole,
             functions,

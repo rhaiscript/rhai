@@ -1,5 +1,6 @@
 use crate::grain::bytecode::code::{self, tag};
 use crate::grain::bytecode::{Chain, Chunk, Op, Receiver, Root, Step, Switch, Tail};
+use crate::grain::format::Caps;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -9,7 +10,7 @@ use std::prelude::v1::*;
 /// Chains and switches come through whole rather than as a count, because both
 /// hold things that have to be checked rather than counted: how much operand
 /// stack a chain consumes, and where a switch can send control.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Pools<'a> {
     /// How many constants there are.
     pub consts: usize,
@@ -34,6 +35,15 @@ pub struct Pools<'a> {
 /// anything a script can express.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyError {
+    /// An instruction requires capabilities which is unavailable.
+    MissingCaps {
+        /// Artifact declared capabilities
+        artifact: String,
+        /// Missing capabilities
+        missing: String,
+        /// Byte offset of the offending tag
+        at: usize,
+    },
     /// A tag with no instruction behind it, or one whose operands run past the
     /// end of the chunk.
     Undecodable {
@@ -149,7 +159,12 @@ pub enum VerifyError {
 ///
 /// Returns the measured stack high water, which is what the chunk should
 /// declare.
-pub fn verify(code: &[u8], chunks: &[Chunk], pools: Pools) -> Result<Vec<u16>, VerifyError> {
+pub fn verify(
+    caps: Caps,
+    code: &[u8],
+    chunks: &[Chunk],
+    pools: &Pools,
+) -> Result<Vec<u16>, VerifyError> {
     // Pass one: where do instructions start?
     //
     // Over the whole buffer at once, because every chunk shares it and an
@@ -171,7 +186,7 @@ pub fn verify(code: &[u8], chunks: &[Chunk], pools: Pools) -> Result<Vec<u16>, V
 
     chunks
         .iter()
-        .map(|chunk| verify_chunk(code, chunk, &starts, pools))
+        .map(|chunk| verify_chunk(caps, code, chunk, &starts, pools))
         .collect()
 }
 
@@ -193,10 +208,11 @@ struct State {
 /// Walk one chunk's reachable instructions, checking that every path into an
 /// instruction agrees on the stack depth.
 fn verify_chunk(
+    caps: Caps,
     code: &[u8],
     chunk: &Chunk,
     starts: &[bool],
-    pools: Pools,
+    pools: &Pools,
 ) -> Result<u16, VerifyError> {
     let (entry, end) = (chunk.entry() as usize, chunk.end() as usize);
     if end > code.len() || entry > end {
@@ -234,6 +250,16 @@ fn verify_chunk(
         high_water = high_water.max(depth);
 
         let op = code::decode(code, at).ok_or(VerifyError::Undecodable { at })?;
+
+        let required_caps = required_caps(&op, pools);
+
+        if !caps.contains(required_caps) {
+            return Err(VerifyError::MissingCaps {
+                at,
+                artifact: caps.to_string(),
+                missing: (required_caps - caps).to_string(),
+            });
+        }
 
         let (requires, pops, pushes) = effect(&op, pools);
 
@@ -397,8 +423,89 @@ fn verify_chunk(
     Ok(high_water)
 }
 
+/// Capabilities an instruction requires.
+fn required_caps(op: &Op, pools: &Pools) -> Caps {
+    match op {
+        Op::Chain(index) => match pools.chains.get(*index as usize) {
+            Some(chain) => {
+                let mut caps = Caps::empty();
+
+                match chain.root {
+                    Root::Local { .. } | Root::Named { .. } | Root::Temporary => {}
+                    Root::This { .. } => caps.insert(Caps::THIS),
+                }
+                chain.steps.iter().for_each(|step| match step {
+                    Step::Index { .. } => caps.insert(Caps::INDEXING),
+                    Step::Property { .. } => caps.insert(Caps::PROPERTY),
+                    Step::Method { .. } => caps.insert(Caps::METHOD),
+                });
+
+                caps
+            }
+            None => Caps::empty(),
+        },
+
+        Op::Const(..)
+        | Op::Unit
+        | Op::Bool(..)
+        | Op::LoadLocal(..)
+        | Op::LoadNamed(..)
+        | Op::StoreLocal { .. }
+        | Op::DeclareLocal { .. }
+        | Op::Pop
+        | Op::AssignLocal { .. }
+        | Op::AssignNamed { .. }
+        | Op::AssignThis { .. }
+        | Op::JumpIfFalse { .. }
+        | Op::JumpIfTrue { .. }
+        | Op::Switch(..)
+        | Op::Jump(..)
+        | Op::UnwindTo(..)
+        | Op::Tick
+        | Op::Checkpoint
+        | Op::PushHandler { .. }
+        | Op::PopHandler
+        | Op::SkipIfNotUnit { .. }
+        | Op::Call { .. }
+        | Op::CallFnPtr { .. }
+        | Op::Rotate(..)
+        | Op::CheckSize { .. }
+        | Op::InterpolateStart
+        | Op::InterpolateAppend
+        | Op::InterpolateEnd
+        | Op::MakeFnPtr
+        | Op::MakeClosure(..)
+        | Op::Curry(..)
+        | Op::Throw
+        | Op::IterInit
+        | Op::IterNext { .. }
+        | Op::IterDrop
+        | Op::Return
+        | Op::LoadShared(..)
+        | Op::LoadSharedNamed(..)
+        | Op::StoreShared(..)
+        | Op::Statement { .. } => Caps::empty(),
+
+        // `EvalAst` is a host-only instruction, so it is never in an artifact.
+        Op::EvalAst { .. } => Caps::empty(),
+
+        Op::Share(..) | Op::ShareNamed(..) => Caps::SHARING,
+
+        Op::RequireThis | Op::LoadThis | Op::LoadThisShared => Caps::THIS,
+
+        Op::CallRef { receiver, .. } => match receiver {
+            Receiver::Local(..) | Receiver::Named(..) => Caps::empty(),
+            Receiver::This => Caps::THIS,
+        },
+
+        Op::MakeArray(..) => Caps::ARRAY,
+        Op::MakeMap(..) => Caps::MAP,
+        Op::IsShared => Caps::SHARING,
+    }
+}
+
 /// How many operands an instruction requires, consumes and produces.
-fn effect(op: &Op, pools: Pools) -> (usize, usize, usize) {
+fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
     match op {
         // A chain eats the indices and arguments its steps named, plus a root
         // that is not a slot, plus the value being assigned, and leaves one
@@ -515,7 +622,7 @@ fn effect(op: &Op, pools: Pools) -> (usize, usize, usize) {
 /// The VM treats these as assertions, and an artifact is the one place they can
 /// be wrong without a compiler bug. Reads the operands off the bytes rather
 /// than off a decoded `Op`, so it runs in the same pass that measures widths.
-fn check_indices(at: usize, code: &[u8], pools: Pools) -> Result<(), VerifyError> {
+fn check_indices(at: usize, code: &[u8], pools: &Pools) -> Result<(), VerifyError> {
     let index = |offset: usize| code::u16_at(code, at + offset).map_or(0, u32::from);
     let bounded = |index: u32, what: &'static str, len: usize| {
         if index as usize >= len {
@@ -582,7 +689,7 @@ fn check_indices(at: usize, code: &[u8], pools: Pools) -> Result<(), VerifyError
 /// A chain is one instruction over an unbounded record, so nearly all of what
 /// it names lives in the pool rather than in the code. Bounding only the
 /// record's own index would leave most of the instruction unverified.
-fn check_chain_indices(at: usize, chain: &Chain, pools: Pools) -> Result<(), VerifyError> {
+fn check_chain_indices(at: usize, chain: &Chain, pools: &Pools) -> Result<(), VerifyError> {
     let bounded = |index: u32, what: &'static str, len: usize| {
         if index as usize >= len {
             Err(VerifyError::BadIndex { at, what, index })
@@ -628,6 +735,7 @@ fn check_chain_indices(at: usize, chain: &Chain, pools: Pools) -> Result<(), Ver
 mod tests {
     use super::*;
     use crate::grain::bytecode::assemble;
+    use crate::grain::format::Abi;
 
     fn pools() -> Pools<'static> {
         Pools {
@@ -645,14 +753,14 @@ mod tests {
     fn check(ops: Vec<Op>) -> Result<Vec<u16>, VerifyError> {
         let (code, _) = assemble(&ops).expect("the test ops must assemble");
         let chunk = Chunk::new(0, code.len() as u32, 8);
-        verify(&code, &[chunk], pools())
+        verify(Abi::host().caps, &code, &[chunk], &pools())
     }
 
     /// The same, for bytes `assemble` would refuse to produce — which is what
     /// a corrupt artifact hands the loader.
     fn check_bytes(code: Vec<u8>, max_stack: u16) -> Result<Vec<u16>, VerifyError> {
         let chunk = Chunk::new(0, code.len() as u32, max_stack);
-        verify(&code, &[chunk], pools())
+        verify(Abi::host().caps, &code, &[chunk], &pools())
     }
 
     #[test]
@@ -663,6 +771,7 @@ mod tests {
     /// `this` is a register, so reading it costs a push and nothing else, and
     /// assigning to it consumes one without leaving anything behind.
     #[test]
+    #[cfg(not(feature = "no_function"))]
     fn the_this_register_is_reached_without_touching_the_scope() {
         assert_eq!(check(vec![Op::LoadThis, Op::Return]), Ok(vec![1]));
         assert_eq!(check(vec![Op::LoadThisShared, Op::Return]), Ok(vec![1]));
@@ -761,7 +870,7 @@ mod tests {
             };
             assert!(
                 matches!(
-                    verify(&code, &[chunk], pools),
+                    verify(Abi::host().caps, &code, &[chunk], &pools),
                     Err(VerifyError::BadIndex {
                         what: "name",
                         index: 3,
@@ -782,9 +891,10 @@ mod tests {
         let chunk = Chunk::new(0, code.len() as u32, 8);
         assert!(matches!(
             verify(
+                Abi::host().caps,
                 &code,
                 &[chunk],
-                Pools {
+                &Pools {
                     names: 1,
                     chains: core::slice::from_ref(&assigning),
                     ..pools()
@@ -814,7 +924,7 @@ mod tests {
             Chunk::new(boundary, code.len() as u32, 8),
         ];
         assert!(matches!(
-            verify(&code, &chunks, pools()),
+            verify(Abi::host().caps, &code, &chunks, &pools()),
             Err(VerifyError::JumpOutOfRange { .. }),
         ));
     }
@@ -913,9 +1023,10 @@ mod tests {
         let good = [table(offsets[2], offsets[4])];
         assert_eq!(
             verify(
+                Abi::host().caps,
                 &code,
                 &[chunk],
-                Pools {
+                &Pools {
                     switches: &good,
                     ..pools()
                 }
@@ -928,9 +1039,10 @@ mod tests {
         assert!(
             matches!(
                 verify(
+                    Abi::host().caps,
                     &code,
                     &[chunk],
-                    Pools {
+                    &Pools {
                         switches: &mid,
                         ..pools()
                     }
@@ -945,9 +1057,10 @@ mod tests {
         assert!(
             matches!(
                 verify(
+                    Abi::host().caps,
                     &code,
                     &[chunk],
-                    Pools {
+                    &Pools {
                         switches: &outside,
                         ..pools()
                     }
@@ -1003,9 +1116,10 @@ mod tests {
         let chunk = Chunk::new(0, code.len() as u32, 8);
         assert!(matches!(
             verify(
+                Abi::host().caps,
                 &code,
                 &[chunk],
-                Pools {
+                &Pools {
                     consts: 1,
                     ..pools()
                 }
@@ -1050,7 +1164,7 @@ mod tests {
     fn rejects_a_chunk_that_names_code_it_does_not_have() {
         let (code, _) = assemble(&[Op::Unit, Op::Return]).unwrap();
         assert!(matches!(
-            verify(&code, &[Chunk::new(0, 9999, 8)], pools()),
+            verify(Abi::host().caps, &code, &[Chunk::new(0, 9999, 8)], &pools()),
             Err(VerifyError::ChunkOutOfRange { .. }),
         ));
     }
