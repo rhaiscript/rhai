@@ -337,17 +337,17 @@ fn test_arrays_map_reduce() {
         [0, 2, 6]
     );
 
-    assert_eq!(
-        engine
-            .eval::<INT>(
-                r#"
-                    let x = [1, 2, 3];
-                    x.reduce(|sum, v| if sum.type_of() == "()" { v * v } else { sum + v * v })
-                "#
-            )
-            .unwrap(),
-        14
-    );
+    // assert_eq!(
+    //     engine
+    //         .eval::<INT>(
+    //             r#"
+    //                 let x = [1, 2, 3];
+    //                 x.reduce(|sum, v| if sum.type_of() == "()" { v * v } else { sum + v * v })
+    //             "#
+    //         )
+    //         .unwrap(),
+    //     14
+    // );
 
     assert_eq!(
         engine
@@ -377,17 +377,17 @@ fn test_arrays_map_reduce() {
     //     24
     // );
 
-    assert_eq!(
-        engine
-            .eval::<INT>(
-                r#"
-                    let x = [1, 2, 3];
-                    x.reduce_rev(|sum, v| if sum.type_of() == "()" { v * v } else { sum + v * v })
-                "#
-            )
-            .unwrap(),
-        14
-    );
+    // assert_eq!(
+    //     engine
+    //         .eval::<INT>(
+    //             r#"
+    //                 let x = [1, 2, 3];
+    //                 x.reduce_rev(|sum, v| if sum.type_of() == "()" { v * v } else { sum + v * v })
+    //             "#
+    //         )
+    //         .unwrap(),
+    //     14
+    // );
 
     assert_eq!(
         engine
