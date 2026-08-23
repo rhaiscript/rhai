@@ -812,7 +812,7 @@ mod tests {
             .collect();
 
         Program::new(
-            Caps::empty(),
+            Caps::DEFINE_FUNCTION,
             code.into(),
             whole,
             functions,
