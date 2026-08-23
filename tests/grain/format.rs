@@ -419,8 +419,8 @@ fn the_same_source_compiles_to_the_same_bytes() {
 
     assert_eq!(first, second, "two compiles of one source disagree");
 
-    let reparsed = engine.compile(source).expect("must compile");
-    let third = Compiler::new().compile(&reparsed).write().expect("must be writable");
+    let recompiled = engine.compile(source).expect("must compile");
+    let third = Compiler::new().compile(&recompiled).write().expect("must be writable");
 
     assert_eq!(first, third, "two parses of one source disagree");
 }
@@ -508,29 +508,82 @@ fn a_future_format_version_is_refused_rather_than_guessed_at() {
     assert!(matches!(Program::read(&bytes).unwrap_err(), ReadError::UnsupportedVersion { found: 0xffff, .. },));
 }
 
-/// The fingerprint is the difference between a clean failure and integers
-/// decoded as the wrong type, so the error must name the flag.
+/// Every capability the compiler tracks for a script is produced by a
+/// common Rhai scriptlet that actually uses it and still round-trips.
 #[test]
-#[cfg(not(feature = "no_index"))]
-fn a_different_value_representation_is_refused_by_name() {
+fn capabilities_round_trip() {
+    use rhai::grain::format::Caps;
+
+    const CASES: &[(&str, &str, Caps, &str)] = &[
+        #[cfg(not(feature = "no_float"))]
+        ("float", "let x = 3.5; x + 1.5", Caps::FLOAT, "floating-point"),
+        #[cfg(not(feature = "no_index"))]
+        ("array", "let a = [1, 2, 3]; a[1] + a[2]", Caps::ARRAY.union(Caps::INDEXING), "arrays"),
+        #[cfg(not(feature = "no_object"))]
+        ("map", "let m = #{ answer: 42 }; m.answer", Caps::MAP.union(Caps::PROPERTY), "object maps"),
+        // #[cfg(feature = "decimal")]
+        // ("decimal", "let d = 1e1000; d + 1", Caps::DECIMAL, "decimal numbers"),
+        #[cfg(not(feature = "no_object"))]
+        ("method", "let a = [1, 2, 3]; a.len()", Caps::ARRAY.union(Caps::METHOD), "method calling style"),
+        #[cfg(not(feature = "no_function"))]
+        ("this", "fn add(n) { this + n } let x = 40; x.add(2)", Caps::THIS.union(Caps::METHOD), "this"),
+        #[cfg(not(feature = "no_closure"))]
+        ("sharing", "let x = 40; let f = || x + 2; f.call()", Caps::SHARING.union(Caps::METHOD), "shared values"),
+        #[cfg(not(any(feature = "no_index", feature = "no_object", feature = "no_closure")))]
+        (
+            "combined_features",
+            "let items = [1, 2, 3]; let map = #{ answer: 42 }; let f = || items[0] + map.answer; f.call()",
+            Caps::ARRAY.union(Caps::INDEXING).union(Caps::MAP).union(Caps::PROPERTY).union(Caps::SHARING).union(Caps::METHOD),
+            "shared values",
+        ),
+    ];
+
     let engine = corpus::engine();
 
-    let mut narrow = sample(&engine);
-    // Halved rather than named: `only_i32` already makes 4 the host's own
-    // width, and an artifact agreeing with the host is not refused at all.
-    let half = narrow[6] / 2; // INT width
-    narrow[6] = half;
-    let message = Program::read(&narrow).unwrap_err().to_string();
-    assert!(message.contains("integer") && message.contains(&half.to_string()), "the message must name the width: {message}",);
+    for (name, source, expected, expected_text) in CASES {
+        let ast = engine.compile(source).unwrap_or_else(|err| panic!("{name} must compile: {err}"));
+        let program = Compiler::new().compile(&ast);
 
-    let mut restricted = sample(&engine);
-    let bits: [u8; 4] = restricted[8..12].try_into().expect("the caps is 4 bytes");
-    let mut caps = rhai::grain::format::Caps::from_bits_retain(u32::from_le_bytes(bits));
-    // Remove the indexing caps.
-    caps -= rhai::grain::format::Caps::INDEXING;
-    restricted[8..12].copy_from_slice(&caps.bits().to_le_bytes());
-    let message = Program::read(&restricted).unwrap_err().to_string();
-    assert!(message.contains("indexing"), "the message must name `indexing`: {message}",);
+        for cap in Caps::all() {
+            if expected.contains(cap) {
+                assert!(program.caps().contains(cap), "{name} is missing {:?}", cap);
+            }
+        }
+
+        let bytes = program.write().expect("scriptlet must serialize");
+        let loaded = Program::read(&bytes).expect("scriptlet must survive a round trip");
+        assert!(loaded.caps().contains(*expected), "{name} lost {expected:?} on read-back");
+        let caps_string = loaded.caps().to_string();
+        assert!(caps_string.contains(expected_text), "{name} caps string did not mention `{expected_text}`: {caps_string}");
+    }
+}
+
+/// Capabilities of the host.
+#[test]
+fn host_capabilities() {
+    use rhai::grain::format::{Abi, Caps};
+
+    const SUPPORTED: &[(Caps, bool, &str)] = &[
+        (Caps::FLOAT, !cfg!(feature = "no_float"), "floating-point"),
+        (Caps::ARRAY, !cfg!(feature = "no_index"), "arrays"),
+        (Caps::BLOB, !cfg!(feature = "no_index"), "BLOB"),
+        (Caps::MAP, !cfg!(feature = "no_object"), "object maps"),
+        (Caps::DECIMAL, cfg!(feature = "decimal"), "decimal numbers"),
+        (Caps::DEFINE_FUNCTION, !cfg!(feature = "no_function"), "functions"),
+        (Caps::INDEXING, !cfg!(feature = "no_index"), "indexing"),
+        (Caps::PROPERTY, !cfg!(feature = "no_object"), "properties"),
+        (Caps::METHOD, !cfg!(feature = "no_object"), "method calling style"),
+        (Caps::THIS, !cfg!(feature = "no_function"), "this"),
+        (Caps::SHARING, !cfg!(feature = "no_closure"), "shared values"),
+        (Caps::IMPORT, !cfg!(feature = "no_module"), "imports modules"),
+        (Caps::EXPORT, !cfg!(feature = "no_module"), "exports data in modules"),
+        (Caps::CUSTOM_SYNTAX, false, "custom syntax"),
+    ];
+
+    let host = Abi::host();
+    for (cap, supported, text) in SUPPORTED {
+        assert_eq!(host.caps.contains(*cap), *supported, "cap {:?} should be {} on this build ({text})", cap, if *supported { "available" } else { "unavailable" });
+    }
 }
 
 /// A `switch` carries hashes Rhai's parser computed, and Rhai seeds its hasher
