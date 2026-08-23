@@ -830,7 +830,10 @@ impl Lowering {
         let mut skipped = 0;
         for def in defs {
             match self.function(def) {
-                Some(function) => functions.push(function),
+                Some(function) => {
+                    functions.push(function);
+                    self.caps.insert(Caps::DEFINE_FUNCTION);
+                }
                 None => skipped += 1,
             }
         }

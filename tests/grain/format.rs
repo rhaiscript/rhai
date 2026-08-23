@@ -524,11 +524,15 @@ fn capabilities_round_trip() {
         // #[cfg(feature = "decimal")]
         // ("decimal", "let d = 1e1000; d + 1", Caps::DECIMAL, "decimal numbers"),
         #[cfg(not(feature = "no_object"))]
+        #[cfg(not(feature = "no_index"))]
         ("method", "let a = [1, 2, 3]; a.len()", Caps::ARRAY.union(Caps::METHOD), "method calling style"),
         #[cfg(not(feature = "no_function"))]
-        ("this", "fn add(n) { this + n } let x = 40; x.add(2)", Caps::THIS.union(Caps::METHOD), "this"),
+        #[cfg(not(feature = "no_object"))]
+        ("this", "fn add(n) { this + n } let x = 40; x.add(2)", Caps::THIS.union(Caps::DEFINE_FUNCTION).union(Caps::METHOD), "this"),
+        #[cfg(not(feature = "no_function"))]
         #[cfg(not(feature = "no_closure"))]
-        ("sharing", "let x = 40; let f = || x + 2; f.call()", Caps::SHARING.union(Caps::METHOD), "shared values"),
+        #[cfg(not(feature = "no_object"))]
+        ("sharing", "let x = 40; let f = || x + 2; f.call()", Caps::SHARING.union(Caps::DEFINE_FUNCTION).union(Caps::METHOD), "shared values"),
         #[cfg(not(any(feature = "no_index", feature = "no_object", feature = "no_closure")))]
         (
             "combined_features",
