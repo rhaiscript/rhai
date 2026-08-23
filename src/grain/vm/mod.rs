@@ -386,7 +386,7 @@ pub struct Vm<'e> {
     /// `this` never inherited: a plain nested call passes `None` and gets the
     /// caller's back on the way out, reproducing `func/call.rs:669` without a
     /// conditional anywhere.
-    this: Option<Dynamic>,
+    this_ptr: Option<Dynamic>,
     /// Whether this `Vm` started the run, and so may clear its trace.
     ///
     /// False for a [`Vm::reentrant`]: a callback clearing the trace would
@@ -479,13 +479,13 @@ impl<'e> Vm<'e> {
             engine,
             global,
             caches: Caches::new(),
-            strings_interner: StringsInterner::new(256),
+            strings_interner: StringsInterner::new(64),
             stack: Vec::new(),
             iterators: Vec::new(),
             handlers: Vec::new(),
             sizes: Vec::new(),
             unwind_floor: 0,
-            this: None,
+            this_ptr: None,
             owns_trace: true,
             chain_step: 0,
             pending_slot: None,
@@ -520,7 +520,7 @@ impl<'e> Vm<'e> {
             engine: context.engine(),
             global: context.global_runtime_state().clone(),
             caches: Caches::new(),
-            strings_interner: StringsInterner::new(256),
+            strings_interner: StringsInterner::new(64),
             stack: Vec::new(),
             iterators: Vec::new(),
             handlers: Vec::new(),
@@ -528,7 +528,7 @@ impl<'e> Vm<'e> {
             unwind_floor: 0,
             // A crossing carries no receiver: Rhai binds one only where it
             // dispatches a method, and this arrives through `call_fn_raw`.
-            this: None,
+            this_ptr: None,
             // `global` is a clone, so the trace is shared with the run that
             // called in and is not this call's to clear.
             owns_trace: false,
@@ -640,7 +640,7 @@ impl<'e> Vm<'e> {
     ///
     /// The receiver comes back however the call ended, for the caller to put
     /// where it took it from — see [`bind_this`] and [`unbind_this`].
-    fn call_function_with_this(
+    pub(crate) fn call_function_with_this(
         &mut self,
         program: &Program,
         name: &str,
@@ -649,7 +649,7 @@ impl<'e> Vm<'e> {
         scope: &mut Scope,
         rewind_scope: bool,
         pos: Position,
-        this: Option<Dynamic>,
+        this_ptr: Option<Dynamic>,
     ) -> (VmResult, Option<Dynamic>) {
         // An entry point in its own right so the trace starts here rather than at `run_main`.
         self.clear_faults();
@@ -663,7 +663,7 @@ impl<'e> Vm<'e> {
                     format!("{name} ({} args)", args.len()),
                     pos,
                 ))),
-                this,
+                this_ptr,
             );
         };
         let (params, chunk) = (function.params.clone(), function.chunk);
@@ -683,7 +683,7 @@ impl<'e> Vm<'e> {
             scope,
             rewind_scope,
             pos,
-            this,
+            this_ptr,
         );
         self.global.level = restore;
 
@@ -894,6 +894,7 @@ impl<'e> Vm<'e> {
     /// # Errors
     ///
     /// As [`eval_with_scope`](Self::eval_with_scope).
+    #[cfg(not(feature = "no_function"))]
     pub fn eval_with_callbacks(&mut self, scope: &mut Scope, program: &SharedProgram) -> VmResult {
         let wrappers =
             (!program.functions().is_empty()).then(|| callback::wrappers(program).into());
@@ -1159,7 +1160,7 @@ impl<'e> Vm<'e> {
         // storage, so a body that mutated and then raised has already written;
         // restoring only on success would discard exactly that.
         if let RootValue::This(value) = root {
-            self.this = Some(value);
+            self.this_ptr = Some(value);
         }
 
         let (out, _) = result?;
@@ -1205,7 +1206,7 @@ impl<'e> Vm<'e> {
             // rather than the `.` after it (`eval/chaining.rs:519-527`).
             Root::This { pos: this_pos } => {
                 let value = self
-                    .this
+                    .this_ptr
                     .take()
                     .ok_or_else(|| Box::new(EvalAltResult::ErrorUnboundThis(this_pos)))?;
                 Ok(ChainRoot {
@@ -2225,7 +2226,7 @@ impl<'e> Vm<'e> {
                 }
             }
             Some(Receiver::This) => {
-                if let Some(entry) = self.this.as_mut() {
+                if let Some(entry) = self.this_ptr.as_mut() {
                     *entry = value;
                 }
             }
@@ -2710,7 +2711,10 @@ impl<'e> Vm<'e> {
         // A function this compiler lowered copies its first argument whatever it
         // is handed, exactly as Rhai copies one before running a script function
         // (`func/call.rs:661`), so a compiled callee rules a reference out too.
-        let by_reference = self.this.as_ref().map_or(false, |value| !is_shared!(value))
+        let by_reference = self
+            .this_ptr
+            .as_ref()
+            .map_or(false, |value| !is_shared!(value))
             && program.function(name_index, argc).is_none();
 
         if !by_reference {
@@ -2723,7 +2727,7 @@ impl<'e> Vm<'e> {
 
         let value = {
             let entry = self
-                .this
+                .this_ptr
                 .as_mut()
                 .ok_or_else(|| malformed("`this` stopped being bound".to_string()))?;
             // Argument zero is the snapshot, dead now that there is a register
@@ -2787,9 +2791,9 @@ impl<'e> Vm<'e> {
         scope: &mut Scope,
         rewind_scope: bool,
         pos: Position,
-        this: Option<Dynamic>,
+        this_ptr: Option<Dynamic>,
     ) -> (VmResult, Option<Dynamic>) {
-        let saved = mem::replace(&mut self.this, this);
+        let saved = mem::replace(&mut self.this_ptr, this_ptr);
 
         let result = match self.engine.track_operation(&mut self.global, pos) {
             Ok(()) => {
@@ -2810,7 +2814,7 @@ impl<'e> Vm<'e> {
             Err(err) => Err(err),
         };
 
-        (result, mem::replace(&mut self.this, saved))
+        (result, mem::replace(&mut self.this_ptr, saved))
     }
 
     fn call_compiled_body(
@@ -2962,7 +2966,7 @@ impl<'e> Vm<'e> {
                 &mut self.global,
                 &mut self.caches,
                 scope,
-                self.this.as_mut(),
+                self.this_ptr.as_mut(),
                 (&node).into(),
                 event,
             );
@@ -3019,7 +3023,7 @@ impl<'e> Vm<'e> {
             &mut self.global,
             &mut self.caches,
             scope,
-            self.this.as_mut(),
+            self.this_ptr.as_mut(),
             &node,
         );
         rewind_after_stop(scope, before);
@@ -3649,7 +3653,7 @@ impl<'e> Vm<'e> {
 
                 code::tag::LOAD_THIS | code::tag::LOAD_THIS_SHARED => {
                     let value = self
-                        .this
+                        .this_ptr
                         .as_ref()
                         .ok_or_else(|| Box::new(EvalAltResult::ErrorUnboundThis(pos())))?;
                     // Rhai's read is `this_ptr.cloned()` and does not flatten
@@ -3663,7 +3667,7 @@ impl<'e> Vm<'e> {
                 }
 
                 code::tag::REQUIRE_THIS => {
-                    if self.this.is_none() {
+                    if self.this_ptr.is_none() {
                         return Err(Box::new(EvalAltResult::ErrorUnboundThis(pos())));
                     }
                 }
@@ -3690,7 +3694,7 @@ impl<'e> Vm<'e> {
                     // that lost its receiver would answer `ErrorUnboundThis` to
                     // every read after this one.
                     let mut this = self
-                        .this
+                        .this_ptr
                         .take()
                         .ok_or_else(|| Box::new(EvalAltResult::ErrorUnboundThis(pos())))?;
 
@@ -3710,7 +3714,7 @@ impl<'e> Vm<'e> {
                         }
                     };
 
-                    self.this = Some(this);
+                    self.this_ptr = Some(this);
                     outcome?;
                 }
 
@@ -3743,7 +3747,7 @@ impl<'e> Vm<'e> {
                             &mut self.global,
                             &mut self.caches,
                             scope,
-                            self.this.as_mut(),
+                            self.this_ptr.as_mut(),
                             block.statements(),
                             rewind_scope,
                         ),
@@ -3751,7 +3755,7 @@ impl<'e> Vm<'e> {
                             &mut self.global,
                             &mut self.caches,
                             scope,
-                            self.this.as_mut(),
+                            self.this_ptr.as_mut(),
                             expr,
                         ),
                     }?;
@@ -4368,7 +4372,6 @@ mod tests {
                 name: index as u32,
                 params: Vec::new(),
                 this_type: None,
-                takes_this: false,
                 chunk: Chunk::new(end_of(span.start), end_of(span.end), 8),
             })
             .collect();
@@ -4401,10 +4404,13 @@ mod tests {
         program_of(&[ops], consts)
     }
 
-    fn call(program: &Program, this: Option<&mut Dynamic>) -> Result<Dynamic, Box<EvalAltResult>> {
+    fn call(
+        program: &Program,
+        this_ptr: Option<&mut Dynamic>,
+    ) -> Result<Dynamic, Box<EvalAltResult>> {
         let engine = Engine::new();
         let mut options = CallFnOptions::new().eval_ast(false);
-        options.this_ptr = this;
+        options.this_ptr = this_ptr;
         Vm::new(&engine).call_fn_with_options(options, &mut Scope::new(), program, "f", ())
     }
 

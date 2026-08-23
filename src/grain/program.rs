@@ -7,8 +7,8 @@ use crate::module_resolvers::StaticModuleResolver;
 use crate::{ast::Expr, ast::Stmt, tokenizer::Token, Dynamic, ImmutableString, Module, Shared};
 
 use crate::grain::bytecode::{
-    site_to_position, sites, AssignOp, Chain, Chunk, Code, Op, Pools, Positions, Root, Strings,
-    Switch, TableError,
+    site_to_position, sites, AssignOp, Chain, Chunk, Code, Pools, Positions, Strings, Switch,
+    TableError,
 };
 use crate::grain::format::{Caps, Sidecar};
 
@@ -47,12 +47,6 @@ pub struct Function {
     ///
     /// `None` for an ordinary function, which is nearly all of them.
     pub this_type: Option<u32>,
-    /// Whether the body reads or writes the frame's receiver.
-    ///
-    /// Derived from the chunk rather than encoded — see [`takes_this`]. It is
-    /// what keeps such a function reachable by Rhai, which needs the body to
-    /// size a call a native makes through a pointer.
-    pub takes_this: bool,
     pub chunk: Chunk,
 }
 
@@ -223,45 +217,6 @@ fn node_position(node: &ASTNode) -> rhai::Position {
     }
 }
 
-/// Whether a chunk reads or writes the frame's receiver.
-///
-/// Read off the bytes for [`makes_fn_pointers`]'s reason: a program loaded from
-/// an artifact never saw the body it came from.
-///
-/// It decides whether Rhai has to be able to reach the function itself. A
-/// pointer to a `this`-taking chunk cannot go through a native wrapper — the
-/// wrapper is registered at one arity, and how many arguments Rhai will ask for
-/// depends on what the *native* appends, which the wrapper cannot know. So such
-/// a function is left to Rhai, which has the body and can size the call itself.
-pub(crate) fn takes_this(code: &[u8], chunk: Chunk, chains: &[Chain]) -> bool {
-    use crate::grain::bytecode::code::tag;
-
-    let (entry, end) = (chunk.entry() as usize, chunk.end() as usize);
-    if end > code.len() || entry > end {
-        return false;
-    }
-
-    crate::grain::bytecode::disassemble(&code[entry..end]).any(|(at, op)| {
-        match code[entry + at] {
-            tag::LOAD_THIS
-            | tag::LOAD_THIS_SHARED
-            | tag::REQUIRE_THIS
-            | tag::ASSIGN_THIS
-            | tag::ASSIGN_THIS_OP
-            | tag::CALL_THIS_REF
-            | tag::CALL_FN_PTR_ON_THIS => true,
-            // A chain says where it is rooted in the pool, not in the code.
-            tag::CHAIN => match op {
-                Op::Chain(index) => chains
-                    .get(index as usize)
-                    .map_or(false, |chain| matches!(chain.root, Root::This { .. })),
-                _ => false,
-            },
-            _ => false,
-        }
-    })
-}
-
 /// Everything a program holds besides its code, gathered so the constructor
 /// does not take ten positional arguments.
 pub(crate) struct Parts<'a> {
@@ -294,13 +249,6 @@ impl<'a> Program<'a> {
         parts: Parts<'a>,
     ) -> Self {
         let has_typed_methods = functions.iter().any(|f| f.this_type.is_some());
-
-        // Derived here so a program means the same whether it was compiled or
-        // loaded, and so the flag cannot disagree with the bytes it describes.
-        let mut functions = functions;
-        for function in &mut functions {
-            function.takes_this = takes_this(&code, function.chunk, &parts.chains);
-        }
 
         // Derived from the diagnostics it was built with, unless a loader
         // supplied the artifact's.
@@ -781,7 +729,6 @@ mod tests {
                 name,
                 params: vec![0; argc],
                 this_type,
-                takes_this: false,
                 chunk: whole,
             })
             .collect();

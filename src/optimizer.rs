@@ -1512,22 +1512,24 @@ impl Engine {
             let lib2 = &[lib2.into()];
 
             crate::Module::from(functions.into_iter().map(|fn_def| {
-                use crate::ast::ScriptFuncPayload;
-
                 // Optimize the function body
                 match fn_def.body {
                     // Payload is a statements block
-                    ScriptFuncPayload::Statements(..) => {
+                    crate::ast::script_fn::ScriptFuncPayload::Statements(..) => {
                         let mut fn_def = crate::func::shared_take_or_clone(fn_def);
-                        let mut body = match fn_def.body {
-                            ScriptFuncPayload::Statements(body) => body,
+                        let crate::ast::script_fn::ScriptFuncPayload::Statements(mut body) =
+                            fn_def.body
+                        else {
+                            unreachable!()
                         };
                         let statements = body.take_statements();
                         *body.statements_mut() =
                             self.optimize_top_level(statements, scope, lib2, optimization_level);
-                        fn_def.body = ScriptFuncPayload::Statements(body);
+                        fn_def.body = crate::ast::script_fn::ScriptFuncPayload::Statements(body);
                         fn_def.into()
                     }
+                    // Can't optimize anything else
+                    _ => fn_def,
                 }
             }))
             .into()

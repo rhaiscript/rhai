@@ -12,6 +12,9 @@ use std::{fmt, hash::Hash};
 pub enum ScriptFuncPayload {
     /// Normal statements block.
     Statements(StmtBlock),
+    /// _(grain)_ A Rhai Grain VM to run the function body.
+    #[cfg(feature = "grain")]
+    GrainVM(crate::grain::SharedProgram),
 }
 
 impl Default for ScriptFuncPayload {
@@ -28,6 +31,7 @@ impl ScriptFuncPayload {
     pub const fn position(&self) -> Position {
         match self {
             Self::Statements(block) => block.position(),
+            _ => Position::NONE,
         }
     }
     /// Get the end position.
@@ -36,6 +40,7 @@ impl ScriptFuncPayload {
     pub const fn end_position(&self) -> Position {
         match self {
             Self::Statements(block) => block.end_position(),
+            _ => Position::NONE,
         }
     }
 }

@@ -160,9 +160,6 @@ impl Compiler {
                 name: f.name,
                 params: f.params,
                 this_type: f.this_type,
-                // Derived from the chunk by `Program::new`, which is the one
-                // place that can see the assembled bytes.
-                takes_this: false,
                 chunk: Chunk::new(
                     offsets[f.first_op],
                     offsets[f.first_op + f.op_count],
@@ -187,11 +184,7 @@ impl Compiler {
         // `callback::wrappers`, which skips exactly these.
         #[cfg(not(feature = "no_function"))]
         let lib = {
-            let escapes_as_pointer = caps.contains(Caps::FN_PTR)
-                && functions
-                    .iter()
-                    .any(|f| crate::grain::program::takes_this(&code, f.chunk, &lowering.chains));
-            let needs_walker = skipped > 0 || !lowering.residuals.is_empty() || escapes_as_pointer;
+            let needs_walker = skipped > 0 || !lowering.residuals.is_empty();
             (needs_walker && !ast.shared_lib().is_empty()).then(|| ast.shared_lib().clone())
         };
         // Under `no_function` there is no function tree to carry, whichever way
@@ -870,9 +863,11 @@ impl Lowering {
             .map(|p| self.push_name(p.clone()))
             .collect();
 
-        // The scripted function's body must be an AST statements list.
         let body = match &def.body {
+            // The scripted function's body must be an AST statements list.
             ScriptFuncPayload::Statements(body) => body,
+            // For some reason, if it is a Grain chunk, then fail to lower.
+            ScriptFuncPayload::GrainVM(..) => return None,
         };
 
         // Rhai stops once on entering a body, before its first statement, at a
@@ -881,7 +876,7 @@ impl Lowering {
         // rather than in the VM. Depth zero, like the statements it precedes:
         // it does not enclose them, so stepping from here reaches the first one.
         #[cfg(feature = "debugging")]
-        self.emit_at(Op::Statement { depth: 0 }, def.body.position());
+        self.emit_at(Op::Statement { depth: 0 }, body.position());
 
         // A body is a statement list whose last value is the return value,
         // which is what `program` already does.

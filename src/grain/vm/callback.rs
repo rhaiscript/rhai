@@ -25,17 +25,13 @@
 //! Neither touches a pointer called directly from compiled code, which is
 //! `Op::CallFnPtr` and never comes through here.
 
-use core::any::TypeId;
-use core::mem;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
-use crate::{
-    func::RhaiFunc, Dynamic, FnArgsVec, FuncRegistration, Module, NativeCallContext, Shared,
-    SmartString,
-};
+#[cfg(not(feature = "no_function"))]
+use crate::ast::script_fn::{ScriptFuncDef, ScriptFuncPayload};
+use crate::{FnAccess, Module};
 
-use super::{malformed, Vm, VmResult};
 use crate::grain::program::SharedProgram;
 
 /// The most parameters a wrapper is registered for.
@@ -52,6 +48,7 @@ const MAX_PARAMS: usize = 16;
 ///
 /// Built once per run rather than cached on the program: the closures hold the
 /// program, so anything the program held back would be a cycle.
+#[cfg(not(feature = "no_function"))]
 pub(super) fn wrappers(program: &SharedProgram) -> Module {
     let mut module = Module::new();
 
@@ -67,69 +64,29 @@ pub(super) fn wrappers(program: &SharedProgram) -> Module {
         if arity > MAX_PARAMS {
             continue;
         }
-        // A `this`-taking chunk cannot be reached this way. A wrapper is
-        // registered at one arity, and how many arguments Rhai asks for depends
-        // on what the *native* appends beside the receiver — `map` adds an
-        // index, `reduce` adds the running result — which the wrapper has no way
-        // to know. Rhai's own pointer carries the body and sizes the call from
-        // its declared arity (`types/fn_ptr.rs:501-535`); a name-only pointer,
-        // which is all a wrapper can be, cannot. So these are left to Rhai,
-        // and `Program::needs_walker` is what keeps its copy alive for them.
-        if function.takes_this {
-            continue;
-        }
         let Some(name) = program.name(function.name) else {
             continue;
         };
 
         let owner = program.clone();
-        let called: SmartString = name.into();
 
-        // One closure for every arity, rather than the fixed-arity shapes
-        // `Module::set_native_fn` generates. `Dynamic` parameters throughout
-        // mean the types never have to line up, only the count.
-        let wrapper = move |context: Option<NativeCallContext>, args: &mut [&mut Dynamic]| {
-            invoke(&owner, &called, context.as_ref(), args)
-        };
+        let params = function
+            .params
+            .iter()
+            .map(|&index| program.names().get(index).unwrap_or(""))
+            .map(Into::into)
+            .collect();
 
-        FuncRegistration::new(name)
-            .in_internal_namespace()
-            .set_into_module_raw(
-                &mut module,
-                vec![TypeId::of::<Dynamic>(); arity],
-                RhaiFunc::Pure {
-                    func: Shared::new(wrapper),
-                    has_context: true,
-                    is_pure: true,
-                    is_volatile: false,
-                },
-            );
+        module.set_script_fn(ScriptFuncDef {
+            body: ScriptFuncPayload::GrainVM(owner),
+            name: name.into(),
+            access: FnAccess::Private,
+            this_type: None,
+            params,
+            #[cfg(feature = "metadata")]
+            comments: Default::default(),
+        });
     }
 
     module
-}
-
-/// Run one chunk for a native that called back into us.
-fn invoke(
-    program: &SharedProgram,
-    name: &str,
-    context: Option<&NativeCallContext>,
-    args: &mut [&mut Dynamic],
-) -> VmResult {
-    // Registered with `has_context`, so Rhai always supplies one.
-    let context =
-        context.ok_or_else(|| malformed("a callback wrapper was given no context".into()))?;
-
-    // Taken rather than cloned, as every registered function does: the
-    // arguments are the caller's to give away, and it has already copied
-    // anything it still needs.
-    let values: FnArgsVec<Dynamic> = args.iter_mut().map(|arg| mem::take(*arg)).collect();
-
-    Vm::reentrant(context).call_function(
-        program,
-        name,
-        values,
-        context.call_level(),
-        context.call_position(),
-    )
 }

@@ -4,7 +4,7 @@
 use super::call::FnCallArgs;
 use crate::ast::{EncapsulatedEnviron, ScriptFuncDef, ScriptFuncPayload};
 use crate::eval::{Caches, GlobalRuntimeState};
-use crate::{Dynamic, Engine, Position, RhaiResult, Scope, ERR};
+use crate::{Dynamic, Engine, FnArgsVec, Position, RhaiResult, Scope, ERR};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -74,20 +74,18 @@ impl Engine {
             .as_ref()
             .map_or(0, |dbg| dbg.call_stack().len());
 
-        // Put arguments into scope as variables
-        scope.extend(fn_def.params.iter().cloned().zip(args.iter_mut().map(|v| {
-            // Actually consume the arguments instead of cloning them
-            v.take()
-        })));
+        // Put collect function call arguments.
+        // Actually consume the arguments instead of cloning them.
+        let arg_values = args.iter_mut().map(|v| v.take()).collect::<FnArgsVec<_>>();
 
         // Push a new call stack frame
         #[cfg(feature = "debugging")]
         if self.is_debugger_registered() {
             let fn_name = fn_def.name.clone();
-            let args = scope
-                .iter_inner()
-                .skip(orig_scope_len)
-                .map(|(.., v)| v.flatten_clone());
+            let args = arg_values
+                .iter()
+                .map(Dynamic::flatten_clone)
+                .collect::<FnArgsVec<_>>();
             let source = global.source.clone();
 
             global
@@ -116,16 +114,22 @@ impl Engine {
             },
         );
 
-        #[cfg(feature = "debugging")]
-        if self.is_debugger_registered() {
-            let node = crate::ast::Stmt::Noop(fn_def.body.position());
-            self.dbg(global, caches, scope, this_ptr.as_deref_mut(), &node)?;
-        }
+        let mut arg_slots = 0;
 
         // Evaluate the function
         let mut _result: RhaiResult = match fn_def.body {
             // Normal statements block
             ScriptFuncPayload::Statements(ref body) => {
+                // Put arguments into scope as variables
+                scope.extend(fn_def.params.iter().cloned().zip(arg_values));
+                arg_slots = fn_def.params.len();
+
+                #[cfg(feature = "debugging")]
+                if self.is_debugger_registered() {
+                    let node = crate::ast::Stmt::Noop(fn_def.body.position());
+                    self.dbg(global, caches, scope, this_ptr.as_deref_mut(), &node)?;
+                }
+
                 self.eval_stmt_block(
                     global,
                     caches,
@@ -163,6 +167,23 @@ impl Engine {
                     .into()),
                 })
             }
+            // Rhai Grain VM
+            #[cfg(feature = "grain")]
+            ScriptFuncPayload::GrainVM(ref program) => {
+                let context = (self, fn_def.name.as_str(), global.source(), &*global, pos).into();
+                let mut vm = crate::grain::Vm::reentrant(&context);
+                vm.call_function_with_this(
+                    program,
+                    fn_def.name.as_str(),
+                    arg_values,
+                    global.level,
+                    scope,
+                    rewind_scope,
+                    pos,
+                    this_ptr.as_deref_mut().cloned(),
+                )
+                .0
+            }
         };
 
         #[cfg(feature = "debugging")]
@@ -197,9 +218,9 @@ impl Engine {
         // Remove all local variables and imported modules
         if rewind_scope {
             scope.rewind(orig_scope_len);
-        } else if !args.is_empty() {
+        } else if arg_slots > 0 {
             // Remove arguments only, leaving new variables in the scope
-            scope.remove_range(orig_scope_len, args.len());
+            scope.remove_range(orig_scope_len, arg_slots);
         }
         global.lib.truncate(orig_lib_len);
         #[cfg(not(feature = "no_module"))]

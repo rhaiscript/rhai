@@ -60,6 +60,7 @@ impl fmt::Debug for AST {
             let sig = fn_def.to_string();
             match fn_def.body {
                 ScriptFuncPayload::Statements(ref block) => fp.field(&sig, &block.statements()),
+                ScriptFuncPayload::GrainVM(..) => fp.field(&sig, &"<Grain VM function chunk>"),
             };
         }
 
@@ -798,6 +799,7 @@ impl AST {
                         }
                     }
                 }
+                _ => (),
             }
         }
 
