@@ -18,7 +18,7 @@ pub use ident::Ident;
 #[cfg(not(feature = "no_module"))]
 pub use namespace::Namespace;
 #[cfg(not(feature = "no_function"))]
-pub use script_fn::{ScriptFnMetadata, ScriptFuncDef};
+pub use script_fn::{ScriptFnMetadata, ScriptFuncDef, ScriptFuncPayload};
 pub use stmt::{
     CaseBlocksList, FlowControl, OpAssignment, RangeCase, Stmt, StmtBlock, StmtBlockContainer,
     SwitchCasesCollection,

@@ -2,7 +2,7 @@
 
 use super::{get_builtin_binary_op_fn, get_builtin_op_assignment_fn, RhaiFunc};
 use crate::api::default_limits::MAX_DYNAMIC_PARAMETERS;
-use crate::ast::{Expr, FnCallExpr, FnCallHashes};
+use crate::ast::{Expr, FnCallExpr, FnCallHashes, ScriptFuncPayload};
 use crate::engine::{
     KEYWORD_DEBUG, KEYWORD_EVAL, KEYWORD_FN_PTR, KEYWORD_FN_PTR_CALL, KEYWORD_FN_PTR_CURRY,
     KEYWORD_IS_DEF_VAR, KEYWORD_PRINT, KEYWORD_TYPE_OF,
@@ -728,8 +728,11 @@ impl Engine {
                 let fn_def = &*fn_def;
                 let env = env.as_deref();
 
-                if fn_def.body.is_empty() {
-                    return Ok((Dynamic::UNIT, false));
+                match fn_def.body {
+                    ScriptFuncPayload::Statements(ref block) if block.is_empty() => {
+                        return Ok((Dynamic::UNIT, false))
+                    }
+                    _ => (),
                 }
 
                 let mut empty_scope;

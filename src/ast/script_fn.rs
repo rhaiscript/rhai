@@ -2,17 +2,50 @@
 #![cfg(not(feature = "no_function"))]
 
 use super::{FnAccess, StmtBlock};
-use crate::{FnArgsVec, ImmutableString};
+use crate::{FnArgsVec, ImmutableString, Position};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{fmt, hash::Hash};
+
+/// A type containing the body of a script-defined function.
+#[derive(Debug, Clone)]
+pub enum ScriptFuncPayload {
+    /// Normal statements block.
+    Statements(StmtBlock),
+}
+
+impl Default for ScriptFuncPayload {
+    #[inline(always)]
+    fn default() -> Self {
+        Self::Statements(StmtBlock::NONE)
+    }
+}
+
+impl ScriptFuncPayload {
+    /// Get the start position.
+    #[inline(always)]
+    #[must_use]
+    pub const fn position(&self) -> Position {
+        match self {
+            Self::Statements(block) => block.position(),
+        }
+    }
+    /// Get the end position.
+    #[inline(always)]
+    #[must_use]
+    pub const fn end_position(&self) -> Position {
+        match self {
+            Self::Statements(block) => block.end_position(),
+        }
+    }
+}
 
 /// _(internals)_ A type containing information on a script-defined function.
 /// Exported under the `internals` feature only.
 #[derive(Debug, Clone)]
 pub struct ScriptFuncDef {
     /// Function body.
-    pub body: StmtBlock,
+    pub body: ScriptFuncPayload,
     /// Function name.
     pub name: ImmutableString,
     /// Function access mode.
@@ -49,7 +82,7 @@ impl ScriptFuncDef {
         Self {
             name: self.name.clone(),
             access: self.access,
-            body: StmtBlock::NONE,
+            body: <_>::default(),
             #[cfg(not(feature = "no_object"))]
             this_type: self.this_type.clone(),
             params: self.params.clone(),

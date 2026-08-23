@@ -7,11 +7,11 @@ use core::mem;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
-#[cfg(not(feature = "no_function"))]
-use crate::ast::ScriptFuncDef;
 use crate::ast::{
     ASTFlags, Expr, FlowControl, FnCallExpr, OpAssignment, Stmt, StmtBlock, SwitchCasesCollection,
 };
+#[cfg(not(feature = "no_function"))]
+use crate::ast::{ScriptFuncDef, ScriptFuncPayload};
 use crate::tokenizer::Token;
 use crate::types::Span;
 use crate::{Dynamic, ImmutableString, Position, AST};
@@ -870,6 +870,11 @@ impl Lowering {
             .map(|p| self.push_name(p.clone()))
             .collect();
 
+        // The scripted function's body must be an AST statements list.
+        let body = match &def.body {
+            ScriptFuncPayload::Statements(body) => body,
+        };
+
         // Rhai stops once on entering a body, before its first statement, at a
         // synthetic node placed on the body itself (`func/script.rs:115-119`).
         // A marker at the same place is that stop, and puts it in the chunk
@@ -880,7 +885,7 @@ impl Lowering {
 
         // A body is a statement list whose last value is the return value,
         // which is what `program` already does.
-        let lowered = self.program(def.body.statements(), false);
+        let lowered = self.program(body.statements(), false);
 
         self.slots = saved_slots;
         self.loops = saved_loops;

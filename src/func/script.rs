@@ -2,7 +2,7 @@
 #![cfg(not(feature = "no_function"))]
 
 use super::call::FnCallArgs;
-use crate::ast::{EncapsulatedEnviron, ScriptFuncDef};
+use crate::ast::{EncapsulatedEnviron, ScriptFuncDef, ScriptFuncPayload};
 use crate::eval::{Caches, GlobalRuntimeState};
 use crate::{Dynamic, Engine, Position, RhaiResult, Scope, ERR};
 #[cfg(feature = "no_std")]
@@ -43,13 +43,24 @@ impl Engine {
             return Err(ERR::ErrorStackOverflow(pos).into());
         }
 
-        #[cfg(feature = "debugging")]
-        if self.debugger_interface.is_none() && fn_def.body.is_empty() {
-            return Ok(Dynamic::UNIT);
+        // Guard against too many variables
+        #[cfg(not(feature = "unchecked"))]
+        if scope.len() + fn_def.params.len() > self.max_variables() {
+            return Err(ERR::ErrorTooManyVariables(pos).into());
         }
-        #[cfg(not(feature = "debugging"))]
-        if fn_def.body.is_empty() {
-            return Ok(Dynamic::UNIT);
+
+        match fn_def.body {
+            #[cfg(feature = "debugging")]
+            ScriptFuncPayload::Statements(ref block)
+                if self.debugger_interface.is_none() && block.is_empty() =>
+            {
+                return Ok(Dynamic::UNIT)
+            }
+            #[cfg(not(feature = "debugging"))]
+            ScriptFuncPayload::Statements(ref block) if block.is_empty() => {
+                return Ok(Dynamic::UNIT)
+            }
+            _ => (),
         }
 
         let orig_scope_len = scope.len();
@@ -62,12 +73,6 @@ impl Engine {
             .debugger
             .as_ref()
             .map_or(0, |dbg| dbg.call_stack().len());
-
-        // Guard against too many variables
-        #[cfg(not(feature = "unchecked"))]
-        if scope.len() + fn_def.params.len() > self.max_variables() {
-            return Err(ERR::ErrorTooManyVariables(pos).into());
-        }
 
         // Put arguments into scope as variables
         scope.extend(fn_def.params.iter().cloned().zip(args.iter_mut().map(|v| {
@@ -118,43 +123,47 @@ impl Engine {
         }
 
         // Evaluate the function
-        let mut _result: RhaiResult = self
-            .eval_stmt_block(
-                global,
-                caches,
-                scope,
-                this_ptr.as_deref_mut(),
-                fn_def.body.statements(),
-                rewind_scope,
-            )
-            .or_else(|err| match *err {
-                // Convert return statement to return value
-                ERR::Return(x, ..) => Ok(x),
-                // Exit value is passed straight-through
-                mut err @ ERR::Exit(..) => {
-                    err.set_position(pos);
-                    Err(err.into())
-                }
-                // System errors are passed straight-through
-                mut err if err.is_system_exception() => {
-                    err.set_position(pos);
-                    Err(err.into())
-                }
-                // Other errors are wrapped in `ErrorInFunctionCall`
-                _ => Err(ERR::ErrorInFunctionCall(
-                    fn_def.name.to_string(),
-                    #[cfg(not(feature = "no_module"))]
-                    _env.and_then(|env| env.lib.last())
-                        .and_then(|m| m.id())
-                        .unwrap_or_else(|| global.source().unwrap_or(""))
-                        .to_string(),
-                    #[cfg(feature = "no_module")]
-                    global.source().unwrap_or("").to_string(),
-                    err,
-                    pos,
+        let mut _result: RhaiResult = match fn_def.body {
+            // Normal statements block
+            ScriptFuncPayload::Statements(ref body) => {
+                self.eval_stmt_block(
+                    global,
+                    caches,
+                    scope,
+                    this_ptr.as_deref_mut(),
+                    body.statements(),
+                    rewind_scope,
                 )
-                .into()),
-            });
+                .or_else(|err| match *err {
+                    // Convert return statement to return value
+                    ERR::Return(x, ..) => Ok(x),
+                    // Exit value is passed straight-through
+                    mut err @ ERR::Exit(..) => {
+                        err.set_position(pos);
+                        Err(err.into())
+                    }
+                    // System errors are passed straight-through
+                    mut err if err.is_system_exception() => {
+                        err.set_position(pos);
+                        Err(err.into())
+                    }
+                    // Other errors are wrapped in `ErrorInFunctionCall`
+                    _ => Err(ERR::ErrorInFunctionCall(
+                        fn_def.name.to_string(),
+                        #[cfg(not(feature = "no_module"))]
+                        _env.and_then(|env| env.lib.last())
+                            .and_then(|m| m.id())
+                            .unwrap_or_else(|| global.source().unwrap_or(""))
+                            .to_string(),
+                        #[cfg(feature = "no_module")]
+                        global.source().unwrap_or("").to_string(),
+                        err,
+                        pos,
+                    )
+                    .into()),
+                })
+            }
+        };
 
         #[cfg(feature = "debugging")]
         if self.is_debugger_registered() {

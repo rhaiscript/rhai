@@ -1,6 +1,6 @@
 //! Module defining the AST (abstract syntax tree).
 
-use super::{ASTFlags, Expr, FnAccess, Stmt};
+use super::{ASTFlags, Expr, FnAccess, ScriptFuncPayload, Stmt};
 use crate::{expose_under_internals, Dynamic, FnNamespace, ImmutableString, Position, ThinVec};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -58,7 +58,9 @@ impl fmt::Debug for AST {
         #[cfg(not(feature = "no_function"))]
         for (.., fn_def) in self.lib.iter_script_fn() {
             let sig = fn_def.to_string();
-            fp.field(&sig, &fn_def.body.statements());
+            match fn_def.body {
+                ScriptFuncPayload::Statements(ref block) => fp.field(&sig, &block.statements()),
+            };
         }
 
         fp.finish()
@@ -787,9 +789,15 @@ impl AST {
             }
         }
         #[cfg(not(feature = "no_function"))]
-        for stmt in self.iter_fn_def().flat_map(|f| f.body.iter()) {
-            if !stmt.walk(path, on_node) {
-                return false;
+        for fn_def in self.iter_fn_def() {
+            match fn_def.body {
+                ScriptFuncPayload::Statements(ref block) => {
+                    for stmt in block.statements() {
+                        if !stmt.walk(path, on_node) {
+                            return false;
+                        }
+                    }
+                }
             }
         }
 

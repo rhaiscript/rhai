@@ -1,10 +1,11 @@
 //! Main module defining the lexer and parser.
 
 use crate::api::options::LangOptions;
+#[cfg(not(feature = "no_function"))]
+use crate::ast::script_fn::{ScriptFuncDef, ScriptFuncPayload};
 use crate::ast::{
     ASTFlags, BinaryExpr, CaseBlocksList, Expr, FlowControl, FnCallExpr, FnCallHashes, Ident,
-    OpAssignment, RangeCase, ScriptFuncDef, Stmt, StmtBlock, StmtBlockContainer,
-    SwitchCasesCollection,
+    OpAssignment, RangeCase, Stmt, StmtBlock, StmtBlockContainer, SwitchCasesCollection,
 };
 use crate::engine::{Precedence, OP_CONTAINS, OP_NOT};
 use crate::eval::{Caches, GlobalRuntimeState};
@@ -3698,7 +3699,7 @@ impl Engine {
             #[cfg(not(feature = "no_object"))]
             this_type,
             params,
-            body,
+            body: ScriptFuncPayload::Statements(body),
             #[cfg(feature = "metadata")]
             comments: comments.into_iter().collect(),
         })
@@ -3913,7 +3914,7 @@ impl Engine {
             #[cfg(not(feature = "no_object"))]
             this_type: None,
             params,
-            body: body.into(),
+            body: ScriptFuncPayload::Statements(body.into()),
             #[cfg(not(feature = "no_function"))]
             #[cfg(feature = "metadata")]
             comments: <_>::default(),
