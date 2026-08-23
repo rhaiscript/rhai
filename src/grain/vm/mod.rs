@@ -33,9 +33,7 @@ use crate::{
 mod callback;
 
 use crate::grain::bytecode::{code, AssignOp, Chain, Chunk, Receiver, Root, Step, StepFlags, Tail};
-#[cfg(not(feature = "no_function"))]
-use crate::grain::program::SharedProgram;
-use crate::grain::program::{Program, SharedModule};
+use crate::grain::program::{Program, SharedModule, SharedProgram};
 
 /// Rhai's own `RhaiResult`, which it does not re-export.
 pub type VmResult = Result<Dynamic, Box<EvalAltResult>>;
@@ -896,11 +894,16 @@ impl<'e> Vm<'e> {
     /// # Errors
     ///
     /// As [`eval_with_scope`](Self::eval_with_scope).
-    #[cfg(not(feature = "no_function"))]
     pub fn eval_with_callbacks(&mut self, scope: &mut Scope, program: &SharedProgram) -> VmResult {
-        let wrappers =
-            (!program.functions().is_empty()).then(|| callback::wrappers(program).into());
-        self.run_with(program, scope, wrappers)
+        #[cfg(not(feature = "no_function"))]
+        return if program.functions().is_empty() {
+            self.run_with(program, scope, None)
+        } else {
+            let wrappers = callback::wrappers(program).into();
+            self.run_with(program, scope, Some(wrappers))
+        };
+        #[cfg(feature = "no_function")]
+        return self.run_with(program, scope, None);
     }
 
     fn run_with(

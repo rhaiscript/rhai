@@ -138,6 +138,7 @@ const CASES: &[Case] = &[
     // Also the only case here that indexes: the `a.push(i)` loop is a chain
     // rooted at a local, so it is what says the root is still being walked
     // where it lives rather than copied out and put back.
+    #[cfg(not(feature = "no_function"))]
     Case {
         name: "native callbacks",
         source: "let a = []; for i in 0..500 { a.push(i); } \
