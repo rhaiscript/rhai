@@ -866,6 +866,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "no_function"))]
     fn a_receiver_type_survives_the_round_trip() {
         let program = program_of(&[(0, Some(1), 0), (0, None, 0)]);
 
