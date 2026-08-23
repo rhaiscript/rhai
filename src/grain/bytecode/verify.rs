@@ -1,6 +1,7 @@
 use crate::grain::bytecode::code::{self, tag};
 use crate::grain::bytecode::{Chain, Chunk, Op, Receiver, Root, Step, Switch, Tail};
 use crate::grain::format::Caps;
+use crate::grain::program::Function;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -162,6 +163,7 @@ pub enum VerifyError {
 pub fn verify(
     caps: Caps,
     code: &[u8],
+    functions: &[Function],
     chunks: &[Chunk],
     pools: &Pools,
 ) -> Result<Vec<u16>, VerifyError> {
@@ -181,6 +183,14 @@ pub fn verify(
         return Err(VerifyError::TrailingBytes {
             at,
             len: code.len(),
+        });
+    }
+
+    if !functions.is_empty() && !caps.contains(Caps::DEFINE_FUNCTION) {
+        return Err(VerifyError::MissingCaps {
+            at: 0,
+            artifact: caps.to_string(),
+            missing: Caps::DEFINE_FUNCTION.to_string(),
         });
     }
 
@@ -753,14 +763,14 @@ mod tests {
     fn check(ops: Vec<Op>) -> Result<Vec<u16>, VerifyError> {
         let (code, _) = assemble(&ops).expect("the test ops must assemble");
         let chunk = Chunk::new(0, code.len() as u32, 8);
-        verify(Abi::host().caps, &code, &[chunk], &pools())
+        verify(Abi::host().caps, &code, &[], &[chunk], &pools())
     }
 
     /// The same, for bytes `assemble` would refuse to produce — which is what
     /// a corrupt artifact hands the loader.
     fn check_bytes(code: Vec<u8>, max_stack: u16) -> Result<Vec<u16>, VerifyError> {
         let chunk = Chunk::new(0, code.len() as u32, max_stack);
-        verify(Abi::host().caps, &code, &[chunk], &pools())
+        verify(Abi::host().caps, &code, &[], &[chunk], &pools())
     }
 
     #[test]
@@ -870,7 +880,7 @@ mod tests {
             };
             assert!(
                 matches!(
-                    verify(Abi::host().caps, &code, &[chunk], &pools),
+                    verify(Abi::host().caps, &code, &[], &[chunk], &pools),
                     Err(VerifyError::BadIndex {
                         what: "name",
                         index: 3,
@@ -893,6 +903,7 @@ mod tests {
             verify(
                 Abi::host().caps,
                 &code,
+                &[],
                 &[chunk],
                 &Pools {
                     names: 1,
@@ -924,7 +935,7 @@ mod tests {
             Chunk::new(boundary, code.len() as u32, 8),
         ];
         assert!(matches!(
-            verify(Abi::host().caps, &code, &chunks, &pools()),
+            verify(Abi::host().caps, &code, &[], &chunks, &pools()),
             Err(VerifyError::JumpOutOfRange { .. }),
         ));
     }
@@ -1025,6 +1036,7 @@ mod tests {
             verify(
                 Abi::host().caps,
                 &code,
+                &[],
                 &[chunk],
                 &Pools {
                     switches: &good,
@@ -1041,6 +1053,7 @@ mod tests {
                 verify(
                     Abi::host().caps,
                     &code,
+                    &[],
                     &[chunk],
                     &Pools {
                         switches: &mid,
@@ -1059,6 +1072,7 @@ mod tests {
                 verify(
                     Abi::host().caps,
                     &code,
+                    &[],
                     &[chunk],
                     &Pools {
                         switches: &outside,
@@ -1118,6 +1132,7 @@ mod tests {
             verify(
                 Abi::host().caps,
                 &code,
+                &[],
                 &[chunk],
                 &Pools {
                     consts: 1,
@@ -1164,7 +1179,13 @@ mod tests {
     fn rejects_a_chunk_that_names_code_it_does_not_have() {
         let (code, _) = assemble(&[Op::Unit, Op::Return]).unwrap();
         assert!(matches!(
-            verify(Abi::host().caps, &code, &[Chunk::new(0, 9999, 8)], &pools()),
+            verify(
+                Abi::host().caps,
+                &code,
+                &[],
+                &[Chunk::new(0, 9999, 8)],
+                &pools()
+            ),
             Err(VerifyError::ChunkOutOfRange { .. }),
         ));
     }

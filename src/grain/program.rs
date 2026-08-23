@@ -407,7 +407,13 @@ impl<'a> Program<'a> {
     /// Cheap enough to run on every compile, and the gate an artifact loaded
     /// from a wire has to pass before the VM will touch it.
     pub fn verify(&self) -> Result<Vec<u16>, crate::grain::bytecode::VerifyError> {
-        crate::grain::bytecode::verify(self.caps, &self.code, &self.chunks(), &self.pools())
+        crate::grain::bytecode::verify(
+            self.caps,
+            &self.code,
+            &self.functions(),
+            &self.chunks(),
+            &self.pools(),
+        )
     }
 
     /// Every chunk, main first, in the order they sit in the code.
