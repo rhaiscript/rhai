@@ -31,7 +31,8 @@ impl ScriptFuncPayload {
     pub const fn position(&self) -> Position {
         match self {
             Self::Statements(block) => block.position(),
-            _ => Position::NONE,
+            #[cfg(feature = "grain")]
+            ScriptFuncPayload::GrainVM(..) => Position::NONE,
         }
     }
     /// Get the end position.
@@ -40,7 +41,8 @@ impl ScriptFuncPayload {
     pub const fn end_position(&self) -> Position {
         match self {
             Self::Statements(block) => block.end_position(),
-            _ => Position::NONE,
+            #[cfg(feature = "grain")]
+            ScriptFuncPayload::GrainVM(..) => Position::NONE,
         }
     }
 }
@@ -55,9 +57,9 @@ pub struct ScriptFuncDef {
     pub name: ImmutableString,
     /// Function access mode.
     pub access: FnAccess,
-    #[cfg(not(feature = "no_object"))]
     /// Type of `this` pointer, if any.
     /// Not available under `no_object`.
+    #[cfg(not(feature = "no_object"))]
     pub this_type: Option<ImmutableString>,
     /// Names of function parameters.
     pub params: FnArgsVec<ImmutableString>,

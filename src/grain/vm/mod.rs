@@ -33,7 +33,9 @@ use crate::{
 mod callback;
 
 use crate::grain::bytecode::{code, AssignOp, Chain, Chunk, Receiver, Root, Step, StepFlags, Tail};
-use crate::grain::program::{Program, SharedModule, SharedProgram};
+#[cfg(not(feature = "no_function"))]
+use crate::grain::program::SharedProgram;
+use crate::grain::program::{Program, SharedModule};
 
 /// Rhai's own `RhaiResult`, which it does not re-export.
 pub type VmResult = Result<Dynamic, Box<EvalAltResult>>;

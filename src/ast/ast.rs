@@ -1,6 +1,6 @@
 //! Module defining the AST (abstract syntax tree).
 
-use super::{ASTFlags, Expr, FnAccess, ScriptFuncPayload, Stmt};
+use super::{ASTFlags, Expr, FnAccess, Stmt};
 use crate::{expose_under_internals, Dynamic, FnNamespace, ImmutableString, Position, ThinVec};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -59,8 +59,13 @@ impl fmt::Debug for AST {
         for (.., fn_def) in self.lib.iter_script_fn() {
             let sig = fn_def.to_string();
             match fn_def.body {
-                ScriptFuncPayload::Statements(ref block) => fp.field(&sig, &block.statements()),
-                ScriptFuncPayload::GrainVM(..) => fp.field(&sig, &"<Grain VM function chunk>"),
+                super::script_fn::ScriptFuncPayload::Statements(ref block) => {
+                    fp.field(&sig, &block.statements())
+                }
+                #[cfg(feature = "grain")]
+                super::script_fn::ScriptFuncPayload::GrainVM(..) => {
+                    fp.field(&sig, &"<Grain VM function chunk>")
+                }
             };
         }
 
@@ -792,14 +797,15 @@ impl AST {
         #[cfg(not(feature = "no_function"))]
         for fn_def in self.iter_fn_def() {
             match fn_def.body {
-                ScriptFuncPayload::Statements(ref block) => {
+                super::script_fn::ScriptFuncPayload::Statements(ref block) => {
                     for stmt in block.statements() {
                         if !stmt.walk(path, on_node) {
                             return false;
                         }
                     }
                 }
-                _ => (),
+                #[cfg(feature = "grain")]
+                super::script_fn::ScriptFuncPayload::GrainVM(..) => (),
             }
         }
 

@@ -801,6 +801,7 @@ impl Scope<'_> {
     ///
     /// If the entry is read-only, [`Some`]`(`[`None`]`))` is returned.
     #[inline]
+    #[cfg(feature = "grain")]
     #[must_use]
     pub(crate) fn get_mut_raw(&mut self, name: &str) -> Option<Option<&mut Dynamic>> {
         self.search(name)

@@ -2,10 +2,11 @@
 
 use crate::api::options::LangOptions;
 #[cfg(not(feature = "no_function"))]
-use crate::ast::script_fn::{ScriptFuncDef, ScriptFuncPayload};
+use crate::ast::script_fn::ScriptFuncPayload;
 use crate::ast::{
     ASTFlags, BinaryExpr, CaseBlocksList, Expr, FlowControl, FnCallExpr, FnCallHashes, Ident,
-    OpAssignment, RangeCase, Stmt, StmtBlock, StmtBlockContainer, SwitchCasesCollection,
+    OpAssignment, RangeCase, ScriptFuncDef, Stmt, StmtBlock, StmtBlockContainer,
+    SwitchCasesCollection,
 };
 use crate::engine::{Precedence, OP_CONTAINS, OP_NOT};
 use crate::eval::{Caches, GlobalRuntimeState};

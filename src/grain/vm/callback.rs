@@ -29,10 +29,11 @@
 use std::prelude::v1::*;
 
 #[cfg(not(feature = "no_function"))]
-use crate::ast::script_fn::{ScriptFuncDef, ScriptFuncPayload};
-use crate::{FnAccess, Module};
-
-use crate::grain::program::SharedProgram;
+use crate::{
+    ast::script_fn::{ScriptFuncDef, ScriptFuncPayload},
+    grain::program::SharedProgram,
+    FnAccess, Module,
+};
 
 /// The most parameters a wrapper is registered for.
 ///
@@ -42,6 +43,7 @@ use crate::grain::program::SharedProgram;
 /// wrapper would be registered and never found, so it is left out rather than
 /// silently dead. Direct dispatch has no such bound; this limits only what a
 /// native can call back into.
+#[cfg(not(feature = "no_function"))]
 const MAX_PARAMS: usize = 16;
 
 /// A wrapper per compiled function, for Rhai to resolve a pointer against.
@@ -81,6 +83,7 @@ pub(super) fn wrappers(program: &SharedProgram) -> Module {
             body: ScriptFuncPayload::GrainVM(owner),
             name: name.into(),
             access: FnAccess::Private,
+            #[cfg(not(feature = "no_object"))]
             this_type: None,
             params,
             #[cfg(feature = "metadata")]

@@ -114,7 +114,7 @@ impl Engine {
             },
         );
 
-        let mut arg_slots = 0;
+        let mut _arg_slots = 0;
 
         // Evaluate the function
         let mut _result: RhaiResult = match fn_def.body {
@@ -122,7 +122,7 @@ impl Engine {
             ScriptFuncPayload::Statements(ref body) => {
                 // Put arguments into scope as variables
                 scope.extend(fn_def.params.iter().cloned().zip(arg_values));
-                arg_slots = fn_def.params.len();
+                _arg_slots = fn_def.params.len();
 
                 #[cfg(feature = "debugging")]
                 if self.is_debugger_registered() {
@@ -218,9 +218,9 @@ impl Engine {
         // Remove all local variables and imported modules
         if rewind_scope {
             scope.rewind(orig_scope_len);
-        } else if arg_slots > 0 {
+        } else if _arg_slots > 0 {
             // Remove arguments only, leaving new variables in the scope
-            scope.remove_range(orig_scope_len, arg_slots);
+            scope.remove_range(orig_scope_len, _arg_slots);
         }
         global.lib.truncate(orig_lib_len);
         #[cfg(not(feature = "no_module"))]
