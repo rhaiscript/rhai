@@ -3665,6 +3665,12 @@ impl<'e> Vm<'e> {
                     let name = program
                         .name(index)
                         .ok_or_else(|| malformed(format!("no name {index}")))?;
+                    // If shadowing is not allowed, return error.
+                    if !self.engine.allow_shadowing() && scope.contains(name) {
+                        return Err(
+                            EvalAltResult::ErrorVariableExists(name.to_string(), pos()).into()
+                        );
+                    }
                     // Flattened, as Rhai flattens a declaration's initializer
                     // (`eval/stmt.rs:438`). A native can hand back a cell that is
                     // already shared, and sharing must stop at the `let` rather
