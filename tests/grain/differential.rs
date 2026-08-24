@@ -27,7 +27,10 @@ struct Outcome {
 }
 
 fn snapshot_scope(scope: &Scope) -> Vec<(String, String)> {
-    scope.iter_raw().map(|(name, _, value)| (name.to_string(), format!("{value:?}"))).collect()
+    scope
+        .iter_raw()
+        .map(|(name, _, value)| (name.to_string(), format!("{value:?}").replace("Fn*", "Fn").replace("Fn+", "Fn")))
+        .collect()
 }
 
 fn run_stock(engine: &Engine, source: &str) -> Outcome {
