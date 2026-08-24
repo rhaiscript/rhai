@@ -169,12 +169,18 @@ impl Engine {
             }
             // Rhai Grain VM
             #[cfg(feature = "grain")]
-            ScriptFuncPayload::GrainVM(ref program) => {
+            ScriptFuncPayload::GrainVM {
+                ref program,
+                ref params,
+                chunk,
+            } => {
                 let context = (self, fn_def.name.as_str(), global.source(), &*global, pos).into();
                 let mut vm = crate::grain::Vm::reentrant(&context);
                 vm.call_function_with_this(
                     program,
                     fn_def.name.as_str(),
+                    params,
+                    chunk,
                     arg_values,
                     global.level,
                     scope,

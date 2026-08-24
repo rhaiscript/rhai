@@ -14,7 +14,11 @@ pub enum ScriptFuncPayload {
     Statements(StmtBlock),
     /// _(grain)_ A Rhai Grain VM to run the function body.
     #[cfg(feature = "grain")]
-    GrainVM(crate::grain::SharedProgram),
+    GrainVM {
+        program: crate::grain::SharedProgram,
+        params: FnArgsVec<u32>,
+        chunk: crate::grain::bytecode::Chunk,
+    },
 }
 
 impl Default for ScriptFuncPayload {
@@ -32,7 +36,7 @@ impl ScriptFuncPayload {
         match self {
             Self::Statements(block) => block.position(),
             #[cfg(feature = "grain")]
-            ScriptFuncPayload::GrainVM(..) => Position::NONE,
+            ScriptFuncPayload::GrainVM { .. } => Position::NONE,
         }
     }
     /// Get the end position.
@@ -42,7 +46,7 @@ impl ScriptFuncPayload {
         match self {
             Self::Statements(block) => block.end_position(),
             #[cfg(feature = "grain")]
-            ScriptFuncPayload::GrainVM(..) => Position::NONE,
+            ScriptFuncPayload::GrainVM { .. } => Position::NONE,
         }
     }
 }

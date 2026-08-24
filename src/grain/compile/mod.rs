@@ -867,7 +867,7 @@ impl Lowering {
             // The scripted function's body must be an AST statements list.
             ScriptFuncPayload::Statements(body) => body,
             // For some reason, if it is a Grain chunk, then fail to lower.
-            ScriptFuncPayload::GrainVM(..) => return None,
+            ScriptFuncPayload::GrainVM { .. } => return None,
         };
 
         // Rhai stops once on entering a body, before its first statement, at a

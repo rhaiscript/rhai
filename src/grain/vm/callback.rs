@@ -70,8 +70,6 @@ pub(super) fn wrappers(program: &SharedProgram) -> Module {
             continue;
         };
 
-        let owner = program.clone();
-
         let params = function
             .params
             .iter()
@@ -80,7 +78,11 @@ pub(super) fn wrappers(program: &SharedProgram) -> Module {
             .collect();
 
         module.set_script_fn(ScriptFuncDef {
-            body: ScriptFuncPayload::GrainVM(owner),
+            body: ScriptFuncPayload::GrainVM {
+                program: program.clone(),
+                params: function.params.iter().copied().collect(),
+                chunk: function.chunk,
+            },
             name: name.into(),
             access: FnAccess::Private,
             #[cfg(not(feature = "no_object"))]

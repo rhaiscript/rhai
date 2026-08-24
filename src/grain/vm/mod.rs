@@ -631,9 +631,21 @@ impl<'e> Vm<'e> {
         level: usize,
         pos: Position,
     ) -> VmResult {
+        let Some(function) = program.function_named(name, args.len()) else {
+            return Err(Box::new(EvalAltResult::ErrorFunctionNotFound(
+                format!("{name} ({} args)", args.len()),
+                pos,
+            )));
+        };
+
+        let (params, chunk) = (&function.params, function.chunk);
+
         let scope = &mut Scope::new();
-        self.call_function_with_this(program, name, args, level, scope, true, pos, None)
-            .0
+
+        self.call_function_with_this(
+            program, name, params, chunk, args, level, scope, true, pos, None,
+        )
+        .0
     }
 
     /// The same, against a receiver the callee owns for the duration.
@@ -644,6 +656,8 @@ impl<'e> Vm<'e> {
         &mut self,
         program: &Program,
         name: &str,
+        params: &[u32],
+        chunk: Chunk,
         args: FnArgsVec<Dynamic>,
         level: usize,
         scope: &mut Scope,
@@ -657,17 +671,6 @@ impl<'e> Vm<'e> {
         #[cfg(feature = "debugging")]
         self.pending_steps.clear();
 
-        let Some(function) = program.function_named(name, args.len()) else {
-            return (
-                Err(Box::new(EvalAltResult::ErrorFunctionNotFound(
-                    format!("{name} ({} args)", args.len()),
-                    pos,
-                ))),
-                this_ptr,
-            );
-        };
-        let (params, chunk) = (function.params.clone(), function.chunk);
-
         // `call_compiled` takes its arguments off the operand stack, where a
         // compiled call site would already have put them.
         let first = self.stack.len();
@@ -677,7 +680,7 @@ impl<'e> Vm<'e> {
         let (result, this) = self.call_compiled_with_this(
             program,
             name,
-            &params,
+            params,
             chunk,
             first,
             scope,
@@ -777,28 +780,40 @@ impl<'e> Vm<'e> {
                 evaluated = unwind_exit(vm.run_main(program, scope)).map(|_| ());
             }
 
-            let (result, returned) = if evaluated.is_ok() {
-                vm.call_function_with_this(
-                    program,
-                    name,
-                    arg_values,
-                    0,
-                    scope,
-                    options.rewind_scope,
-                    Position::NONE,
+            if let Some(function) = program.function_named(name, arg_values.len()) {
+                let (result, returned) = if evaluated.is_ok() {
+                    vm.call_function_with_this(
+                        program,
+                        name,
+                        &function.params,
+                        function.chunk,
+                        arg_values,
+                        0,
+                        scope,
+                        options.rewind_scope,
+                        Position::NONE,
+                        this,
+                    )
+                } else {
+                    (Ok(Dynamic::UNIT), this)
+                };
+
+                // However it went, and whether the call happened at all: Rhai
+                // reports the end of a `call_fn` unconditionally
+                // (`api/call_fn.rs:302-308`).
+                #[cfg(feature = "debugging")]
+                let result = vm.at_end(scope).and(result);
+
+                (result, returned)
+            } else {
+                (
+                    Err(Box::new(EvalAltResult::ErrorFunctionNotFound(
+                        format!("{name} ({} args)", arg_values.len()),
+                        Position::NONE,
+                    ))),
                     this,
                 )
-            } else {
-                (Ok(Dynamic::UNIT), this)
-            };
-
-            // However it went, and whether the call happened at all: Rhai
-            // reports the end of a `call_fn` unconditionally
-            // (`api/call_fn.rs:302-308`).
-            #[cfg(feature = "debugging")]
-            let result = vm.at_end(scope).and(result);
-
-            (result, returned)
+            }
         });
 
         // Before the errors below, both of them: Rhai's mutation through `this`
@@ -2486,6 +2501,7 @@ impl<'e> Vm<'e> {
     ) -> VmResult {
         // Run compiled function if available.
         if let Some(function) = program.function(name_index, argc) {
+            let name = program.name(function.name).unwrap_or("<unknown>");
             return self.call_compiled(
                 program,
                 name,

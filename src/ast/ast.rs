@@ -63,7 +63,7 @@ impl fmt::Debug for AST {
                     fp.field(&sig, &block.statements())
                 }
                 #[cfg(feature = "grain")]
-                super::script_fn::ScriptFuncPayload::GrainVM(..) => {
+                super::script_fn::ScriptFuncPayload::GrainVM { .. } => {
                     fp.field(&sig, &"<Grain VM function chunk>")
                 }
             };
@@ -805,7 +805,7 @@ impl AST {
                     }
                 }
                 #[cfg(feature = "grain")]
-                super::script_fn::ScriptFuncPayload::GrainVM(..) => (),
+                super::script_fn::ScriptFuncPayload::GrainVM { .. } => (),
             }
         }
 

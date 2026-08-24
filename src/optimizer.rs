@@ -1520,7 +1520,9 @@ impl Engine {
                         let mut body = match fn_def.body {
                             crate::ast::script_fn::ScriptFuncPayload::Statements(body) => body,
                             #[cfg(feature = "grain")]
-                            crate::ast::script_fn::ScriptFuncPayload::GrainVM(..) => unreachable!(),
+                            crate::ast::script_fn::ScriptFuncPayload::GrainVM { .. } => {
+                                unreachable!()
+                            }
                         };
                         let statements = body.take_statements();
                         *body.statements_mut() =
@@ -1530,7 +1532,7 @@ impl Engine {
                     }
                     // Payload is a Grain VM function chunk -- cannot optimize
                     #[cfg(feature = "grain")]
-                    crate::ast::script_fn::ScriptFuncPayload::GrainVM(..) => fn_def,
+                    crate::ast::script_fn::ScriptFuncPayload::GrainVM { .. } => fn_def,
                 }
             }))
             .into()
