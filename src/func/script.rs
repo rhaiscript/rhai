@@ -176,7 +176,11 @@ impl Engine {
             } => {
                 let context = (self, fn_def.name.as_str(), global.source(), &*global, pos).into();
                 let mut vm = crate::grain::Vm::reentrant(&context);
-                vm.call_function_with_this(
+
+                // The value in the `this` pointer is cloned
+                let this_ptr_value = this_ptr.as_deref_mut().cloned();
+
+                let (result, new_this_ptr) = vm.call_function_with_this(
                     program,
                     fn_def.name.as_str(),
                     params,
@@ -186,9 +190,17 @@ impl Engine {
                     scope,
                     rewind_scope,
                     pos,
-                    this_ptr.as_deref_mut().cloned(),
-                )
-                .0
+                    this_ptr_value,
+                );
+
+                // Write back new value for the `this` pointer
+                if let Some(this_ptr) = this_ptr.as_deref_mut() {
+                    if let Some(new_this_ptr) = new_this_ptr {
+                        *this_ptr = new_this_ptr;
+                    }
+                }
+
+                result
             }
         };
 
