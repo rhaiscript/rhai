@@ -39,7 +39,7 @@ pub enum WriteError {
     /// chunks, so its functions are ASTs an artifact cannot hold.
     HasScriptFunctions,
     /// A pooled constant carries something that has no meaning in another
-    /// process — a host type, a function pointer, a clock reading.
+    /// process — a custom type, a clock reading etc.
     UnserializableConstant {
         /// Index into the constant pool
         index: usize,

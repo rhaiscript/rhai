@@ -73,6 +73,12 @@ pub(crate) fn is_poolable(value: &Dynamic) -> bool {
         return value.read_lock::<Decimal>().is_some();
     }
 
+    // Disregard the embedded environment in the FnPtr because it most likely
+    // will simply be the collection of all functions in the program.
+    if value.is_fnptr() {
+        return value.read_lock::<rhai::FnPtr>().is_some();
+    }
+
     // A range is a host type by representation but not by nature: Rhai builds
     // one for `0..5` and indexes strings and arrays with it, and its `TypeId`
     // is one both sides can name. Without this every slice is a fragment.
@@ -80,6 +86,6 @@ pub(crate) fn is_poolable(value: &Dynamic) -> bool {
         return true;
     }
 
-    // Anything else — FnPtr, TimeStamp, Decimal, a host type, a shared cell.
+    // Anything else — TimeStamp, a custom type, a shared cell.
     false
 }
