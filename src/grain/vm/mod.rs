@@ -4421,7 +4421,7 @@ mod tests {
     use crate::grain::bytecode::{assemble, Chain, Chunk, Op, Positions, Step, Strings, Tail};
     use crate::grain::format::Abi;
     use crate::grain::program::{Function, Parts};
-    use crate::{CallFnOptions, Engine, Map, Scope, INT};
+    use crate::{CallFnOptions, Engine, Scope, INT};
 
     /// A program of phantom functions, named `f` upwards in the order given.
     ///
@@ -4679,7 +4679,7 @@ mod tests {
     #[test]
     #[cfg(not(feature = "no_object"))]
     fn a_map_method_step_calls_a_fnptr_property_in_oop_style() {
-        let mut map = Map::new();
+        let mut map = crate::Map::new();
         map.insert("g".into(), FnPtr::new("g").expect("valid name").into());
 
         let program = program_with_chains(
@@ -4714,7 +4714,7 @@ mod tests {
     #[test]
     #[cfg(not(feature = "no_object"))]
     fn a_map_fnptr_method_in_oop_style_beats_a_registered_method_with_the_same_name() {
-        let mut map = Map::new();
+        let mut map = crate::Map::new();
         map.insert("len".into(), FnPtr::new("g").expect("valid name").into());
 
         let program = program_with_chains(
