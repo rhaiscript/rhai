@@ -2935,7 +2935,7 @@ impl<'e> Vm<'e> {
             if self.global.level > self.engine.max_call_levels() {
                 return Err(Box::new(EvalAltResult::ErrorStackOverflow(pos)));
             }
-            if params.len() > self.engine.max_variables() {
+            if scope.len() + params.len() > self.engine.max_variables() {
                 return Err(Box::new(EvalAltResult::ErrorTooManyVariables(pos)));
             }
         }
@@ -3676,6 +3676,13 @@ impl<'e> Vm<'e> {
                     // already shared, and sharing must stop at the `let` rather
                     // than becoming a property of the new local.
                     let value = self.pop()?.flatten();
+
+                    // Guard against too many variables
+                    #[cfg(not(feature = "unchecked"))]
+                    if scope.len() >= self.engine.max_variables() {
+                        return Err(EvalAltResult::ErrorTooManyVariables(pos()).into());
+                    }
+
                     if tag == code::tag::DECLARE_CONST {
                         scope.push_constant_dynamic(name, value);
                     } else {
