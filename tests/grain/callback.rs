@@ -166,14 +166,29 @@ fn a_callback_costs_more_call_levels() {
 
 #[test]
 fn without_the_wrappers_the_pointer_does_not_resolve() {
-    // The whole reason `eval_with_callbacks` exists. A plain eval leaves Rhai
-    // nowhere to look, and the failure is a lookup failure rather than
-    // anything worse.
     let engine = corpus::engine();
-    let source = "let a = [1, 2, 3]; a.map(|x| x * 2)";
-    let ast = engine.compile(source).unwrap();
-    let program = Compiler::new().compile(&ast);
 
-    let err = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).unwrap_err();
-    assert!(format!("{err:?}").contains("ErrorFunctionNotFound"), "{err}");
+    const SCRIPTS: &[&str] = &[
+        "let a = [1, 2, 3]; a.map(|x| x * 2)",
+        "let a = [1, 2, 3]; a.map(|| this * 2)",
+        "let a = [1, 2, 3]; a.filter(|x| x % 2 == 0).map(|| this * 2)",
+        "let a = [1, 2, 3]; a.reduce(|a, v| if a == () { v } else { a + v })",
+        "let a = [1, 2, 3]; a.reduce(|a| if a == () { this } else { a + this })",
+        "let s = 0; let a = [10, 20, 30]; a.for_each(|i| s += i); s",
+        "let s = 0; let a = [10, 20, 30]; a.for_each(|| s += this); s",
+    ];
+
+    for source in SCRIPTS {
+        // The AST walker and VM must agree.
+        agree(source);
+
+        // Now check that the program is a callback that requires wrappers.
+        let ast = engine.compile(source).unwrap();
+        let program = Compiler::new().compile(&ast);
+
+        assert!(program.makes_fn_pointers(), "{source} must be a program a host is told to run with callbacks",);
+
+        let err = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).unwrap_err();
+        assert!(format!("{err:?}").contains("ErrorFunctionNotFound"), "{source}: {err}");
+    }
 }
