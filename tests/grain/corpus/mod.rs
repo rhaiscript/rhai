@@ -198,6 +198,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
                 | "is_def_fn"
                 | "map_computed_order"
                 | "map_read_of_absent_key_is_not_visible_to_a_closure"
+                | "oop_style_calling"
                 | "switch_on_a_shared_subject_matches"
                 | "switch_range_on_a_shared_subject_matches"
                 | "temp_root_call"

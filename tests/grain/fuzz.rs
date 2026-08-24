@@ -180,8 +180,11 @@ impl std::fmt::Debug for Outcome {
 
 fn snapshot(scope: &Scope, result: Result<Dynamic, Box<rhai::EvalAltResult>>) -> Outcome {
     Outcome {
-        result: result.map(|value| format!("{value:?}")).map_err(|err| format!("{err:?}")),
-        scope: scope.iter_raw().map(|(name, _, value)| (name.to_string(), format!("{value:?}"))).collect(),
+        result: result.map(|value| format!("{value:?}")).map_err(|err| format!("{err:?}").replace("Fn*", "Fn").replace("Fn+", "Fn")),
+        scope: scope
+            .iter_raw()
+            .map(|(name, _, value)| (name.to_string(), format!("{value:?}").replace("Fn*", "Fn").replace("Fn+", "Fn")))
+            .collect(),
     }
 }
 

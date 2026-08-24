@@ -24,8 +24,11 @@ struct Outcome {
 /// A finished run, reduced to what two of them can be compared on.
 fn snapshot(scope: &Scope, result: Result<Dynamic, Box<rhai::EvalAltResult>>) -> Outcome {
     Outcome {
-        result: result.map(|value| format!("{value:?}")).map_err(|err| format!("{err:?}")),
-        scope: scope.iter_raw().map(|(name, _, value)| (name.to_string(), format!("{value:?}"))).collect(),
+        result: result.map(|value| format!("{value:?}")).map_err(|err| format!("{err:?}").replace("Fn*", "Fn").replace("Fn+", "Fn")),
+        scope: scope
+            .iter_raw()
+            .map(|(name, _, value)| (name.to_string(), format!("{value:?}").replace("Fn*", "Fn").replace("Fn+", "Fn")))
+            .collect(),
     }
 }
 
