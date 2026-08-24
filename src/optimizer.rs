@@ -1516,7 +1516,12 @@ impl Engine {
                 match fn_def.body {
                     // Payload is a statements block
                     crate::ast::script_fn::ScriptFuncPayload::Statements(..) => {
+                        // We cannot just bind to the body here because the `fn_def`
+                        // is wrapped within an `Rc` (or `Arc`).
+                        // It is impossible to take ownership of the body inside
+                        // `fn_def` unless we consume or clone it first.
                         let mut fn_def = crate::func::shared_take_or_clone(fn_def);
+                        // Use a `match` instead of `let ... else` to shut up clippy.
                         let mut body = match fn_def.body {
                             crate::ast::script_fn::ScriptFuncPayload::Statements(body) => body,
                             #[cfg(feature = "grain")]
@@ -1524,13 +1529,16 @@ impl Engine {
                                 unreachable!()
                             }
                         };
+                        // Consume the statements block body and optimize it
                         let statements = body.take_statements();
                         *body.statements_mut() =
                             self.optimize_top_level(statements, scope, lib2, optimization_level);
+                        // Write back the optimized body
                         fn_def.body = crate::ast::script_fn::ScriptFuncPayload::Statements(body);
+                        // Return it as a new `ScriptFuncDef`
                         fn_def.into()
                     }
-                    // Payload is a Grain VM function chunk -- cannot optimize
+                    // Payload is a Grain VM function chunk -- cannot be optimized
                     #[cfg(feature = "grain")]
                     crate::ast::script_fn::ScriptFuncPayload::GrainVM { .. } => fn_def,
                 }
