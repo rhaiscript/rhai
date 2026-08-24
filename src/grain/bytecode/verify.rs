@@ -186,11 +186,11 @@ pub fn verify(
         });
     }
 
-    if !functions.is_empty() && !caps.contains(Caps::DEFINE_FUNCTION) {
+    if !functions.is_empty() && !caps.contains(Caps::FUNCTION) {
         return Err(VerifyError::MissingCaps {
             at: 0,
             artifact: caps.to_string(),
-            missing: Caps::DEFINE_FUNCTION.to_string(),
+            missing: Caps::FUNCTION.to_string(),
         });
     }
 

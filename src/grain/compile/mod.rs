@@ -171,6 +171,8 @@ impl Compiler {
             })
             .collect();
 
+        let caps = lowering.caps;
+
         // Rhai's own functions are carried whenever anything might still reach
         // for them: a function this compiler skipped, or a fragment that could
         // call one. With neither, every call resolves in the table above and
@@ -185,7 +187,7 @@ impl Compiler {
         // `callback::wrappers`, which skips exactly these.
         #[cfg(not(feature = "no_function"))]
         let lib = {
-            let escapes_as_pointer = crate::grain::program::makes_fn_pointers(&code)
+            let escapes_as_pointer = caps.contains(Caps::FN_PTR)
                 && functions
                     .iter()
                     .any(|f| crate::grain::program::takes_this(&code, f.chunk, &lowering.chains));
@@ -201,7 +203,7 @@ impl Compiler {
         };
 
         let mut program = Program::new(
-            lowering.caps,
+            caps,
             code.into(),
             main,
             functions,
@@ -832,7 +834,7 @@ impl Lowering {
             match self.function(def) {
                 Some(function) => {
                     functions.push(function);
-                    self.caps.insert(Caps::DEFINE_FUNCTION);
+                    self.caps.insert(Caps::FUNCTION);
                 }
                 None => skipped += 1,
             }
@@ -1544,6 +1546,7 @@ impl Lowering {
                     .to_string();
                 let name = self.push_name(name.into());
                 self.emit_at(Op::MakeClosure(name), expr.position());
+                self.caps.insert(Caps::FN_PTR);
             }
 
             Expr::DynamicConstant(value, ..) if is_poolable(value) => {
@@ -1746,6 +1749,7 @@ impl Lowering {
                     );
                 } else {
                     self.emit_at(Op::Curry(argc), pos);
+                    self.caps.insert(Caps::FN_PTR | Caps::CURRYING);
                 }
             }
 
@@ -2026,6 +2030,7 @@ impl Lowering {
             (crate::engine::KEYWORD_FN_PTR, 1) => {
                 self.expression(&call.args[0]);
                 self.emit_at(Op::MakeFnPtr, call.args[0].position());
+                self.caps.insert(Caps::FN_PTR);
             }
             (crate::engine::KEYWORD_FN_PTR_CURRY, _) if argc > 1 => {
                 let mut args = call.args.iter();
@@ -2037,6 +2042,7 @@ impl Lowering {
                     self.unflattened(arg);
                 }
                 self.emit_at(Op::Curry((argc - 1) as u8), call.args[0].position());
+                self.caps.insert(Caps::FN_PTR | Caps::CURRYING);
             }
             (crate::engine::KEYWORD_FN_PTR_CALL, _)
                 if argc >= 1 && argc <= u8::MAX as usize + 1 =>
@@ -2053,6 +2059,7 @@ impl Lowering {
                     },
                     pos,
                 );
+                self.caps.insert(Caps::FN_PTR);
             }
             _ => return false,
         }

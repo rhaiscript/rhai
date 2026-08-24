@@ -21,23 +21,27 @@ bitflags! {
         /// The script uses decimal numbers, which are only available under `decimal`.
         const DECIMAL = 1<<4;
         /// The script defines functions, which are not available under `no_function`.
-        const DEFINE_FUNCTION = 1<<5;
+        const FUNCTION = 1<<5;
+        /// The script uses function pointers.
+        const FN_PTR = 1<<6;
+        /// The script uses currying on function pointers.
+        const CURRYING = 1<<7;
         /// The script employs indexing, which is not available under `no_index`.
-        const INDEXING = 1<<6;
+        const INDEXING = 1<<8;
         /// The script accesses properties, which are not available under `no_object`.
-        const PROPERTY = 1<<7;
+        const PROPERTY = 1<<9;
         /// The script uses method calling style, which is not available under `no_object`.
-        const METHOD = 1<<8;
+        const METHOD = 1<<10;
         /// The script uses `this`, which is not available under `no_function`.
-        const THIS = 1<<9;
+        const THIS = 1<<11;
         /// The script uses shared values, which is not available under `no_closure`.
-        const SHARING = 1<<10;
+        const SHARING = 1<<12;
         /// The script uses the `import` statement to import modules, which is not available under `no_module`.
-        const IMPORT = 1<<11;
+        const IMPORT = 1<<13;
         /// The script uses the `export` statement to export in modules, which is not available under `no_module`.
-        const EXPORT = 1<<12;
+        const EXPORT = 1<<14;
         /// The script uses the custom syntax, which is not available under `no_custom_syntax`.
-        const CUSTOM_SYNTAX = 1<<13;
+        const CUSTOM_SYNTAX = 1<<15;
     }
 }
 
@@ -71,58 +75,25 @@ impl std::fmt::Display for Caps {
 
 /// A table of all capabilities, their human-readable names,
 /// and whether this build has them.
+#[rustfmt::skip]
 const CAP_FLAGS: &[(Caps, &'static str, bool)] = &[
-    (
-        Caps::FLOAT,
-        "uses floating-point numbers",
-        !cfg!(feature = "no_float"),
-    ),
-    (Caps::ARRAY, "uses arrays", !cfg!(feature = "no_index")),
-    (Caps::BLOB, "uses BLOB's", !cfg!(feature = "no_index")),
-    (Caps::MAP, "uses object maps", !cfg!(feature = "no_object")),
-    (
-        Caps::DECIMAL,
-        "uses decimal numbers",
-        cfg!(feature = "decimal"),
-    ),
-    (
-        Caps::DEFINE_FUNCTION,
-        "defines functions",
-        !cfg!(feature = "no_function"),
-    ),
-    (Caps::INDEXING, "uses indexing", !cfg!(feature = "no_index")),
-    (
-        Caps::PROPERTY,
-        "accesses properties",
-        !cfg!(feature = "no_object"),
-    ),
-    (
-        Caps::METHOD,
-        "uses method calling style",
-        !cfg!(feature = "no_object"),
-    ),
-    (Caps::THIS, "uses `this`", !cfg!(feature = "no_function")),
-    (
-        Caps::SHARING,
-        "uses shared values",
-        !cfg!(feature = "no_closure"),
-    ),
-    (
-        Caps::IMPORT,
-        "imports modules",
-        !cfg!(feature = "no_module"),
-    ),
-    (
-        Caps::EXPORT,
-        "exports data in modules",
-        !cfg!(feature = "no_module"),
-    ),
-    (
-        Caps::CUSTOM_SYNTAX,
-        "uses custom syntax",
-        // Unsupported syntax is not yet supported
-        false && !cfg!(feature = "no_custom_syntax"),
-    ),
+    (Caps::FLOAT,       "uses floating-point numbers",      !cfg!(feature = "no_float")),
+    (Caps::ARRAY,       "uses arrays",                      !cfg!(feature = "no_index")),
+    (Caps::BLOB,        "uses BLOB's",                      !cfg!(feature = "no_index")),
+    (Caps::MAP,         "uses object maps",                 !cfg!(feature = "no_object")),
+    (Caps::DECIMAL,     "uses decimal numbers",              cfg!(feature = "decimal")),
+    (Caps::FUNCTION,    "defines functions",                !cfg!(feature = "no_function")),
+    (Caps::FN_PTR,      "uses function pointers",            true),
+    (Caps::CURRYING,    "uses currying",                     true),
+    (Caps::INDEXING,    "uses indexing",                    !cfg!(feature = "no_index")),
+    (Caps::PROPERTY,    "accesses properties",              !cfg!(feature = "no_object")),
+    (Caps::METHOD,      "uses method calling style",        !cfg!(feature = "no_object")),
+    (Caps::THIS,        "uses `this`",                      !cfg!(feature = "no_function")),
+    (Caps::SHARING,     "uses shared values",               !cfg!(feature = "no_closure")),
+    (Caps::IMPORT,      "imports modules",                  !cfg!(feature = "no_module")),
+    (Caps::EXPORT,      "exports data in modules",          !cfg!(feature = "no_module")),
+    // Unsupported features below
+    (Caps::CUSTOM_SYNTAX, "uses custom syntax",              false && !cfg!(feature = "no_custom_syntax")),
 ];
 
 /// The value representation an artifact was written against.

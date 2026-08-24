@@ -90,10 +90,6 @@ pub struct Program<'a> {
     /// The deepest chunk's operand-stack need, cached.
     max_stack: u16,
 
-    /// Whether the program can hand a function pointer to something that
-    /// might call it back. See [`Program::makes_fn_pointers`].
-    makes_fn_pointers: bool,
-
     /// Whether any function was declared for a receiver type.
     ///
     /// Derived, not stored: [`Program::method`] is a linear scan on every method
@@ -227,24 +223,6 @@ fn node_position(node: &ASTNode) -> rhai::Position {
     }
 }
 
-/// Whether any instruction in `code` produces a function pointer.
-///
-/// Read off the bytes rather than tracked while lowering, because a program
-/// read from an artifact has no lowering to have tracked it — and the answer
-/// has to be the same either way or one of the two paths silently loses its
-/// callbacks.
-///
-/// Deliberately over-broad: it says yes to a pointer that is only ever called
-/// directly. Narrowing it would mean deciding where a pointer *goes*, which is
-/// a dataflow question over values that outlive the instruction that made
-/// them. Being wrong the other way loses a call at run time.
-pub(crate) fn makes_fn_pointers(code: &[u8]) -> bool {
-    use crate::grain::bytecode::code::tag;
-
-    crate::grain::bytecode::disassemble(code)
-        .any(|(at, ..)| matches!(code[at], tag::MAKE_CLOSURE | tag::MAKE_FN_PTR | tag::CURRY))
-}
-
 /// Whether a chunk reads or writes the frame's receiver.
 ///
 /// Read off the bytes for [`makes_fn_pointers`]'s reason: a program loaded from
@@ -315,7 +293,6 @@ impl<'a> Program<'a> {
         functions: Vec<Function>,
         parts: Parts<'a>,
     ) -> Self {
-        let makes_fn_pointers = makes_fn_pointers(&code);
         let has_typed_methods = functions.iter().any(|f| f.this_type.is_some());
 
         // Derived here so a program means the same whether it was compiled or
@@ -340,7 +317,6 @@ impl<'a> Program<'a> {
             main,
             functions,
             max_stack: 0,
-            makes_fn_pointers,
             has_typed_methods,
             positions: parts.positions,
             debug_id,
@@ -372,7 +348,6 @@ impl<'a> Program<'a> {
             main: self.main,
             functions: self.functions,
             max_stack: self.max_stack,
-            makes_fn_pointers: self.makes_fn_pointers,
             has_typed_methods: self.has_typed_methods,
             positions: self.positions,
             debug_id: self.debug_id,
@@ -546,7 +521,7 @@ impl<'a> Program<'a> {
     /// the script. False is the common answer and costs nothing.
     #[must_use]
     pub fn makes_fn_pointers(&self) -> bool {
-        self.makes_fn_pointers
+        self.caps().contains(Caps::FN_PTR)
     }
 
     /// How much operand stack the deepest chunk needs.
@@ -812,7 +787,7 @@ mod tests {
             .collect();
 
         Program::new(
-            Caps::DEFINE_FUNCTION,
+            Caps::FUNCTION,
             code.into(),
             whole,
             functions,
