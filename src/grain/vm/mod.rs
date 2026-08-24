@@ -1393,6 +1393,33 @@ impl<'e> Vm<'e> {
                     return Err(malformed("chain method arguments missing".to_string()));
                 }
 
+                #[cfg(not(feature = "no_object"))]
+                {
+                    let fn_ptr = target.as_map_mut().as_deref_mut().ok().and_then(|map| {
+                        map.get(name)
+                            .and_then(|value| value.read_lock::<FnPtr>().map(|ptr| ptr.clone()))
+                    });
+                    if let Some(fn_ptr) = fn_ptr {
+                        let mut args: FnArgsVec<Dynamic> =
+                            operands[first..first + argc].iter().cloned().collect();
+                        let mut out = self
+                            .call_map_fn_ptr_method(program, target, fn_ptr, &mut args, step_pos)?;
+
+                        return if last {
+                            if value.is_some() {
+                                Err(malformed("assignment to a method call".to_string()))
+                            } else {
+                                Ok((out, true))
+                            }
+                        } else {
+                            let result = self
+                                .walk_chain(program, chain, rest, &mut out, operands, value, pos)?
+                                .0;
+                            Ok((result, true))
+                        };
+                    }
+                }
+
                 // A method call is where Rhai tries the receiver's type before
                 // the plain name (`func/call.rs:614-629`), and the only place it
                 // does. `argc` already excludes the receiver, which is the arity
@@ -2183,12 +2210,7 @@ impl<'e> Vm<'e> {
             let context = (self.engine, pointer.fn_name(), None, &self.global, pos).into();
             pointer
                 .call_raw(&context, bound.as_mut(), &mut args)
-                .map_err(|mut err| {
-                    if err.position().is_none() {
-                        err.set_position(pos);
-                    }
-                    err
-                })
+                .map_err(|err| positioned(err, pos))
         };
 
         // Before `?`, as everywhere else: Rhai binds the receiver by reference,
@@ -2204,6 +2226,65 @@ impl<'e> Vm<'e> {
         let value = outcome?;
         self.stack.truncate(base);
         Ok(value)
+    }
+
+    /// Call a `FnPtr` found in a map by method name:
+    /// `obj.foo(..)` where `foo` is a function pointer.
+    #[cfg(not(feature = "no_object"))]
+    fn call_map_fn_ptr_method(
+        &mut self,
+        program: &Program,
+        target: &mut Dynamic,
+        fn_ptr: FnPtr,
+        args: &mut [Dynamic],
+        pos: Position,
+    ) -> VmResult {
+        let name = fn_ptr.fn_name();
+        let argc = args.len() + fn_ptr.curry().len();
+        let function = program.function_named(name, argc);
+
+        let (this, restore) = bind_this(target);
+        let mut this = Some(this);
+
+        let result = if let Some(f) = function {
+            let at = self.stack.len();
+            self.stack.extend(fn_ptr.curry().iter().cloned());
+            self.stack.extend(args.iter_mut().map(|v| v.take()));
+            let new_scope = &mut Scope::new();
+            let (result, new_this_value) = self.call_compiled_with_this(
+                program, name, &f.params, f.chunk, at, new_scope, true, pos, this,
+            );
+            self.stack.truncate(at);
+            this = new_this_value;
+            result
+        } else {
+            let mut call_args: FnArgsVec<Dynamic> = fn_ptr
+                .curry()
+                .iter()
+                .cloned()
+                .chain(args.iter().cloned())
+                .collect();
+            let mut args: FnArgsVec<&mut Dynamic> =
+                std::iter::once(this.as_mut().expect("bound above"))
+                    .chain(call_args.iter_mut())
+                    .collect();
+
+            call_engine(
+                self.engine,
+                &mut self.global,
+                &mut self.caches,
+                &mut Scope::new(),
+                name,
+                &mut args,
+                true,
+                true,
+                pos,
+            )
+        };
+
+        unbind_this(target, this, restore);
+
+        result
     }
 
     /// Carry a write through `obj.call(f)`'s `this` back to `obj` itself.
@@ -4334,7 +4415,7 @@ mod tests {
     use crate::grain::bytecode::{assemble, Chain, Chunk, Op, Positions, Step, Strings, Tail};
     use crate::grain::format::Abi;
     use crate::grain::program::{Function, Parts};
-    use crate::{CallFnOptions, Engine, Scope, INT};
+    use crate::{CallFnOptions, Engine, Map, Scope, INT};
 
     /// A program of phantom functions, named `f` upwards in the order given.
     ///
@@ -4587,6 +4668,75 @@ mod tests {
 
         let mut this = Dynamic::from(7 as INT);
         assert_eq!(call(&program, Some(&mut this)).unwrap().as_int(), Ok(7));
+    }
+
+    #[test]
+    #[cfg(not(feature = "no_object"))]
+    fn a_map_method_step_calls_a_fnptr_property_in_oop_style() {
+        let mut map = Map::new();
+        map.insert("g".into(), FnPtr::new("g").expect("valid name").into());
+
+        let program = program_with_chains(
+            // `f` is `#{ g: Fn("g") }.g()`; `g` is `this`.
+            &[
+                &[Op::Const(0), Op::Chain(0), Op::Return],
+                &[Op::LoadThis, Op::Return],
+            ],
+            vec![Dynamic::from_map(map)],
+            vec![Chain {
+                root: Root::Temporary,
+                steps: vec![Step::Method {
+                    name: 1, // `g`
+                    argc: 0,
+                    operand: 0,
+                    flags: Default::default(),
+                    pos: Position::NONE,
+                }],
+                tail: Tail::Read,
+                operands: 0,
+            }],
+        );
+
+        let out = call(&program, None).expect("map fnptr method call should succeed");
+        let map = out.as_map_ref().expect("fnptr body returns `this` map");
+        assert!(
+            map.contains_key("g"),
+            "expected the map returned through `this`"
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "no_object"))]
+    fn a_map_fnptr_method_in_oop_style_beats_a_registered_method_with_the_same_name() {
+        let mut map = Map::new();
+        map.insert("len".into(), FnPtr::new("g").expect("valid name").into());
+
+        let program = program_with_chains(
+            // `f` is `#{ len: Fn("g") }.len()`; `g` is `this`.
+            &[
+                &[Op::Const(0), Op::Chain(0), Op::Return],
+                &[Op::LoadThis, Op::Return],
+            ],
+            vec![Dynamic::from_map(map)],
+            vec![Chain {
+                root: Root::Temporary,
+                steps: vec![Step::Method {
+                    name: 3, // `len`
+                    argc: 0,
+                    operand: 0,
+                    flags: Default::default(),
+                    pos: Position::NONE,
+                }],
+                tail: Tail::Read,
+                operands: 0,
+            }],
+        );
+
+        let out = call(&program, None).expect("map fnptr method call should succeed");
+        assert!(
+            out.is_map(),
+            "expected map fnptr dispatch to win over built-in map `len()`"
+        );
     }
 
     /// And a write inside that callee travels back out through both frames: the

@@ -353,6 +353,7 @@ pub fn applies_to_this_build(name: &str) -> bool {
                 | "index_expression_reads_the_root"
                 | "interpolation_of_containers"
                 | "nested_containers"
+                | "oop_style_calling"
                 | "property_assign_deep"
                 | "string_ops"
                 | "temp_root_array_method"
@@ -854,6 +855,8 @@ pub const CASES: &[Case] = &[
     case("closure_for_each_binds_this", "let t = 0; [1, 2, 3].for_each(|| t += this); t"),
     // And the argument form, which takes the element as a parameter instead.
     case("closure_map_takes_an_argument", "[1, 2, 3].map(|x| x * 2)"),
+    // OOP-style calling.
+    case("oop_style_calling", "let map = #{ value: 42, foo: |x| { this.value += x; }}; map.foo(8);"),
     // `type_of` has no registered implementation anywhere — Rhai answers it by
     // name — so it is reached through the same door every other call is.
     // A constant argument is folded by the optimizer and proves nothing.
