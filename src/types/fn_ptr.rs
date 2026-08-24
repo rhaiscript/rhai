@@ -582,11 +582,24 @@ impl FnPtr {
         extras: [Dynamic; E],
         move_this_ptr_to_args: usize,
     ) -> RhaiResult {
+        // Wrap the error in an `ErrorInFunctionCall`
+        fn wrap_err(result: RhaiResult, ctx: &NativeCallContext, caller_fn: &str) -> RhaiResult {
+            result.map_err(|err| {
+                Box::new(ERR::ErrorInFunctionCall(
+                    caller_fn.to_string(),
+                    ctx.call_source().unwrap_or("").to_string(),
+                    err,
+                    Position::NONE,
+                ))
+            })
+        }
+
         match self.typ {
             #[cfg(not(feature = "no_function"))]
             FnPtrType::Script { num_params, .. } => {
                 if num_params == N + self.curry().len() {
-                    return self.call_raw(ctx, this_ptr, args);
+                    let result = self.call_raw(ctx, this_ptr, args);
+                    return wrap_err(result, ctx, caller_fn);
                 }
                 if MOVE_PTR {
                     if let Some(this_ptr) = this_ptr.as_deref() {
@@ -599,7 +612,8 @@ impl FnPtr {
                                 args2.extend(args);
                                 args2.insert(move_this_ptr_to_args, this_ptr.clone());
                             }
-                            return self.call_raw(ctx, None, args2);
+                            let result = self.call_raw(ctx, None, args2);
+                            return wrap_err(result, ctx, caller_fn);
                         }
                         if num_params == N + E + 1 + self.curry().len() {
                             let mut args2 = FnArgsVec::with_capacity(args.len() + extras.len() + 1);
@@ -612,7 +626,8 @@ impl FnPtr {
                                 args2.extend(extras);
                                 args2.insert(move_this_ptr_to_args, this_ptr.clone());
                             }
-                            return self.call_raw(ctx, None, args2);
+                            let result = self.call_raw(ctx, None, args2);
+                            return wrap_err(result, ctx, caller_fn);
                         }
                     }
                 }
@@ -620,7 +635,8 @@ impl FnPtr {
                     let mut args2 = FnArgsVec::with_capacity(args.len() + extras.len());
                     args2.extend(args);
                     args2.extend(extras);
-                    return self.call_raw(ctx, this_ptr, args2);
+                    let result = self.call_raw(ctx, this_ptr, args2);
+                    return wrap_err(result, ctx, caller_fn);
                 }
             }
             _ => (),
@@ -669,14 +685,7 @@ impl FnPtr {
                 }
                 _ => Err(err),
             })
-            .map_err(|err| {
-                Box::new(ERR::ErrorInFunctionCall(
-                    caller_fn.to_string(),
-                    ctx.call_source().unwrap_or("").to_string(),
-                    err,
-                    Position::NONE,
-                ))
-            })
+            .or_else(|err| wrap_err(Err(err), ctx, caller_fn))
     }
 }
 
