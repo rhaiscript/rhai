@@ -864,10 +864,14 @@ impl Lowering {
             .collect();
 
         let body = match &def.body {
-            // The scripted function's body must be an AST statements list.
+            // The function's body must be an AST statements block.
             ScriptFuncPayload::Statements(body) => body,
-            // For some reason, if it is a Grain chunk, then fail to lower.
-            ScriptFuncPayload::GrainVM { .. } => return None,
+            // This should not happen: the only way for a `GrainVM` to appear
+            // is for Grain to generate it inside a callback wrapper.
+            // So Grain should never be handed another Grain function to compile.
+            ScriptFuncPayload::GrainVM { .. } => {
+                unreachable!("AST compiled by Rhai never contains a GrainVM function body")
+            }
         };
 
         // Rhai stops once on entering a body, before its first statement, at a
