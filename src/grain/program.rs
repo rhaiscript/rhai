@@ -47,6 +47,7 @@ pub struct Function {
     ///
     /// `None` for an ordinary function, which is nearly all of them.
     pub this_type: Option<u32>,
+    /// The function's chunk.
     pub chunk: Chunk,
 }
 

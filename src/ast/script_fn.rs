@@ -2,7 +2,7 @@
 #![cfg(not(feature = "no_function"))]
 
 use super::{FnAccess, StmtBlock};
-use crate::{FnArgsVec, ImmutableString, Position};
+use crate::{types::Span, FnArgsVec, ImmutableString, Position};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{fmt, hash::Hash};
@@ -18,6 +18,7 @@ pub enum ScriptFuncPayload {
         program: crate::grain::SharedProgram,
         params: FnArgsVec<u32>,
         chunk: crate::grain::bytecode::Chunk,
+        span: Span,
     },
 }
 
@@ -32,11 +33,11 @@ impl ScriptFuncPayload {
     /// Get the start position.
     #[inline(always)]
     #[must_use]
-    pub const fn position(&self) -> Position {
+    pub const fn start_position(&self) -> Position {
         match self {
             Self::Statements(block) => block.position(),
             #[cfg(feature = "grain")]
-            ScriptFuncPayload::GrainVM { .. } => Position::NONE,
+            ScriptFuncPayload::GrainVM { span, .. } => span.start(),
         }
     }
     /// Get the end position.
@@ -46,7 +47,7 @@ impl ScriptFuncPayload {
         match self {
             Self::Statements(block) => block.end_position(),
             #[cfg(feature = "grain")]
-            ScriptFuncPayload::GrainVM { .. } => Position::NONE,
+            ScriptFuncPayload::GrainVM { span, .. } => span.end(),
         }
     }
 }

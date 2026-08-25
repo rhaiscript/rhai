@@ -32,6 +32,7 @@ use std::prelude::v1::*;
 use crate::{
     ast::script_fn::{ScriptFuncDef, ScriptFuncPayload},
     grain::program::SharedProgram,
+    types::Span,
     FnAccess, Module,
 };
 
@@ -82,6 +83,10 @@ pub(super) fn wrappers(program: &SharedProgram) -> Module {
                 program: program.clone(),
                 params: function.params.iter().copied().collect(),
                 chunk: function.chunk,
+                span: Span::new(
+                    program.position(function.chunk.entry() as usize),
+                    program.position(function.chunk.end() as usize),
+                ),
             },
             name: name.into(),
             access: FnAccess::Private,
