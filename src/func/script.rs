@@ -49,20 +49,23 @@ impl Engine {
             return Err(ERR::ErrorTooManyVariables(pos).into());
         }
 
+        // Short-circuit empty function body
         match fn_def.body {
-            #[cfg(feature = "debugging")]
-            ScriptFuncPayload::Statements(ref block)
-                if self.debugger_interface.is_none() && block.is_empty() =>
-            {
-                return Ok(Dynamic::UNIT)
+            ScriptFuncPayload::Statements(ref block) => {
+                let is_empty = block.is_empty();
+                #[cfg(feature = "debugging")]
+                let is_empty = is_empty && self.debugger_interface.is_none();
+
+                if is_empty {
+                    return Ok(Dynamic::UNIT);
+                }
             }
-            #[cfg(not(feature = "debugging"))]
-            ScriptFuncPayload::Statements(ref block) if block.is_empty() => {
-                return Ok(Dynamic::UNIT)
-            }
-            _ => (),
+            // We don't know about Grain functions, so call it anyway
+            #[cfg(feature = "grain")]
+            ScriptFuncPayload::GrainVM { .. } => (),
         }
 
+        // Save the original state
         let orig_scope_len = scope.len();
         let orig_lib_len = global.lib.len();
         #[cfg(not(feature = "no_module"))]
@@ -126,7 +129,7 @@ impl Engine {
 
                 #[cfg(feature = "debugging")]
                 if self.is_debugger_registered() {
-                    let node = crate::ast::Stmt::Noop(fn_def.body.position());
+                    let node = crate::ast::Stmt::Noop(fn_def.body.start_position());
                     self.dbg(global, caches, scope, this_ptr.as_deref_mut(), &node)?;
                 }
 
@@ -173,6 +176,7 @@ impl Engine {
                 ref program,
                 ref params,
                 chunk,
+                ..
             } => {
                 let context = (self, fn_def.name.as_str(), global.source(), &*global, pos).into();
                 let mut vm = crate::grain::Vm::reentrant(&context);

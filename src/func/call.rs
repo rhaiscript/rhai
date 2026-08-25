@@ -728,15 +728,19 @@ impl Engine {
                 let fn_def = &*fn_def;
                 let env = env.as_deref();
 
+                // Short-circuit empty script function body
                 match fn_def.body {
-                    crate::ast::script_fn::ScriptFuncPayload::Statements(ref block)
-                        if block.is_empty() =>
-                    {
-                        return Ok((Dynamic::UNIT, false))
+                    crate::ast::script_fn::ScriptFuncPayload::Statements(ref block) => {
+                        if block.is_empty() {
+                            return Ok((Dynamic::UNIT, false));
+                        }
                     }
-                    _ => (),
+                    // We don't know about Grain functions, so call it anyway
+                    #[cfg(feature = "grain")]
+                    crate::ast::script_fn::ScriptFuncPayload::GrainVM { .. } => (),
                 }
 
+                // Make empty scope for function call
                 let mut empty_scope;
                 let scope = if let Some(scope) = _scope {
                     scope
@@ -745,9 +749,11 @@ impl Engine {
                     &mut empty_scope
                 };
 
+                // Swap source
                 let orig_source = mem::replace(&mut global.source, source);
                 defer! { global => move |g| g.source = orig_source }
 
+                // Execute function call
                 return if _is_method_call {
                     // Method call of script function - map first argument to `this`
                     let (first_arg, args) = args.split_first_mut().unwrap();
