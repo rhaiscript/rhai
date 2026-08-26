@@ -629,6 +629,10 @@ impl Lowering {
 
         // Dispatch to the ranges table if no case value matches or all the guards decline.
         // The default arm is only reached when all ranges fail.
+        //
+        // The last chain to decline arrives here by falling off its own end, so
+        // it needs no jump to say so.
+        self.drop_idle_jump(&mut to_ranges);
         let ranges_dispatch = self.here();
         self.emit(Op::LoadLocal(value_slot));
 
@@ -696,6 +700,11 @@ impl Lowering {
         };
 
         // Unwind at the end of the switch.
+        //
+        // The last body emitted falls into it when there is nothing between the
+        // two — which is every `switch` with a `_` arm, because then the default
+        // is a body already emitted rather than a unit put here.
+        self.drop_idle_jump(&mut to_end);
         let unwind_at = self.here();
         self.unwind_to(unwind_depth);
 
@@ -2284,13 +2293,33 @@ impl Lowering {
 
     /// Drop everything emitted since `mark`.
     ///
-    /// Only safe for an attempt that emitted no jumps out of the rewound
-    /// region, which is why it is used for chains and nothing else: a chain
-    /// emits its operands and then one instruction, and gives up before
-    /// emitting the instruction.
+    /// Only safe for a region no surviving jump points into or out of. A chain
+    /// qualifies because it emits its operands and then one instruction, and
+    /// gives up before emitting that instruction; so does the single jump
+    /// [`Lowering::drop_idle_jump`] takes back, which goes with its site.
     fn rewind(&mut self, mark: usize) {
         self.code.truncate(mark);
         self.positions.truncate(mark);
+    }
+
+    /// Take back a jump that would land on the instruction after itself.
+    ///
+    /// Call it where the next instruction emitted *is* what `sites` is waiting
+    /// for: the last of them can then fall through to that instruction instead
+    /// of jumping to it, so it is dropped along with its place in the list
+    /// rather than patched.
+    ///
+    /// Only the last entry is a candidate, because only it can still be the
+    /// instruction most recently emitted — and nothing can point at it yet.
+    /// These lists are patched once every body has an address, and what a switch
+    /// table holds are guards and bodies, never the jumps out of them.
+    fn drop_idle_jump(&mut self, sites: &mut Vec<usize>) {
+        if let Some(&site) = sites.last() {
+            if site + 1 == self.code.len() {
+                sites.pop();
+                self.rewind(site);
+            }
+        }
     }
 
     fn here(&self) -> u32 {

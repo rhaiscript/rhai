@@ -191,12 +191,9 @@ fn every_compiled_chunk_verifies() {
 /// condition and still has to reject one that is not a boolean, so landing next
 /// door says nothing about it.
 ///
-/// `switch` is left out, and not because it is allowed to: every arm ends in a
-/// jump to the unwind, and the last one has nothing to clear when the default is
-/// an arm already emitted. Closing that is a change to the arm layout rather
-/// than to a reserved slot, so it is its own. Filtered on the syntax rather than
-/// listed by name, so a new `switch` case does not have to be added here — and
-/// so this tightens by deleting the filter.
+/// No exceptions, and that is the claim: every corpus script is checked, so a
+/// new one that reserves a jump it never needed fails here on arrival rather
+/// than joining a majority that already does it.
 #[test]
 fn no_jump_lands_on_the_following_instruction() {
     use rhai::grain::bytecode::{disassemble, Op};
@@ -205,7 +202,6 @@ fn no_jump_lands_on_the_following_instruction() {
 
     let idle: Vec<_> = corpus::CASES
         .iter()
-        .filter(|case| !case.source.contains("switch"))
         .filter_map(|case| {
             let ast = engine.compile(case.source).ok()?;
             let program = Compiler::new().compile(&ast);
