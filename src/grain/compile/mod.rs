@@ -1298,12 +1298,7 @@ impl Lowering {
                 self.emit(Op::UnwindTo(outside));
                 self.slots.unwind_to(outside as usize);
 
-                self.emit(Op::Unit);
-                let past = self.emit_jump();
-                for site in breaks {
-                    self.patch_here(site);
-                }
-                self.patch_here(past);
+                self.finish_loop(breaks);
                 Lowered::Value
             }
 
@@ -1328,7 +1323,17 @@ impl Lowering {
                     Lowered::Defeated => return Lowered::Defeated,
                     lowered => lowered,
                 };
-                let past_else = self.emit_jump();
+
+                // An `if` with no `else` has an empty branch, which emits
+                // nothing — so unless a unit has to be put there for the `then`
+                // path to skip, there is nothing between this jump and where it
+                // would land. Reserved before the branch rather than deleted
+                // after it: `to_else` is patched past this slot, and dropping an
+                // instruction it has already been pointed over would leave that
+                // target one instruction long.
+                let past_else = (!branch.statements().is_empty()
+                    || matches!(then_branch, Lowered::Value))
+                .then(|| self.emit_jump());
 
                 self.patch_here(to_else);
                 let else_branch = match self.block(branch.statements()) {
@@ -1347,22 +1352,22 @@ impl Lowering {
                 match (then_branch, else_branch) {
                     (Lowered::Value, Lowered::Empty) => {
                         self.emit(Op::Unit);
-                        self.patch_here(past_else);
+                        self.patch_here_if(past_else);
                         Lowered::Value
                     }
                     (Lowered::Empty, Lowered::Value) => {
                         let past_trailer = self.emit_jump();
-                        self.patch_here(past_else);
+                        self.patch_here_if(past_else);
                         self.emit(Op::Unit);
                         self.patch_here(past_trailer);
                         Lowered::Value
                     }
                     (Lowered::Value, Lowered::Value) => {
-                        self.patch_here(past_else);
+                        self.patch_here_if(past_else);
                         Lowered::Value
                     }
                     (Lowered::Empty, Lowered::Empty) => {
-                        self.patch_here(past_else);
+                        self.patch_here_if(past_else);
                         Lowered::Empty
                     }
                     (Lowered::Defeated, _) | (_, Lowered::Defeated) => {
@@ -1398,14 +1403,7 @@ impl Lowering {
                 if let Some(exit) = exit {
                     self.patch_here(exit);
                 }
-                // A `while` that runs to completion is unit; a `break value`
-                // supplies its own. Both arrive here with the stack balanced.
-                self.emit(Op::Unit);
-                let past = self.emit_jump();
-                for site in breaks {
-                    self.patch_here(site);
-                }
-                self.patch_here(past);
+                self.finish_loop(breaks);
                 Lowered::Value
             }
 
@@ -1433,12 +1431,7 @@ impl Lowering {
                     self.patch_here(exit);
                 }
 
-                self.emit(Op::Unit);
-                let past = self.emit_jump();
-                for site in breaks {
-                    self.patch_here(site);
-                }
-                self.patch_here(past);
+                self.finish_loop(breaks);
                 Lowered::Value
             }
 
@@ -2323,6 +2316,13 @@ impl Lowering {
         self.patch_to(site, target);
     }
 
+    /// The same, for a jump that was only worth emitting under a condition.
+    fn patch_here_if(&mut self, site: Option<usize>) {
+        if let Some(site) = site {
+            self.patch_here(site);
+        }
+    }
+
     /// Point a previously emitted jump at an instruction already emitted.
     fn patch_to(&mut self, site: usize, target: u32) {
         match &mut self.code[site] {
@@ -2387,6 +2387,19 @@ impl Lowering {
 
     fn end_loop(&mut self) -> Vec<usize> {
         self.loops.pop().expect("loop stack is balanced").breaks
+    }
+
+    /// Push the value a loop has when it runs to completion — unit — and land
+    /// every `break` in it just past that.
+    ///
+    /// A `break value` supplied its own and unwound before jumping, so the two
+    /// paths meet one instruction later at the same depth. That is why the
+    /// straight-line path has nothing to jump over.
+    fn finish_loop(&mut self, breaks: Vec<usize>) {
+        self.emit(Op::Unit);
+        for site in breaks {
+            self.patch_here(site);
+        }
     }
 
     fn residual_expr(&mut self, expr: &Expr) {
@@ -2690,6 +2703,42 @@ mod tests {
             stack_traffic.is_empty(),
             "effect-only statements must leave nothing to discard, found {stack_traffic:?}",
         );
+    }
+
+    /// Leaving a loop needs no jump. Both ways out arrive at the same address —
+    /// a `break` past the unit the exhausted path pushes — so the instruction
+    /// after the unit is where each of them already was going.
+    ///
+    /// Stated as "no jump lands on the instruction after itself", because that
+    /// is the shape of the mistake rather than the loop it was found in.
+    #[test]
+    fn leaving_a_loop_jumps_nowhere() {
+        let engine = crate::Engine::new();
+
+        for source in [
+            "let s = 0; for i in 0..3 { s += i; } s",
+            "let s = 0; while s < 3 { s += 1; } s",
+            "let s = 0; loop { s += 1; break s }",
+            "let s = 0; do { s += 1; } while s < 3; s",
+        ] {
+            let ast = engine.compile(source).expect("must compile");
+            let program = Compiler::new().compile(&ast);
+
+            let ops: Vec<_> = crate::grain::bytecode::disassemble(program.code()).collect();
+            let idle: Vec<_> = ops
+                .windows(2)
+                .filter(|pair| match pair[0].1 {
+                    Op::Jump(target) => target as usize == pair[1].0,
+                    _ => false,
+                })
+                .map(|pair| pair[0].0)
+                .collect();
+
+            assert!(
+                idle.is_empty(),
+                "`{source}` jumps to the following instruction at {idle:?}",
+            );
+        }
     }
 
     #[test]
