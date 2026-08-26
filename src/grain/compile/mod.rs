@@ -266,6 +266,25 @@ enum Entry {
     Default,
 }
 
+/// What lowering a statement left on the operand stack.
+///
+/// Every Rhai statement has a value, but most of them have the *same* value:
+/// a declaration, an assignment and a `share` are all unit. Saying so here is
+/// what lets the caller materialize that unit only where it is read — as a
+/// block's value — rather than pushing and popping one per statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+enum Lowered {
+    /// One value, which the statement pushed itself.
+    Value,
+    /// Nothing. Either the statement's value is unit, or control left before
+    /// reaching its end — for the caller the two mean the same thing: what
+    /// follows starts at the depth the statement began at.
+    Empty,
+    /// The slot model could not account for it, so the caller falls back.
+    Defeated,
+}
+
 /// A function body that lowered, before its instruction indices become byte
 /// addresses.
 struct LoweredFn {
@@ -344,19 +363,24 @@ impl Lowering {
             if keeps_scope {
                 self.emit(Op::Checkpoint);
             }
-            if !self.statement(stmt) {
-                return false;
+            match self.statement(stmt) {
+                Lowered::Defeated => return false,
+                // A statement's value is only the program's value if it is the
+                // last one; Rhai discards the rest.
+                Lowered::Value => self.emit(Op::Pop),
+                Lowered::Empty => {}
             }
-            // A statement's value is only the program's value if it is the
-            // last one; Rhai discards the rest.
-            self.emit(Op::Pop);
         }
 
         if keeps_scope {
             self.emit(Op::Checkpoint);
         }
-        if !self.statement(last) {
-            return false;
+        match self.statement(last) {
+            Lowered::Defeated => return false,
+            // [`Op::Return`] takes the frame's value off the stack, so the unit
+            // an empty statement stands for has to be there.
+            Lowered::Empty => self.emit(Op::Unit),
+            Lowered::Value => {}
         }
 
         self.emit(Op::Return);
@@ -935,14 +959,15 @@ impl Lowering {
         self.emit(Op::Return);
     }
 
-    /// Lower one statement, leaving its value on the stack.
+    /// Lower one statement, leaving its value on the stack — or saying it left
+    /// none, which is [`Lowered::Empty`].
     ///
     /// Marks where it begins first, which is what the debugger stops at — see
     /// [`Op::Statement`]. Every statement gets one, the ones that end up as
     /// fragments included: the walker evaluating a fragment stops at its own
     /// node as well, so such a statement stops twice at the same place. Driving
     /// the residual count to zero is what removes that.
-    fn statement(&mut self, stmt: &Stmt) -> bool {
+    fn statement(&mut self, stmt: &Stmt) -> Lowered {
         #[cfg(feature = "debugging")]
         let enclosing = {
             let depth = self.stmt_depth;
@@ -965,13 +990,13 @@ impl Lowering {
     }
 
     /// The lowering itself, one arm per kind of statement.
-    fn lower_statement(&mut self, stmt: &Stmt) -> bool {
+    fn lower_statement(&mut self, stmt: &Stmt) -> Lowered {
         match stmt {
             Stmt::Var(payload, flags, ..) => {
                 // `export let x = ...` also binds a module alias, which the
                 // slot model does not represent.
                 if flags.contains(ASTFlags::EXPORTED) || self.slots.is_full() {
-                    return false;
+                    return Lowered::Defeated;
                 }
                 let is_const = flags.contains(ASTFlags::CONSTANT);
 
@@ -990,13 +1015,12 @@ impl Lowering {
                 }
 
                 // A declaration evaluates to unit.
-                self.emit(Op::Unit);
-                true
+                Lowered::Empty
             }
 
             Stmt::Expr(expr) => {
                 self.expression(expr);
-                true
+                Lowered::Value
             }
 
             // Rhai gives a call standing alone as a statement its own node
@@ -1005,18 +1029,18 @@ impl Lowering {
             // A closure's `curry` lands here rather than in `Stmt::Expr`,
             // because Rhai gives a call standing alone as a statement its own
             // node.
-            Stmt::FnCall(call, pos) if self.fn_ptr_call(call, *pos) => true,
+            Stmt::FnCall(call, pos) if self.fn_ptr_call(call, *pos) => Lowered::Value,
 
             Stmt::FnCall(call, pos) if self.is_lowerable_call(call) => {
                 self.lower_call(call, *pos);
-                true
+                Lowered::Value
             }
 
             // Standing alone is the position `eval` is usually written in, and
             // Rhai gives it its own node — so this is the arm that catches it,
             // not the `Expr::FnCall` one. See there for why it defeats the
             // lowering rather than becoming a fragment.
-            Stmt::FnCall(call, ..) if call.name == crate::engine::KEYWORD_EVAL => false,
+            Stmt::FnCall(call, ..) if call.name == crate::engine::KEYWORD_EVAL => Lowered::Defeated,
 
             // `this` on the left. Ahead of the two variable arms because Rhai's
             // parser puts it there too (`parser.rs:2002`), and because the
@@ -1037,8 +1061,7 @@ impl Lowering {
                 let op = self.op_assignment(op_info);
 
                 self.emit_at(Op::AssignThis { op }, op_info.position());
-                self.emit(Op::Unit);
-                true
+                Lowered::Empty
             }
 
             // A plain local on the left.
@@ -1057,8 +1080,7 @@ impl Lowering {
                 let op = self.op_assignment(op_info);
 
                 self.emit_at(Op::AssignLocal { slot, var_name, op }, op_info.position());
-                self.emit(Op::Unit);
-                true
+                Lowered::Empty
             }
 
             // A variable no slot names — the caller's. Same shape as above,
@@ -1085,8 +1107,7 @@ impl Lowering {
                 // because the parser rejects a constant it can see; for a name
                 // the caller supplied they are the common failures.
                 self.emit_at(Op::AssignNamed { name, op }, binary.lhs.position());
-                self.emit(Op::Unit);
-                true
+                Lowered::Empty
             }
 
             // A chain on the left. The value goes on the stack after the
@@ -1113,9 +1134,10 @@ impl Lowering {
                         rewind_scope: true,
                     });
                 }
-                // The chain leaves unit, which is what an assignment evaluates
-                // to, so there is nothing to add here.
-                true
+                // [`Op::Chain`] leaves one value however it ends, and for an
+                // assigning tail that value is the unit the statement is — so
+                // this arm is a `Value` where the others are `Empty`.
+                Lowered::Value
             }
 
             // Emitted by the parser ahead of the `curry` call that binds a
@@ -1135,10 +1157,11 @@ impl Lowering {
                         }
                     }
                 }
-                self.emit(Op::Unit);
-                true
+                Lowered::Empty
             }
 
+            // One path in and one out, so the block's own answer is the
+            // statement's — nothing has to be equalized.
             Stmt::Block(block) => self.block(block.statements()),
 
             // `try { .. } catch (e) { .. }`.
@@ -1170,9 +1193,10 @@ impl Lowering {
                 );
                 self.handlers += 1;
 
-                if !self.block(body.statements()) {
-                    return false;
-                }
+                let lowered = match self.block(body.statements()) {
+                    Lowered::Defeated => return Lowered::Defeated,
+                    lowered => lowered,
+                };
                 self.emit(Op::PopHandler);
                 self.handlers -= 1;
                 let past = self.emit_jump();
@@ -1188,17 +1212,23 @@ impl Lowering {
                 if let Some(name) = catch_var {
                     self.slots.declare(name);
                 }
-                if !self.block(branch.statements()) {
-                    return false;
+                match self.block(branch.statements()) {
+                    Lowered::Defeated => return Lowered::Defeated,
+                    Lowered::Value => self.emit(Op::Pop),
+                    Lowered::Empty => {}
                 }
-                self.emit(Op::Pop);
                 self.unwind_to(depth);
                 self.emit(Op::PopHandler);
                 self.handlers -= 1;
-                self.emit(Op::Unit);
+                // Both paths meet at `past`, so the catch path has to leave the
+                // stack the same depth the try path did — and the try body is
+                // the one whose value the statement takes.
+                if let Lowered::Value = lowered {
+                    self.emit(Op::Unit);
+                }
 
                 self.patch_here(past);
-                true
+                lowered
             }
 
             // `for x in seq` / `for (x, i) in seq`.
@@ -1257,7 +1287,7 @@ impl Lowering {
 
                 self.begin_for(top, outside);
                 if !self.block_discarding(flow.body.statements()) {
-                    return false;
+                    return Lowered::Defeated;
                 }
                 self.emit(Op::Jump(top));
                 let breaks = self.end_loop();
@@ -1274,12 +1304,18 @@ impl Lowering {
                     self.patch_here(site);
                 }
                 self.patch_here(past);
-                true
+                Lowered::Value
             }
 
+            // Every arm is an expression and the default is a `Unit`, so a
+            // `switch` always leaves one.
             Stmt::Switch(payload, ..) => {
                 let (subject, cases) = &**payload;
-                self.switch(subject, cases)
+                if self.switch(subject, cases) {
+                    Lowered::Value
+                } else {
+                    Lowered::Defeated
+                }
             }
 
             Stmt::If(payload, ..) => {
@@ -1288,17 +1324,51 @@ impl Lowering {
                 self.expression(expr);
                 let to_else = self.emit_jump_if_false(expr.position());
 
-                if !self.block(body.statements()) {
-                    return false;
-                }
+                let then_branch = match self.block(body.statements()) {
+                    Lowered::Defeated => return Lowered::Defeated,
+                    lowered => lowered,
+                };
                 let past_else = self.emit_jump();
 
                 self.patch_here(to_else);
-                if !self.block(branch.statements()) {
-                    return false;
+                let else_branch = match self.block(branch.statements()) {
+                    Lowered::Defeated => return Lowered::Defeated,
+                    lowered => lowered,
+                };
+
+                // The two branches meet at the same address, so they have to
+                // arrive at the same depth. An `else` short of a value takes
+                // one straight after itself, being last; a `then` short of one
+                // needs a trailer past the `else`, and the jump around it is
+                // what that costs. Neither is reached by an `if` whose branches
+                // already agree, which is nearly all of them — including the
+                // `if` with no `else` at all, where the missing branch is an
+                // empty block and both sides are `Empty`.
+                match (then_branch, else_branch) {
+                    (Lowered::Value, Lowered::Empty) => {
+                        self.emit(Op::Unit);
+                        self.patch_here(past_else);
+                        Lowered::Value
+                    }
+                    (Lowered::Empty, Lowered::Value) => {
+                        let past_trailer = self.emit_jump();
+                        self.patch_here(past_else);
+                        self.emit(Op::Unit);
+                        self.patch_here(past_trailer);
+                        Lowered::Value
+                    }
+                    (Lowered::Value, Lowered::Value) => {
+                        self.patch_here(past_else);
+                        Lowered::Value
+                    }
+                    (Lowered::Empty, Lowered::Empty) => {
+                        self.patch_here(past_else);
+                        Lowered::Empty
+                    }
+                    (Lowered::Defeated, _) | (_, Lowered::Defeated) => {
+                        unreachable!("both branches returned above")
+                    }
                 }
-                self.patch_here(past_else);
-                true
             }
 
             // `loop` and `while true` are the same node: Rhai marks an
@@ -1320,7 +1390,7 @@ impl Lowering {
 
                 self.begin_loop(top);
                 if !self.block_discarding(body.statements()) {
-                    return false;
+                    return Lowered::Defeated;
                 }
                 self.emit(Op::Jump(top));
 
@@ -1336,7 +1406,7 @@ impl Lowering {
                     self.patch_here(site);
                 }
                 self.patch_here(past);
-                true
+                Lowered::Value
             }
 
             Stmt::Do(payload, flags, ..) => {
@@ -1348,7 +1418,7 @@ impl Lowering {
 
                 self.begin_loop(top);
                 if !self.block_discarding(body.statements()) {
-                    return false;
+                    return Lowered::Defeated;
                 }
                 let breaks = self.end_loop();
 
@@ -1369,7 +1439,7 @@ impl Lowering {
                     self.patch_here(site);
                 }
                 self.patch_here(past);
-                true
+                Lowered::Value
             }
 
             Stmt::BreakLoop(value, flags, ..) => {
@@ -1377,7 +1447,7 @@ impl Lowering {
                     // Outside any loop this is a parse error in Rhai, so it
                     // should be unreachable; bail rather than emit a jump to
                     // nowhere.
-                    return false;
+                    return Lowered::Defeated;
                 };
                 let continue_target = active.continue_target;
                 let loop_iters = active.iters;
@@ -1413,10 +1483,9 @@ impl Lowering {
                     self.emit(Op::Jump(continue_target));
                 }
 
-                // Unreachable, but every statement must leave a value for the
-                // caller's `Pop`, and the verifier checks depth on every path.
-                self.emit(Op::Unit);
-                true
+                // Control left with the jump above, so nothing here falls
+                // through to the caller.
+                Lowered::Empty
             }
 
             // `throw` shares this node, flagged, and unwinds as an error
@@ -1428,10 +1497,8 @@ impl Lowering {
                     None => self.emit(Op::Unit),
                 }
                 self.emit_at(Op::Throw, *pos);
-                // Unreachable, but every statement leaves a value for the
-                // caller's `Pop` and the verifier checks depth on every path.
-                self.emit(Op::Unit);
-                true
+                // The error unwinds from here, so nothing falls through.
+                Lowered::Empty
             }
 
             Stmt::Return(value, flags, ..) if !flags.contains(ASTFlags::BREAK) => {
@@ -1440,8 +1507,7 @@ impl Lowering {
                     None => self.emit(Op::Unit),
                 }
                 self.emit(Op::Return);
-                self.emit(Op::Unit);
-                true
+                Lowered::Empty
             }
 
             // The one statement the fragment fallback below cannot hold.
@@ -1455,7 +1521,7 @@ impl Lowering {
             #[cfg(not(feature = "no_module"))]
             Stmt::Import(..) => {
                 self.caps.insert(Caps::IMPORT);
-                false
+                Lowered::Defeated
             }
 
             // Not lowered yet, and listed rather than matched with `_` on
@@ -1478,7 +1544,7 @@ impl Lowering {
                     residual,
                     rewind_scope: true,
                 });
-                true
+                Lowered::Value
             }
 
             #[cfg(not(feature = "no_module"))]
@@ -1489,7 +1555,7 @@ impl Lowering {
                     residual,
                     rewind_scope: true,
                 });
-                true
+                Lowered::Value
             }
         }
     }
@@ -1673,7 +1739,7 @@ impl Lowering {
             // it with `restore_orig_state` set (`eval/expr.rs:434`), so it
             // rewinds what it declared — which is what `block` emits.
             Expr::Stmt(block) => {
-                if !self.block(block.statements()) {
+                if !self.block_value(block.statements()) {
                     self.defeated = true;
                 }
             }
@@ -2148,28 +2214,46 @@ impl Lowering {
         }
     }
 
-    /// Lower a block, leaving its value — the last statement's, or unit if
-    /// empty — on the stack, and dropping anything it declared.
-    fn block(&mut self, statements: &[Stmt]) -> bool {
+    /// Lower a block, leaving its value — the last statement's — on the stack,
+    /// and dropping anything it declared.
+    ///
+    /// `Empty` when that value is unit and no instruction pushed it: an empty
+    /// block, or one ending in a declaration or an assignment. Whoever reads the
+    /// block's value materializes the unit; whoever discards it does neither.
+    fn block(&mut self, statements: &[Stmt]) -> Lowered {
         let depth = self.slots.depth();
 
         let Some((last, leading)) = statements.split_last() else {
-            self.emit(Op::Unit);
-            return true;
+            return Lowered::Empty;
         };
 
         for stmt in leading {
-            if !self.statement(stmt) {
-                return false;
+            match self.statement(stmt) {
+                Lowered::Defeated => return Lowered::Defeated,
+                Lowered::Value => self.emit(Op::Pop),
+                Lowered::Empty => {}
             }
-            self.emit(Op::Pop);
         }
-        if !self.statement(last) {
-            return false;
-        }
+        let lowered = match self.statement(last) {
+            Lowered::Defeated => return Lowered::Defeated,
+            lowered => lowered,
+        };
 
         self.unwind_to(depth);
-        true
+        lowered
+    }
+
+    /// Lower a block whose value is read, materializing the unit an `Empty` one
+    /// stands for. Returns false if the slot model gave up.
+    fn block_value(&mut self, statements: &[Stmt]) -> bool {
+        match self.block(statements) {
+            Lowered::Defeated => false,
+            Lowered::Empty => {
+                self.emit(Op::Unit);
+                true
+            }
+            Lowered::Value => true,
+        }
     }
 
     /// Lower a block for its effects only, leaving nothing on the stack.
@@ -2177,11 +2261,14 @@ impl Lowering {
     /// Loop bodies discard their value: Rhai's loops yield unit or whatever a
     /// `break` supplied, never the body's last statement.
     fn block_discarding(&mut self, statements: &[Stmt]) -> bool {
-        if !self.block(statements) {
-            return false;
+        match self.block(statements) {
+            Lowered::Defeated => false,
+            Lowered::Value => {
+                self.emit(Op::Pop);
+                true
+            }
+            Lowered::Empty => true,
         }
-        self.emit(Op::Pop);
-        true
     }
 
     /// Emit the scope truncation for leaving a block, and unwind the
@@ -2577,6 +2664,31 @@ mod tests {
             order,
             [("alpha", 1), ("alpha", 2), ("mike", 0), ("zulu", 1)],
             "functions must be lowered by name and arity, not by hash",
+        );
+    }
+
+    /// A statement whose value is unit pushes nothing, so nothing has to pop it
+    /// either — [`Lowered::Empty`] is what says so, and an `if` whose branches
+    /// both say it passes it on.
+    ///
+    /// Every statement here is unit but the last, whose value the frame returns,
+    /// so the count is exact rather than a bound: one `Op::Unit` anywhere in
+    /// this program is one the caller then has to discard.
+    #[test]
+    fn a_statement_whose_value_is_unit_pushes_nothing() {
+        let engine = crate::Engine::new();
+        let ast = engine
+            .compile("let x = 1; x = 2; x += 3; if x > 0 { x = 4; } x")
+            .expect("must compile");
+        let program = Compiler::new().compile(&ast);
+
+        let stack_traffic: Vec<_> = crate::grain::bytecode::disassemble(program.code())
+            .filter(|(.., op)| matches!(op, Op::Unit | Op::Pop))
+            .collect();
+
+        assert!(
+            stack_traffic.is_empty(),
+            "effect-only statements must leave nothing to discard, found {stack_traffic:?}",
         );
     }
 

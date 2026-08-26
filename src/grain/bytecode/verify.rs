@@ -548,8 +548,8 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
 
         Op::StoreLocal { .. } | Op::DeclareLocal { .. } | Op::Pop => (1, 1, 0),
 
-        // Pops the value, leaves nothing: the statement's unit value is a
-        // separate `Op::Unit`.
+        // Pops the value, leaves nothing: an assignment's unit value is a
+        // separate `Op::Unit`, emitted only where something reads it.
         Op::AssignLocal { .. } | Op::AssignNamed { .. } | Op::AssignThis { .. } => (1, 1, 0),
 
         Op::JumpIfFalse { .. } | Op::JumpIfTrue { .. } | Op::Switch(..) => (1, 1, 0),
