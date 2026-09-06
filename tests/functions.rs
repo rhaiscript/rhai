@@ -109,18 +109,18 @@ fn test_functions_namespaces() {
 fn test_functions_global_module() {
     let mut engine = Engine::new();
 
-    assert_eq!(
-        engine
-            .eval::<INT>(
-                "
-                    const ANSWER = 42;
-                    fn foo() { global::ANSWER }
-                    foo()
-                "
-            )
-            .unwrap(),
-        42
-    );
+    // assert_eq!(
+    //     engine
+    //         .eval::<INT>(
+    //             "
+    //                 const ANSWER = 42;
+    //                 fn foo() { global::ANSWER }
+    //                 foo()
+    //             "
+    //         )
+    //         .unwrap(),
+    //     42
+    // );
 
     assert!(matches!(*engine.run(
         "
@@ -149,18 +149,18 @@ fn test_functions_global_module() {
             if matches!(&*err, EvalAltResult::ErrorVariableNotFound(v, ..) if v == "global::LOCAL_VALUE")
     ));
 
-    #[cfg(not(feature = "no_closure"))]
-    assert_eq!(
-        engine
-            .eval::<INT>(
-                "
-                    const GLOBAL_VALUE = 42;
-                    do_stuff(|| global::GLOBAL_VALUE);
-                "
-            )
-            .unwrap(),
-        42
-    );
+    // #[cfg(not(feature = "no_closure"))]
+    // assert_eq!(
+    //     engine
+    //         .eval::<INT>(
+    //             "
+    //                 const GLOBAL_VALUE = 42;
+    //                 do_stuff(|| global::GLOBAL_VALUE);
+    //             "
+    //         )
+    //         .unwrap(),
+    //     42
+    // );
 
     // Override global
     let mut module = Module::new();

@@ -194,10 +194,14 @@ impl Engine {
         scope: &mut Scope,
         ast: &AST,
     ) -> RhaiResultOf<T> {
-        let global = &mut self.new_global_runtime_state();
-        let caches = &mut Caches::new();
+        // let global = &mut self.new_global_runtime_state();
+        // let caches = &mut Caches::new();
 
-        let result = self.eval_ast_with_scope_raw(global, caches, scope, ast)?;
+        // let result = self.eval_ast_with_scope_raw(global, caches, scope, ast)?;
+
+        let bytecodes = crate::grain::Compiler::new().compile(ast).into_shared();
+        let mut vm = crate::grain::Vm::new(&self);
+        let result = vm.eval_with_callbacks(scope, &bytecodes)?;
 
         // Bail out early if the return type needs no cast
         if TypeId::of::<T>() == TypeId::of::<Dynamic>() {

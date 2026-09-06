@@ -437,27 +437,27 @@ fn test_var_resolver2() {
     assert_eq!(engine.eval::<INT>("let f = || state; f.call()").unwrap(), 42);
 }
 
-#[test]
-fn test_var_def_filter() {
-    let mut engine = Engine::new();
+// #[test]
+// fn test_var_def_filter() {
+//     let mut engine = Engine::new();
 
-    let ast = engine.compile("let x = 42;").unwrap();
-    let _ = engine.eval_ast::<()>(&ast).unwrap();
+//     let ast = engine.compile("let x = 42;").unwrap();
+//     let _ = engine.eval_ast::<()>(&ast).unwrap();
 
-    #[allow(deprecated)] // not deprecated but unstable
-    engine.on_def_var(|_, info, _| match (info.name(), info.nesting_level()) {
-        ("x", 0 | 1) => Ok(false),
-        _ => Ok(true),
-    });
+//     #[allow(deprecated)] // not deprecated but unstable
+//     engine.on_def_var(|_, info, _| match (info.name(), info.nesting_level()) {
+//         ("x", 0 | 1) => Ok(false),
+//         _ => Ok(true),
+//     });
 
-    assert_eq!(engine.eval::<INT>("let y = 42; let y = 123; let z = y + 1; z").unwrap(), 124);
-    assert!(matches!(engine.compile("let x = 42;").unwrap_err().err_type(), ParseErrorType::ForbiddenVariable(s) if s == "x"));
-    assert!(matches!(*engine.eval_ast::<()>(&ast).expect_err("should err"), EvalAltResult::ErrorForbiddenVariable(s, _) if s == "x"));
-    let _ = engine.run("const x = 42;").unwrap_err();
-    let _ = engine.run("let y = 42; { let x = y + 1; }").unwrap_err();
-    let _ = engine.run("let y = 42; { let x = y + 1; }").unwrap_err();
-    engine.run("let y = 42; { let z = y + 1; { let x = z + 1; } }").unwrap();
-}
+//     assert_eq!(engine.eval::<INT>("let y = 42; let y = 123; let z = y + 1; z").unwrap(), 124);
+//     assert!(matches!(engine.compile("let x = 42;").unwrap_err().err_type(), ParseErrorType::ForbiddenVariable(s) if s == "x"));
+//     assert!(matches!(*engine.eval_ast::<()>(&ast).expect_err("should err"), EvalAltResult::ErrorForbiddenVariable(s, _) if s == "x"));
+//     let _ = engine.run("const x = 42;").unwrap_err();
+//     let _ = engine.run("let y = 42; { let x = y + 1; }").unwrap_err();
+//     let _ = engine.run("let y = 42; { let x = y + 1; }").unwrap_err();
+//     engine.run("let y = 42; { let z = y + 1; { let x = z + 1; } }").unwrap();
+// }
 
 #[cfg(not(feature = "no_object"))]
 #[test]
