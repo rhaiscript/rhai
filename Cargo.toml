@@ -107,7 +107,7 @@ no_ast = ["no_optimize", "no_custom_syntax"]
 
 #! ### Performance-Related Features
 
-## Disable all safety checks.
+## It is OK to panic - disable all safety checks.
 unchecked = []
 ## Do not track position when parsing.
 no_position = []
