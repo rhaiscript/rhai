@@ -1093,11 +1093,13 @@ impl<'e> Vm<'e> {
     ) -> VmResult {
         // Step operands were pushed first, then the root if it is one that has
         // to be evaluated, then the value being assigned.
-        let operands_at = self
+        let frame_pointer = self
             .stack
             .len()
             .checked_sub(chain.consumes())
             .ok_or_else(|| malformed("chain with too few operands".to_string()))?;
+
+        let operands_at = frame_pointer + usize::from(chain.assigns());
 
         let ChainRoot {
             value: mut root,
@@ -1131,7 +1133,7 @@ impl<'e> Vm<'e> {
             }),
             // Rhai flattens the right-hand side before assigning, so a shared
             // cell is copied out rather than aliased in.
-            (true, _) => Ok(Some(self.stack[self.stack.len() - 1].clone().flatten())),
+            (true, _) => Ok(Some(self.stack[frame_pointer].take().flatten())),
         };
 
         let result = value.and_then(|value| {
@@ -1187,7 +1189,7 @@ impl<'e> Vm<'e> {
         }
 
         let (out, _) = result?;
-        self.stack.truncate(operands_at);
+        self.stack.truncate(frame_pointer);
         Ok(out)
     }
 
@@ -2977,7 +2979,11 @@ impl<'e> Vm<'e> {
                 .get_mut(slot)
                 .ok_or_else(|| malformed("call with too few arguments".to_string()))?
                 .take();
-            scope.push_dynamic(name, value);
+            scope.push_entry(
+                self.strings_interner.get(name),
+                AccessMode::ReadWrite,
+                value,
+            );
         }
         let scope_end_len = scope.len();
 
@@ -3444,7 +3450,11 @@ impl<'e> Vm<'e> {
                     program.position(target),
                 )));
             }
-            scope.push_dynamic(name, value);
+            scope.push_entry(
+                self.strings_interner.get(name),
+                AccessMode::ReadWrite,
+                value,
+            );
         }
 
         self.handlers.last_mut().expect("checked").caught = Some(err);
@@ -3701,11 +3711,15 @@ impl<'e> Vm<'e> {
                         return Err(EvalAltResult::ErrorTooManyVariables(pos()).into());
                     }
 
-                    if tag == code::tag::DECLARE_CONST {
-                        scope.push_constant_dynamic(name, value);
-                    } else {
-                        scope.push_dynamic(name, value);
-                    }
+                    scope.push_entry(
+                        self.strings_interner.get(name),
+                        if tag == code::tag::DECLARE_CONST {
+                            AccessMode::ReadOnly
+                        } else {
+                            AccessMode::ReadWrite
+                        },
+                        value,
+                    );
                 }
 
                 code::tag::ASSIGN_LOCAL | code::tag::ASSIGN_LOCAL_OP => {

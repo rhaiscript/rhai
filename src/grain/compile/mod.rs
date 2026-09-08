@@ -430,34 +430,12 @@ impl Lowering {
         // the root and steps.
 
         let rewind_mark = self.mark();
-        let unwind_depth = self.slots.depth();
 
-        let value_slot = if let Some(value) = value {
-            if self.slots.is_full() {
-                return false;
-            }
-
-            let value_name = ImmutableString::from("$CHAIN_SET_VALUE$");
-            let value_name_index = self.push_name(value_name.clone());
-            let value_slot = self.slots.declare(value_name);
-
+        if let Some(value) = value {
             // First evaluate the assigned value first, stash it so the chain
             // can read it back after the lvalue steps have been resolved.
-            self.emit(Op::Unit);
-            self.emit(Op::DeclareLocal {
-                name: value_name_index,
-                is_const: false,
-            });
             self.expression(value);
-            self.emit(Op::StoreLocal {
-                slot: value_slot,
-                is_const: false,
-            });
-
-            Some(value_slot)
-        } else {
-            None
-        };
+        }
 
         // Index values and method arguments are evaluated first, in step
         // order, exactly as Rhai collects them before walking
@@ -493,16 +471,14 @@ impl Lowering {
                 ChainStep::Method(call, pos, flags) => {
                     self.caps.insert(Caps::METHOD);
                     if !self.is_lowerable_call(call) {
-                        if value_slot.is_some() {
+                        if value.is_some() {
                             self.rewind(rewind_mark);
-                            self.slots.unwind_to(unwind_depth);
                         }
                         return false;
                     }
                     let Ok(argc) = u8::try_from(call.args.len()) else {
-                        if value_slot.is_some() {
+                        if value.is_some() {
                             self.rewind(rewind_mark);
-                            self.slots.unwind_to(unwind_depth);
                         }
                         return false;
                     };
@@ -529,10 +505,6 @@ impl Lowering {
             self.expression(root);
         }
 
-        if let Some(value_slot) = value_slot {
-            self.emit(Op::LoadLocal(value_slot));
-        }
-
         let index = self.push_chain(Chain {
             root: root_spec,
             steps: lowered,
@@ -540,7 +512,6 @@ impl Lowering {
             operands,
         });
         self.emit_at(Op::Chain(index), expr.position());
-        self.unwind_to(unwind_depth);
         true
     }
 
