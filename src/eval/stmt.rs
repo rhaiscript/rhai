@@ -709,11 +709,16 @@ impl Engine {
 
                 // Add the loop variables
                 let counter_index = counter.as_ref().map(|counter| {
-                    scope.push(counter.name.clone(), 0 as INT);
+                    let name = self.get_interned_string(&counter.name);
+                    scope.push_entry(name, AccessMode::ReadWrite, Dynamic::ZERO);
                     scope.len() - 1
                 });
 
-                scope.push(var_name.name.clone(), ());
+                scope.push_entry(
+                    self.get_interned_string(&var_name.name),
+                    AccessMode::ReadWrite,
+                    Dynamic::UNIT,
+                );
                 let index = scope.len() - 1;
 
                 let mut result = Dynamic::UNIT;
@@ -855,7 +860,7 @@ impl Engine {
                             if scope.len() >= self.max_variables() {
                                 return Err(ERR::ErrorTooManyVariables(catch_var.position()).into());
                             }
-                            scope.push(x.1.clone(), err_value);
+                            scope.push_entry(x.1.clone(), AccessMode::ReadWrite, err_value);
                         }
 
                         let this_ptr = this_ptr.as_deref_mut();
