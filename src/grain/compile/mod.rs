@@ -562,9 +562,6 @@ impl Lowering {
             return false;
         }
         let unwind_depth = self.slots.depth();
-        let value_name = ImmutableString::from("$SWITCH_VALUE$");
-        let value_name_index = self.push_name(value_name.clone());
-        let value_slot = self.slots.declare(value_name);
 
         // Overlapping range arms have no single answer at runtime, so they are
         // cut into disjoint pieces here instead. See [`cases::split`].
@@ -572,13 +569,22 @@ impl Lowering {
 
         self.expression(subject);
 
-        // Store the subject's value because if all the arms decline,
-        // the ranges still needs it.
-        self.emit(Op::DeclareLocal {
-            name: value_name_index,
-            is_const: false,
-        });
-        self.emit(Op::LoadLocal(value_slot));
+        let value_slot = if !ranges.is_empty() {
+            let value_name = ImmutableString::from("$SWITCH_VALUE$");
+            let value_name_index = self.push_name(value_name.clone());
+            let value_slot = self.slots.declare(value_name);
+
+            // Store the subject's value because if all the arms decline,
+            // the ranges still needs it.
+            self.emit(Op::DeclareLocal {
+                name: value_name_index,
+                is_const: false,
+            });
+            self.emit(Op::LoadLocal(value_slot));
+            value_slot
+        } else {
+            0
+        };
 
         // The first table is for the hashed case values.
         let cases_table = self.push_switch();
@@ -589,7 +595,6 @@ impl Lowering {
         let mut case_chains: Vec<(&[usize], Entry)> = Vec::new();
         let mut to_body: Vec<(usize, usize)> = Vec::new();
         let mut to_ranges: Vec<usize> = Vec::new();
-        let mut to_default: Vec<usize> = Vec::new();
 
         for blocks in sw.cases.values().map(|case| case.blocks.as_slice()) {
             if case_chains.iter().any(|(ex, ..)| *ex == blocks) {
@@ -605,23 +610,32 @@ impl Lowering {
         // The last chain to decline arrives here by falling off its own end, so
         // it needs no jump to say so.
         self.drop_idle_jump(&mut to_ranges);
-        let ranges_dispatch = self.here();
-        self.emit(Op::LoadLocal(value_slot));
 
-        // The second table is for the ranges.
-        let ranges_table = self.push_switch();
-        self.emit(Op::Switch(ranges_table));
+        let ranges_dispatch = self.here();
+        let mut to_default: Vec<usize> = Vec::new();
 
         // One chain per distinct list of ranges, shared by every table entry
         let mut range_chains: Vec<(&[usize], Entry)> = Vec::new();
 
-        for blocks in ranges.iter().map(|(.., blocks)| blocks.as_slice()) {
-            if range_chains.iter().any(|(ex, ..)| *ex == blocks) {
-                continue;
+        let ranges_table = if !ranges.is_empty() {
+            self.emit(Op::LoadLocal(value_slot));
+
+            // The second table is for the ranges.
+            let ranges_table = self.push_switch();
+            self.emit(Op::Switch(ranges_table));
+
+            for blocks in ranges.iter().map(|(.., blocks)| blocks.as_slice()) {
+                if range_chains.iter().any(|(ex, ..)| *ex == blocks) {
+                    continue;
+                }
+                let entry = self.arm_chain(sw, blocks, &mut to_body, &mut to_default);
+                range_chains.push((blocks, entry));
             }
-            let entry = self.arm_chain(sw, blocks, &mut to_body, &mut to_default);
-            range_chains.push((blocks, entry));
-        }
+
+            ranges_table
+        } else {
+            0
+        };
 
         // Bodies, one per arm something can reach. An arm behind a constant
         // false guard, or one whose range the parser dropped for being empty,
@@ -683,8 +697,14 @@ impl Lowering {
         for site in to_end {
             self.patch_to(site, unwind_at);
         }
-        for site in to_ranges {
-            self.patch_to(site, ranges_dispatch);
+        if ranges.is_empty() {
+            for site in to_ranges {
+                self.patch_to(site, default_at);
+            }
+        } else {
+            for site in to_ranges {
+                self.patch_to(site, ranges_dispatch);
+            }
         }
         for site in to_default {
             self.patch_to(site, default_at);
@@ -699,23 +719,17 @@ impl Lowering {
                 .find(|(ex, ..)| *ex == blocks)
                 .map(|(.., entry)| *entry)
                 .expect("every list got a chain above");
-            match entry {
-                Entry::Body(block) => at(block),
-                Entry::At(target) => target,
-                Entry::Default => ranges_dispatch,
-            }
-        };
 
-        let range_target = |blocks: &[usize]| {
-            let entry = range_chains
-                .iter()
-                .find(|(ex, ..)| *ex == blocks)
-                .map(|(.., entry)| *entry)
-                .expect("every list got a chain above");
             match entry {
                 Entry::Body(block) => at(block),
                 Entry::At(target) => target,
-                Entry::Default => default_at,
+                Entry::Default => {
+                    if ranges.is_empty() {
+                        default_at
+                    } else {
+                        ranges_dispatch
+                    }
+                }
             }
         };
 
@@ -735,19 +749,40 @@ impl Lowering {
                     .collect(),
             ),
             ranges: Vec::new(),
-            default: ranges_dispatch,
+            default: if ranges.is_empty() {
+                default_at
+            } else {
+                ranges_dispatch
+            },
         };
-        self.switches[ranges_table as usize] = Switch {
-            cases: None,
-            ranges: ranges
-                .iter()
-                .map(|(range, blocks)| SwitchRange {
-                    target: range_target(blocks),
-                    ..*range
-                })
-                .collect(),
-            default: default_at,
-        };
+
+        if !ranges.is_empty() {
+            let range_target = |blocks: &[usize]| {
+                let entry = range_chains
+                    .iter()
+                    .find(|(ex, ..)| *ex == blocks)
+                    .map(|(.., entry)| *entry)
+                    .expect("every list got a chain above");
+
+                match entry {
+                    Entry::Body(block) => at(block),
+                    Entry::At(target) => target,
+                    Entry::Default => default_at,
+                }
+            };
+
+            self.switches[ranges_table as usize] = Switch {
+                cases: None,
+                ranges: ranges
+                    .iter()
+                    .map(|(range, blocks)| SwitchRange {
+                        target: range_target(blocks),
+                        ..*range
+                    })
+                    .collect(),
+                default: default_at,
+            };
+        }
 
         true
     }
