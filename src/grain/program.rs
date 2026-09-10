@@ -52,6 +52,22 @@ pub struct Function {
     pub chunk: Chunk,
 }
 
+impl Function {
+    pub fn disassemble(&self, program: &Program) -> String {
+        format!(
+            "{}{}{}({})",
+            self.this_type.map_or("", |t| program.name(t).unwrap()),
+            if self.this_type.is_some() { "!" } else { "" },
+            program.name(self.name).unwrap(),
+            self.params
+                .iter()
+                .map(|&p| program.name(p).unwrap())
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    }
+}
+
 /// A compiled script, ready to run against an `Engine`.
 ///
 /// Owns everything execution needs that is not the `Engine` itself, so the

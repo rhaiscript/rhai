@@ -1,4 +1,5 @@
 use crate::func::{calc_switch_value_hash, StraightHashMap};
+use crate::grain::Program;
 use crate::{eval::RangeCase, Dynamic, INT};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -25,6 +26,26 @@ pub struct Switch {
     pub default: u32,
 }
 
+impl Switch {
+    /// Dump the disassembly of the operation.
+    pub fn disassemble(&self, program: &Program) -> String {
+        format!(
+            "{{ {} }}",
+            self.cases
+                .iter()
+                .flat_map(|cases| cases.iter())
+                .map(|(_, (target, value))| format!(
+                    "case {} => {target}",
+                    program.constant(*value).unwrap()
+                ))
+                .chain(self.ranges.iter().map(|r| r.disassemble()))
+                .chain(std::iter::once(format!("default => {}", self.default)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
 /// One `a..b => ...` arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchRange {
@@ -39,8 +60,18 @@ pub struct SwitchRange {
 }
 
 impl SwitchRange {
-    /// Whether a subject falls in this range.
-    ///
+    /// Dump the disassembly of the switch range.
+    pub fn disassemble(&self) -> String {
+        if self.inclusive {
+            format!("range {}..={} => {}", self.from, self.to, self.target)
+        } else {
+            format!("range {}..{} => {}", self.from, self.to, self.target)
+        }
+    }
+}
+
+impl SwitchRange {
+    /// Whether a subject falls in this range.    ///
     /// Delegates to Rhai's own `RangeCase` rather than comparing integers,
     /// because a range arm matches more than integers: `switch 5.5 { 0..10 =>
     /// .. }` matches, and under the `decimal` feature so does a `Decimal`

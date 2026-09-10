@@ -1,7 +1,9 @@
-#[cfg(feature = "no_std")]
-use std::prelude::v1::*;
+use crate::grain::Program;
 
 use bitflags::bitflags;
+
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 bitflags! {
     /// Per-step flags for a chain.
@@ -108,6 +110,57 @@ impl Step {
             Step::Property { .. } | Step::Method { .. } => 1,
         }
     }
+
+    /// Dump the disassembly of the step.
+    pub fn disassemble(&self, program: &Program) -> String {
+        match self {
+            Step::Index { operand, flags, .. } => {
+                format!(
+                    "{}[{operand}]",
+                    if flags.contains(StepFlags::SKIP_IF_UNIT) {
+                        "?"
+                    } else {
+                        ""
+                    }
+                )
+            }
+            Step::Property { name, flags, .. } => {
+                format!(
+                    ".{}{}",
+                    if flags.contains(StepFlags::SKIP_IF_UNIT) {
+                        "?"
+                    } else {
+                        ""
+                    },
+                    program.name(*name).unwrap()
+                )
+            }
+            Step::Method {
+                name,
+                argc,
+                operand,
+                flags,
+                ..
+            } if *argc > 0 => format!(
+                ".{}{}({argc} args from {operand})",
+                if flags.contains(StepFlags::SKIP_IF_UNIT) {
+                    "?"
+                } else {
+                    ""
+                },
+                program.name(*name).unwrap()
+            ),
+            Step::Method { name, flags, .. } => format!(
+                ".{}{}()",
+                if flags.contains(StepFlags::SKIP_IF_UNIT) {
+                    "?"
+                } else {
+                    ""
+                },
+                program.name(*name).unwrap()
+            ),
+        }
+    }
 }
 
 /// What a chain does when it gets to the end.
@@ -121,6 +174,19 @@ pub enum Tail {
         /// Index into the op-assignment pool; absent for a plain `=`.
         op: Option<u32>,
     },
+}
+
+impl Tail {
+    /// Dump the disassembly of the tail.
+    pub fn disassemble(&self, program: &Program) -> String {
+        match self {
+            Tail::Read => String::new(),
+            Tail::Assign { op } => match op {
+                Some(op) => format!("{}", program.assign_op(*op).unwrap().disassemble(program)),
+                None => "=".to_string(),
+            },
+        }
+    }
 }
 
 /// Where a chain starts.
@@ -332,5 +398,24 @@ impl Chain {
                 .steps
                 .iter()
                 .any(|step| matches!(step, Step::Method { .. }))
+    }
+
+    /// Dump the disassembly of the entire chain.
+    pub fn disassemble(&self, program: &Program) -> String {
+        format!(
+            "{:?} {} {} {}",
+            self.root,
+            match self.root {
+                Root::Named { name, .. } | Root::Local { name, .. } => program.name(name).unwrap(),
+                Root::This { .. } => "this",
+                Root::Temporary => "<temp value>",
+            },
+            self.steps
+                .iter()
+                .map(|step| step.disassemble(program))
+                .collect::<Vec<_>>()
+                .join(" "),
+            self.tail.disassemble(program)
+        )
     }
 }

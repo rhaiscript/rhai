@@ -1,4 +1,7 @@
+use crate::grain::Program;
 use crate::types::Token;
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 /// What `x op= y` needs to reproduce Rhai's resolution order.
 ///
@@ -20,6 +23,19 @@ pub struct AssignOp {
     pub op: Token,
     /// `"+"`.
     pub op_name: u32,
+}
+
+impl AssignOp {
+    /// Dump the disassembly of the operation.
+    pub fn disassemble(&self, program: &Program) -> String {
+        format!(
+            "{} ({:?}) / {} ({:?})",
+            program.name(self.op_assign_name).unwrap(),
+            self.op_assign,
+            program.name(self.op_name).unwrap(),
+            self.op,
+        )
+    }
 }
 
 /// Where [`Op::CallRef`] finds the variable it calls through.
@@ -642,4 +658,80 @@ pub enum Op {
 
     /// End the chunk, yielding the top of the operand stack, or unit if empty.
     Return,
+}
+
+impl Op {
+    /// Dump the disassembly of the operation.
+    pub fn disassemble(&self, program: &Program) -> String {
+        match self {
+            Op::Const(idx) => format!("{self:?} = {}", program.constant(*idx).unwrap()),
+            Op::LoadNamed(name) => format!("{self:?} : {}", program.name(*name).unwrap()),
+            Op::AssignNamed { name, op } => {
+                if let Some(op) = op {
+                    format!(
+                        "{self:?} : {} {}",
+                        program.name(*name).unwrap(),
+                        program.assign_op(*op).unwrap().disassemble(program)
+                    )
+                } else {
+                    format!("{self:?} : {}", program.name(*name).unwrap(),)
+                }
+            }
+
+            Op::AssignLocal { var_name, op, .. } => {
+                if let Some(op) = op {
+                    format!(
+                        "{self:?} : {} {}",
+                        program.name(*var_name).unwrap(),
+                        program.assign_op(*op).unwrap().disassemble(program)
+                    )
+                } else {
+                    format!("{self:?} : {}", program.name(*var_name).unwrap(),)
+                }
+            }
+            Op::DeclareLocal { name, is_const } => {
+                format!(
+                    "{self:?} : {} {}",
+                    if *is_const { "const" } else { "let" },
+                    program.name(*name).unwrap()
+                )
+            }
+            Op::Call { name, op, .. } => {
+                if let Some(op) = op {
+                    format!(
+                        "{self:?} : {} ({:?})",
+                        program.name(*name).unwrap(),
+                        program.token(*op).unwrap()
+                    )
+                } else {
+                    format!("{self:?} : {}", program.name(*name).unwrap(),)
+                }
+            }
+
+            Op::CallRef { name, .. } => format!("{self:?} : {}", program.name(*name).unwrap(),),
+            Op::Switch(idx) => format!(
+                "Switch({idx}) {}",
+                program.switch(*idx).unwrap().disassemble(program),
+            ),
+            Op::ShareNamed(name) => format!("{self:?} : {}", program.name(*name).unwrap()),
+            Op::LoadSharedNamed(name) => format!("{self:?} : {}", program.name(*name).unwrap()),
+            Op::AssignThis { op, .. } if op.is_some() => {
+                format!(
+                    "{self:?} : this {:?}",
+                    program.assign_op(op.unwrap()).unwrap().disassemble(program)
+                )
+            }
+            Op::MakeClosure(name) => format!("{self:?} : {}", program.name(*name).unwrap(),),
+            Op::Chain(idx) => {
+                let chain = program.chain(*idx).unwrap();
+                format!(
+                    "Chain({idx}, {} total operands): {}",
+                    chain.operands,
+                    chain.disassemble(program),
+                )
+            }
+
+            _ => format!("{self:?}"),
+        }
+    }
 }
