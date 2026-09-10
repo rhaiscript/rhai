@@ -2496,19 +2496,19 @@ fn parse_identifier_token(
 /// Exported under the `internals` feature only.
 #[must_use]
 pub fn is_valid_identifier(name: &str) -> bool {
-    let mut iter = name.chars();
+    let mut first_alphabetic = false;
 
-    if !iter.next().map(is_id_first_alphabetic).unwrap_or(false) {
-        return false;
-    }
-
-    while let Some(ch) = iter.next() {
-        if !is_id_continue(ch) {
-            return false;
+    for ch in name.chars() {
+        match ch {
+            '_' => (),
+            _ if is_id_first_alphabetic(ch) => first_alphabetic = true,
+            _ if !first_alphabetic => return false,
+            _ if is_id_continue(ch) => (),
+            _ => return false,
         }
     }
 
-    true
+    first_alphabetic
 }
 
 /// _(internals)_ Is a text string a valid script-defined function name?

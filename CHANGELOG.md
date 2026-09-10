@@ -1,6 +1,12 @@
 Rhai Release Notes
 ==================
 
+Version 1.26.1
+==============
+
+This is a maintenance release to fix a bug in the tokenizer that disallows valid variable names like `_i` (thanks [`@dtolnay`](https://github.com/dtolnay) [`#1167`](https://github.com/rhaiscript/rhai/pull/1167)).
+
+
 Version 1.26.0
 ==============
 

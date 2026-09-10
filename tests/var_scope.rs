@@ -1,4 +1,4 @@
-use rhai::{Dynamic, Engine, EvalAltResult, Module, ParseErrorType, Position, Scope, INT};
+use rhai::{Dynamic, Engine, EvalAltResult, LexError, Module, ParseErrorType, Position, Scope, INT};
 
 #[test]
 fn test_var_scope() {
@@ -76,6 +76,21 @@ fn test_var_scope() {
 
     assert_eq!(scope2.is_constant("x"), Some(true));
     assert_eq!(scope3.is_constant("x"), Some(true));
+}
+
+#[test]
+fn test_var_names() {
+    let engine = Engine::new();
+    let mut scope = Scope::new();
+
+    engine.eval_with_scope::<()>(&mut scope, "let abc___123;").unwrap();
+    engine.eval_with_scope::<()>(&mut scope, "let _____abc123;").unwrap();
+
+    assert!(matches!(
+        *engine.eval_with_scope::<()>(&mut scope, "let _____123abc;").unwrap_err(),
+        EvalAltResult::ErrorParsing(ParseErrorType::BadInput(LexError::MalformedIdentifier(..)), ..)
+    ));
+    assert!(engine.eval_with_scope::<()>(&mut scope, "let 123_abc;").is_err());
 }
 
 #[cfg(not(feature = "unchecked"))]
