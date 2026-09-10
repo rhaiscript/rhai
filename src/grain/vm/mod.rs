@@ -1785,41 +1785,43 @@ impl<'e> Vm<'e> {
             .name(name)
             .ok_or_else(|| malformed(format!("no name {name}")))?;
 
-        // A map is the one property holder that is not a host type, and
-        // `no_object` removes both it and the syntax that would reach one.
+        // Properties on maps and indexed values share the same reference path.
+        // Besides avoiding a copy for nested walks, this applies map callbacks
+        // and strict missing-property handling consistently with `[index]`.
         #[cfg(not(feature = "no_object"))]
         if target.is_map() {
-            let mut map = target
-                .write_lock::<Map>()
-                .ok_or_else(|| malformed("a map that is not a map".to_string()))?;
+            let mut detached = Scope::new();
+            let mut index = self.strings_interner.get(key).into();
+            let assigning = last && value.is_some();
 
-            // Only a write creates a key. Rhai passes `add_if_not_found` for
-            // an assignment (`eval/chaining.rs:930`) and withholds it for a
-            // read (`:959`) and for a step on the way through (`:1086`), so
-            // reading `m.absent` must leave `m` alone — otherwise a closure
-            // holding the map sees a key nobody wrote.
+            let mut item = self.engine.get_indexed_mut(
+                &mut self.global,
+                &mut self.caches,
+                &mut detached,
+                None,
+                target,
+                &mut index,
+                step_pos,
+                step_pos,
+                assigning,
+                false,
+            )?;
+
+            let target = item.as_mut();
+
             if last {
                 if let Some(value) = value {
-                    let entry = map.entry(key.into()).or_insert(Dynamic::UNIT);
-                    self.store(program, chain_op(program, chain)?, entry, value, pos)?;
+                    self.store(program, chain_op(program, chain)?, target, value, pos)?;
+                    item.propagate_changed_value(pos)?;
                     return Ok((Dynamic::UNIT, true));
                 }
-                return match map.get(key) {
-                    Some(entry) => Ok((entry.clone(), false)),
-                    None => self.absent_key(key, step_pos).map(|unit| (unit, false)),
-                };
+                return Ok((item.take_or_clone(), false));
+            } else {
+                let (out, changed) =
+                    self.walk_chain(program, chain, rest, target, operands, value, pos)?;
+                item.propagate_changed_value(pos)?;
+                return Ok((out, changed));
             }
-
-            return match map.get_mut(key) {
-                Some(entry) => self.walk_chain(program, chain, rest, entry, operands, value, pos),
-                // Rhai walks on into a detached unit, so whatever the rest of
-                // the chain does to it is discarded (`eval/chaining.rs:211`).
-                None => {
-                    let mut absent = self.absent_key(key, step_pos)?;
-                    drop(map);
-                    self.walk_chain(program, chain, rest, &mut absent, operands, value, pos)
-                }
-            };
         }
 
         // A host type: getter in, setter out.
@@ -3247,23 +3249,6 @@ impl<'e> Vm<'e> {
             actual.into(),
             pos,
         ))
-    }
-
-    /// What reading a key a map does not have produces.
-    ///
-    /// Unit, unless the host asked for the strict reading — which is a whole
-    /// engine option (`fail_on_invalid_map_property`) rather than anything the
-    /// script says, so it has to be consulted rather than assumed.
-    #[cfg(not(feature = "no_object"))]
-    fn absent_key(&self, key: &str, pos: Position) -> VmResult {
-        if self.engine.fail_on_invalid_map_property() {
-            Err(Box::new(EvalAltResult::ErrorPropertyNotFound(
-                key.to_string(),
-                pos,
-            )))
-        } else {
-            Ok(Dynamic::UNIT)
-        }
     }
 
     /// Fold the element on top of the stack into the literal's running total,

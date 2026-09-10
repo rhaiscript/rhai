@@ -65,7 +65,6 @@ impl Engine {
                     Err(err) => {
                         #[cfg(not(feature = "no_index"))]
                         #[cfg(feature = "internals")]
-                        #[cfg(not(feature = "no_ast"))]
                         if let Some(ref cb) = self.invalid_array_index {
                             let context =
                                 super::EvalContext::new(self, global, caches, _scope, _this_ptr);
@@ -107,7 +106,6 @@ impl Engine {
 
                 #[cfg(not(feature = "no_object"))]
                 #[cfg(feature = "internals")]
-                #[cfg(not(feature = "no_ast"))]
                 if let Some(ref cb) = self.missing_map_property {
                     if !map.contains_key(index.as_str()) {
                         let context =

@@ -10,6 +10,7 @@ Bug fixes
 * Fixed bug in using bare function name as a variable (identified by Grain VM).
 * Support bare function names as variables in Rhai Grain ([`#1158`](https://github.com/rhaiscript/rhai/pull/1158)).
 * (Fuzzing) Fixed missing data-race condition in native function callbacks ([`#1161`](https://github.com/rhaiscript/rhai/pull/1161)).
+* The `Engine::on_map_missing_property` callback now works properly with Rhai Grain ([`#1164`](https://github.com/rhaiscript/rhai/pull/1164)).
 
 New features
 ------------
