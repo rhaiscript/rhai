@@ -1,4 +1,6 @@
 use crate::types::Token;
+#[cfg(feature = "no_std")]
+use std::prelude::v1::*;
 
 /// What `x op= y` needs to reproduce Rhai's resolution order.
 ///
