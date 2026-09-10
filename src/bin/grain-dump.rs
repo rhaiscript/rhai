@@ -18,7 +18,7 @@ fn dump(program: &Program, code: &[u8], name: &str, chunk: &rhai::grain::bytecod
             (Some(line), Some(col)) => format!("{line}:{col}"),
             _ => String::new(),
         };
-        println!("  {at:>5}  {:<8}  {op:?}", where_);
+        println!("  {at:>5}  {where_:<8}  {}", op.disassemble(program));
     }
 }
 
@@ -35,7 +35,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dump(&program, code, "main", program.main());
 
     for f in program.functions() {
-        let label = format!("fn #{} ({} params)", f.name, f.params.len());
+        let label = format!(
+            "fn {} : #{} ({} params)",
+            f.disassemble(&program),
+            f.name,
+            f.params.len(),
+        );
         dump(&program, code, &label, &f.chunk);
     }
 
