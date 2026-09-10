@@ -3,7 +3,7 @@ members = [".", "codegen", "codegen/tests/custom_root"]
 
 [package]
 name = "rhai"
-version = "1.26.0"
+version = "1.26.1"
 rust-version = "1.66.0"
 edition = "2021"
 resolver = "2"
