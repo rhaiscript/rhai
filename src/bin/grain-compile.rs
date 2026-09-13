@@ -10,12 +10,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let path = std::env::args()
             .nth(1)
-            .ok_or("usage: grain-compile <script.rhai> <output.rgrn>")?;
+            .ok_or("usage: grain-compile <script.rhai> [<output.rgrn>]")?;
         let source = std::fs::read_to_string(&path)?;
 
-        let path = std::env::args()
-            .nth(2)
-            .ok_or("usage: grain-compile <script.rhai> <output.rgrn>")?;
+        let path = std::env::args().nth(2).unwrap_or_else(|| {
+            let mut path = std::path::PathBuf::from(path);
+            path.set_extension("rgrn");
+            path.to_string_lossy().into_owned()
+        });
 
         let engine = Engine::new();
         let ast = engine.compile(&source)?;
