@@ -1,7 +1,18 @@
 //! Module defining external-loaded modules for Rhai.
 
+mod namespace;
+/// Module containing all built-in [module resolvers][ModuleResolver].
+pub mod resolvers;
+
+#[cfg(not(feature = "no_module"))]
+pub use namespace::Namespace;
+#[cfg(not(feature = "no_module"))]
+pub use resolvers::ModuleResolver;
+
 #[cfg(feature = "metadata")]
 use crate::api::formatting::format_param_type_for_display;
+#[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
+use crate::func::register::Mut;
 use crate::func::{
     shared_take_or_clone, FnAccess, FnIterator, RhaiFunc, RhaiNativeFunc, SendSync, StraightHashMap,
 };
@@ -23,9 +34,6 @@ use std::{
     fmt,
     ops::{Add, AddAssign},
 };
-
-#[cfg(any(not(feature = "no_index"), not(feature = "no_object")))]
-use crate::func::register::Mut;
 
 /// Initial capacity of the hashmap for functions.
 const FN_MAP_SIZE: usize = 16;
@@ -1265,7 +1273,6 @@ impl Module {
 
     /// Get a namespace-qualified [`Module`] variable as a [`Dynamic`].
     #[cfg(not(feature = "no_module"))]
-    #[cfg(not(feature = "no_ast"))]
     #[inline]
     pub(crate) fn get_qualified_var(&self, hash_var: u64) -> Option<Dynamic> {
         self.all_variables
@@ -1331,17 +1338,31 @@ impl Module {
         hash_script
     }
 
-    /// Get a shared reference to a scripted function in the [`Module`] based on its hash.
+    /// Get a reference to a scripted function in the [`Module`] based on its hash.
     /// Exported under the `internals` feature only.
     #[cfg(not(feature = "no_function"))]
-    #[inline]
+    #[inline(always)]
     #[must_use]
     pub(crate) fn get_script_fn_by_hash(&self, hash: u64) -> Option<&crate::func::RhaiFunc> {
-        if let Some(ref functions) = self.functions {
-            functions.get(&hash).map(|(f, _)| f)
-        } else {
-            None
-        }
+        self.functions
+            .as_ref()
+            .and_then(|f| f.get(&hash))
+            .map(|(f, _)| f)
+    }
+
+    /// Get a mutable reference to a scripted function in the [`Module`] based on its hash.
+    /// Exported under the `internals` feature only.
+    #[cfg(not(feature = "no_function"))]
+    #[inline(always)]
+    #[must_use]
+    pub(crate) fn get_script_fn_by_hash_mut(
+        &mut self,
+        hash: u64,
+    ) -> Option<&mut crate::func::RhaiFunc> {
+        self.functions
+            .as_mut()
+            .and_then(|f| f.get_mut(&hash))
+            .map(|(f, _)| f)
     }
 
     /// Get a shared reference to the script-defined function in the [`Module`] based on name
@@ -2708,10 +2729,3 @@ impl Module {
         self.type_iterators.get(&id).map(|f| &**f)
     }
 }
-
-/// Module containing all built-in [module resolvers][ModuleResolver].
-#[cfg(not(feature = "no_module"))]
-pub mod resolvers;
-
-#[cfg(not(feature = "no_module"))]
-pub use resolvers::ModuleResolver;

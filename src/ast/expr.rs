@@ -70,7 +70,7 @@ impl CustomExpr {
 pub struct FnCallExpr {
     /// Namespace of the function, if any.
     #[cfg(not(feature = "no_module"))]
-    pub namespace: super::Namespace,
+    pub namespace: crate::module::Namespace,
     /// Function name.
     pub name: ImmutableString,
     /// Pre-calculated hashes.
@@ -177,7 +177,12 @@ pub enum Expr {
     /// This is to avoid reading a pointer redirection during each variable access.
     Variable(
         #[cfg(not(feature = "no_module"))]
-        Box<(Option<NonZeroUsize>, ImmutableString, super::Namespace, u64)>,
+        Box<(
+            Option<NonZeroUsize>,
+            ImmutableString,
+            crate::module::Namespace,
+            u64,
+        )>,
         #[cfg(feature = "no_module")] Box<(Option<NonZeroUsize>, ImmutableString)>,
         Option<NonZeroU8>,
         Position,
@@ -471,7 +476,7 @@ impl Expr {
             Union::FnPtr(f, ..) if !f.is_curried() => Self::FnCall(
                 FnCallExpr {
                     #[cfg(not(feature = "no_module"))]
-                    namespace: super::Namespace::NONE,
+                    namespace: crate::module::Namespace::NONE,
                     name: KEYWORD_FN_PTR.into(),
                     hashes: FnCallHashes::from_hash(calc_fn_hash(None, f.fn_name(), 1)),
                     args: once(Self::StringConstant(f.fn_name().into(), pos)).collect(),

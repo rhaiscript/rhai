@@ -1,3 +1,5 @@
+#![cfg(not(feature = "no_module"))]
+
 use crate::eval::GlobalRuntimeState;
 use crate::func::SendSync;
 #[cfg(not(feature = "no_ast"))]

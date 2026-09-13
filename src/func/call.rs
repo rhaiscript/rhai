@@ -762,7 +762,7 @@ impl Engine {
         caches: &mut Caches,
         scope: &mut Scope,
         mut this_ptr: Option<&mut Dynamic>,
-        namespace: &crate::ast::Namespace,
+        namespace: &crate::module::Namespace,
         fn_name: &str,
         args_expr: &[Expr],
         hash: u64,

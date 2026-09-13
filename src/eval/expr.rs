@@ -17,7 +17,7 @@ impl Engine {
     pub(crate) fn search_imports(
         &self,
         global: &GlobalRuntimeState,
-        namespace: &crate::ast::Namespace,
+        namespace: &crate::module::Namespace,
     ) -> Option<crate::SharedModule> {
         debug_assert!(!namespace.is_empty());
 

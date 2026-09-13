@@ -589,7 +589,7 @@ impl Engine {
         id: ImmutableString,
         no_args: bool,
         capture_parent_scope: bool,
-        #[cfg(not(feature = "no_module"))] mut namespace: crate::ast::Namespace,
+        #[cfg(not(feature = "no_module"))] mut namespace: crate::module::Namespace,
     ) -> ParseResult<Expr> {
         let (token, token_pos) = if no_args {
             &(Token::RightParen, Position::NONE)
@@ -1508,7 +1508,7 @@ impl Engine {
             // Identifier
             Token::Identifier(..) => {
                 #[cfg(not(feature = "no_module"))]
-                let ns = crate::ast::Namespace::NONE;
+                let ns = crate::module::Namespace::NONE;
 
                 let s = match state.input.next().unwrap() {
                     (Token::Identifier(s), ..) => s,
@@ -1584,7 +1584,7 @@ impl Engine {
             // Reserved keyword or symbol
             Token::Reserved(..) => {
                 #[cfg(not(feature = "no_module"))]
-                let ns = crate::ast::Namespace::NONE;
+                let ns = crate::module::Namespace::NONE;
 
                 let s = match state.input.next().unwrap() {
                     (Token::Reserved(s), ..) => s,
@@ -1894,7 +1894,7 @@ impl Engine {
                     // Call negative function
                     expr => Ok(FnCallExpr {
                         #[cfg(not(feature = "no_module"))]
-                        namespace: crate::ast::Namespace::NONE,
+                        namespace: crate::module::Namespace::NONE,
                         name: self.get_interned_string("-"),
                         hashes: FnCallHashes::from_native_only(calc_fn_hash(None, "-", 1)),
                         args: IntoIterator::into_iter([expr]).collect(),
@@ -1917,7 +1917,7 @@ impl Engine {
                     // Call plus function
                     expr => Ok(FnCallExpr {
                         #[cfg(not(feature = "no_module"))]
-                        namespace: crate::ast::Namespace::NONE,
+                        namespace: crate::module::Namespace::NONE,
                         name: self.get_interned_string("+"),
                         hashes: FnCallHashes::from_native_only(calc_fn_hash(None, "+", 1)),
                         args: IntoIterator::into_iter([expr]).collect(),
@@ -1934,7 +1934,7 @@ impl Engine {
 
                 Ok(FnCallExpr {
                     #[cfg(not(feature = "no_module"))]
-                    namespace: crate::ast::Namespace::NONE,
+                    namespace: crate::module::Namespace::NONE,
                     name: self.get_interned_string("!"),
                     hashes: FnCallHashes::from_native_only(calc_fn_hash(None, "!", 1)),
                     args: {
@@ -2323,7 +2323,7 @@ impl Engine {
 
             let mut op_base = FnCallExpr {
                 #[cfg(not(feature = "no_module"))]
-                namespace: crate::ast::Namespace::NONE,
+                namespace: crate::module::Namespace::NONE,
                 name: self.get_interned_string(&op),
                 hashes: FnCallHashes::from_native_only(hash),
                 args: IntoIterator::into_iter([root, rhs]).collect(),
@@ -2405,7 +2405,7 @@ impl Engine {
                         // Put a `!` call in front
                         let not_base = FnCallExpr {
                             #[cfg(not(feature = "no_module"))]
-                            namespace: crate::ast::Namespace::NONE,
+                            namespace: crate::module::Namespace::NONE,
                             name: self.get_interned_string(OP_NOT),
                             hashes: FnCallHashes::from_native_only(calc_fn_hash(None, OP_NOT, 1)),
                             args: IntoIterator::into_iter([fn_call]).collect(),
@@ -2524,7 +2524,7 @@ impl Engine {
 
                     inputs.push(Expr::Variable(
                         #[cfg(not(feature = "no_module"))]
-                        (None, name, crate::ast::Namespace::NONE, 0).into(),
+                        (None, name, crate::module::Namespace::NONE, 0).into(),
                         #[cfg(feature = "no_module")]
                         (None, name).into(),
                         None,
@@ -3739,7 +3739,7 @@ impl Engine {
 
         let expr = FnCallExpr {
             #[cfg(not(feature = "no_module"))]
-            namespace: crate::ast::Namespace::NONE,
+            namespace: crate::module::Namespace::NONE,
             name: self.get_interned_string(crate::engine::KEYWORD_FN_PTR_CURRY),
             hashes: FnCallHashes::from_native_only(calc_fn_hash(
                 None,

@@ -330,6 +330,10 @@ pub use api::json::format_map_as_json;
 #[cfg(not(feature = "no_module"))]
 pub use module::ModuleResolver;
 
+#[cfg(not(feature = "no_module"))]
+#[cfg(feature = "internals")]
+pub use module::Namespace;
+
 /// Module containing all built-in _module resolvers_ available to Rhai.
 #[cfg(not(feature = "no_module"))]
 pub use module::resolvers as module_resolvers;
@@ -382,11 +386,6 @@ pub use ast::{
 #[cfg(feature = "internals")]
 #[cfg(not(feature = "no_custom_syntax"))]
 pub use ast::CustomExpr;
-
-#[cfg(feature = "internals")]
-#[cfg(not(feature = "no_module"))]
-#[cfg(not(feature = "no_ast"))]
-pub use ast::Namespace;
 
 #[cfg(feature = "internals")]
 pub use eval::{Caches, GlobalRuntimeState, RangeCase, Target};

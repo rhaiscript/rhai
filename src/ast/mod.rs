@@ -5,7 +5,6 @@ pub mod ast;
 pub mod expr;
 pub mod flags;
 pub mod ident;
-pub mod namespace;
 pub mod stmt;
 
 pub use ast::{ASTNode, AST};
@@ -14,8 +13,6 @@ pub use expr::CustomExpr;
 pub use expr::{BinaryExpr, Expr, FnCallExpr};
 pub use flags::ASTFlags;
 pub use ident::Ident;
-#[cfg(not(feature = "no_module"))]
-pub use namespace::Namespace;
 pub use stmt::{
     CaseBlocksList, FlowControl, OpAssignment, Stmt, StmtBlock, StmtBlockContainer,
     SwitchCasesCollection,
