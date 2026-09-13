@@ -1,7 +1,7 @@
 //! Namespace reference type.
 #![cfg(not(feature = "no_module"))]
 
-use crate::ast::Ident;
+use crate::types::Ident;
 use crate::{Position, StaticVec};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;

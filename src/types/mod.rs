@@ -6,6 +6,7 @@ pub mod dynamic;
 pub mod error;
 pub mod float;
 pub mod fn_ptr;
+pub mod ident;
 pub mod immutable_string;
 pub mod interner;
 pub mod parse_error;
@@ -26,6 +27,7 @@ pub use error::EvalAltResult;
 #[cfg(not(feature = "no_float"))]
 pub use float::FloatWrapper;
 pub use fn_ptr::FnPtr;
+pub use ident::Ident;
 pub use immutable_string::ImmutableString;
 pub use interner::StringsInterner;
 pub use parse_error::{LexError, ParseError, ParseErrorType};

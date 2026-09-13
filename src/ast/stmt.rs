@@ -1,10 +1,10 @@
 //! Module defining script statements.
 
-use super::{ASTFlags, ASTNode, BinaryExpr, Expr, FnCallExpr, Ident};
+use super::{ASTFlags, ASTNode, BinaryExpr, Expr, FnCallExpr};
 use crate::engine::{KEYWORD_EVAL, OP_EQUALS};
 use crate::eval::RangeCase;
 use crate::func::StraightHashMap;
-use crate::types::{Span, Token};
+use crate::types::{Ident, Span, Token};
 use crate::{calc_fn_hash, FnArgsVec, Position, StaticVec};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;

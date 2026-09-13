@@ -2,7 +2,7 @@
 
 use crate::api::options::LangOptions;
 use crate::ast::{
-    ASTFlags, BinaryExpr, CaseBlocksList, Expr, FlowControl, FnCallExpr, Ident, OpAssignment, Stmt,
+    ASTFlags, BinaryExpr, CaseBlocksList, Expr, FlowControl, FnCallExpr, OpAssignment, Stmt,
     StmtBlock, StmtBlockContainer, SwitchCasesCollection,
 };
 use crate::engine::{Precedence, OP_CONTAINS, OP_NOT};
@@ -15,6 +15,7 @@ use crate::func::{calc_switch_value_hash, FnCallHashes, ScriptFuncDef, StraightH
 use crate::tokenizer::{TokenStream, TokenizerControl};
 use crate::types::dynamic::{AccessMode, Union};
 use crate::types::token::{is_reserved_keyword_or_symbol, is_valid_identifier, Token};
+use crate::types::Ident;
 use crate::{
     calc_fn_hash, Dynamic, Engine, EvalAltResult, EvalContext, ExclusiveRange, FnArgsVec,
     ImmutableString, InclusiveRange, LexError, ParseError, Position, Scope, Shared, SmartString,

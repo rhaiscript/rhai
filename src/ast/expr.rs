@@ -1,11 +1,10 @@
 //! Module defining script expressions.
 
-use super::{ASTFlags, ASTNode, Ident, Stmt, StmtBlock};
+use super::{ASTFlags, ASTNode, Stmt, StmtBlock};
 use crate::engine::KEYWORD_FN_PTR;
 use crate::eval::GlobalRuntimeState;
 use crate::func::FnCallHashes;
-use crate::types::dynamic::Union;
-use crate::types::Token;
+use crate::types::{dynamic::Union, Ident, Token};
 use crate::{
     calc_fn_hash, Dynamic, FnArgsVec, FnPtr, Identifier, ImmutableString, Position, SmartString,
     StaticVec, ThinVec, INT,

@@ -960,7 +960,7 @@ impl Engine {
             // Export statement
             #[cfg(not(feature = "no_module"))]
             Stmt::Export(x, ..) => {
-                use crate::ast::Ident;
+                use crate::types::Ident;
                 let (Ident { name, pos, .. }, Ident { name: alias, .. }) = &**x;
                 // Mark scope variables as public
                 scope.search(name).map_or_else(

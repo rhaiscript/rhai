@@ -357,7 +357,7 @@ pub use module::{FuncInfo, FuncMetadata};
 pub use types::FloatWrapper;
 
 #[cfg(feature = "internals")]
-pub use types::{BloomFilterU64, CustomTypeInfo, Span, StringsInterner, Token};
+pub use types::{BloomFilterU64, CustomTypeInfo, Ident, Span, StringsInterner, Token};
 
 #[cfg(not(feature = "no_ast"))]
 pub use types::VarDefInfo;
@@ -379,8 +379,8 @@ pub use api::default_limits;
 #[cfg(feature = "internals")]
 #[cfg(not(feature = "no_ast"))]
 pub use ast::{
-    ASTFlags, ASTNode, BinaryExpr, Expr, FlowControl, FnCallExpr, Ident, OpAssignment, Stmt,
-    StmtBlock, SwitchCasesCollection,
+    ASTFlags, ASTNode, BinaryExpr, Expr, FlowControl, FnCallExpr, OpAssignment, Stmt, StmtBlock,
+    SwitchCasesCollection,
 };
 
 #[cfg(feature = "internals")]
