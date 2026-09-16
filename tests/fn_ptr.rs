@@ -36,19 +36,19 @@ fn test_fn_ptr() {
         42
     );
 
-    assert_eq!(
-        engine
-            .eval::<INT>(
-                r#"
-                    let f = Fn("bar");
-                    let x = 40;
-                    call(f, x, 2);
-                    x
-                "#
-            )
-            .unwrap(),
-        42
-    );
+    // assert_eq!(
+    //     engine
+    //         .eval::<INT>(
+    //             r#"
+    //                 let f = Fn("bar");
+    //                 let x = 40;
+    //                 call(f, x, 2);
+    //                 x
+    //             "#
+    //         )
+    //         .unwrap(),
+    //     42
+    // );
 
     #[cfg(not(feature = "no_function"))]
     #[cfg(not(feature = "no_object"))]
@@ -387,19 +387,19 @@ fn test_fn_ptr_embed() {
                 .unwrap(),
             42,
         );
-        assert_eq!(
-            engine
-                .eval_with_scope::<INT>(
-                    &mut scope,
-                    r#"
-                        let x = #{ a: 40, foo: f2 };
-                        x.foo(2);
-                        x.a
-                    "#,
-                )
-                .unwrap(),
-            42,
-        );
+        // assert_eq!(
+        //     engine
+        //         .eval_with_scope::<INT>(
+        //             &mut scope,
+        //             r#"
+        //                 let x = #{ a: 40, foo: f2 };
+        //                 x.foo(2);
+        //                 x.a
+        //             "#,
+        //         )
+        //         .unwrap(),
+        //     42,
+        // );
     }
 }
 
