@@ -196,7 +196,7 @@ pub fn derive_custom_type_impl(input: DeriveInput) -> TokenStream {
 
 // Code lifted from: https://stackoverflow.com/questions/55271857/how-can-i-get-the-t-from-an-optiont-when-using-syn
 fn extract_type_from_option(ty: &syn::Type) -> Option<&syn::Type> {
-    use syn::{GenericArgument, Path, PathArguments, PathSegment};
+    use syn::{GenericArgument, PathArguments, PathSegment};
 
     fn extract_type_path(ty: &syn::Type) -> Option<&Path> {
         match *ty {

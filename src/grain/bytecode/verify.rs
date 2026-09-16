@@ -586,7 +586,9 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
         // separate `Op::Unit`, emitted only where something reads it.
         Op::AssignLocal { .. } | Op::AssignNamed { .. } | Op::AssignThis { .. } => (1, 1, 0),
 
-        Op::JumpIfFalse { .. } | Op::JumpIfTrue { .. } | Op::Switch(..) => (1, 1, 0),
+        Op::JumpIfFalse { .. } | Op::JumpIfTrue { .. } => (1, 1, 0),
+
+        Op::Switch(..) => (1, 0, 0),
 
         Op::Jump(..)
         | Op::UnwindTo(..)
@@ -1082,7 +1084,7 @@ mod tests {
                     ..pools()
                 }
             ),
-            Ok(vec![1]),
+            Ok(vec![2]),
         );
 
         // One byte into the `Switch` instruction's own operand.

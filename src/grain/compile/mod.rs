@@ -234,6 +234,9 @@ struct Loop {
     /// How many `try` regions were armed when the loop began, so a jump out
     /// of the loop disarms the ones inside it.
     handlers: usize,
+    /// How many surplus stack slots enclosed this loop when it began, so a
+    /// jump out of the loop can drop them on the stack.
+    stack_surplus: usize,
     /// `Jump` sites awaiting the address after the loop.
     breaks: Vec<usize>,
     /// Whether any `break` statement in this loop yields an expression value.
@@ -309,6 +312,9 @@ struct Lowering {
     /// The same for `try` regions: a `break` out of one has to disarm it, or
     /// the next unrelated error is caught into a block already left.
     handlers: usize,
+    /// How many surplus stack slots enclose this point in the lowering, so a
+    /// `break` out of a loop knows how many stack slots to drop.
+    stack_surplus: usize,
     /// How many statements enclose the one being lowered, for the marker
     /// [`Lowering::statement`] emits. Restored on the way out, so it is the
     /// nesting rather than a running count.
@@ -532,27 +538,13 @@ impl Lowering {
     /// Nearly every arm anyone writes has no guard, and those cost no chain at
     /// all.
     fn switch(&mut self, subject: &Expr, sw: &SwitchCasesCollection) -> bool {
-        if self.slots.is_full() {
-            return false;
-        }
-        let unwind_depth = self.slots.depth();
-        let value_name = ImmutableString::from("$SWITCH_VALUE$");
-        let value_name_index = self.push_name(value_name.clone());
-        let value_slot = self.slots.declare(value_name);
+        self.stack_surplus += 1;
 
         // Overlapping range arms have no single answer at runtime, so they are
         // cut into disjoint pieces here instead. See [`cases::split`].
         let ranges = cases::split(&sw.ranges);
 
         self.expression(subject);
-
-        // Store the subject's value because if all the arms decline,
-        // the ranges still needs it.
-        self.emit(Op::DeclareLocal {
-            name: value_name_index,
-            is_const: false,
-        });
-        self.emit(Op::LoadLocal(value_slot));
 
         // The first table is for the hashed case values.
         let cases_table = self.push_switch();
@@ -563,7 +555,6 @@ impl Lowering {
         let mut case_chains: Vec<(&[usize], Entry)> = Vec::new();
         let mut to_body: Vec<(usize, usize)> = Vec::new();
         let mut to_ranges: Vec<usize> = Vec::new();
-        let mut to_default: Vec<usize> = Vec::new();
 
         for blocks in sw.cases.values().map(|case| case.blocks.as_slice()) {
             if case_chains.iter().any(|(ex, ..)| *ex == blocks) {
@@ -578,24 +569,33 @@ impl Lowering {
         //
         // The last chain to decline arrives here by falling off its own end, so
         // it needs no jump to say so.
-        self.drop_idle_jump(&mut to_ranges);
-        let ranges_dispatch = self.here();
-        self.emit(Op::LoadLocal(value_slot));
+        if !ranges.is_empty() {
+            self.drop_idle_jump(&mut to_ranges);
+        }
 
-        // The second table is for the ranges.
-        let ranges_table = self.push_switch();
-        self.emit(Op::Switch(ranges_table));
+        let ranges_dispatch = self.here();
+        let mut to_default: Vec<usize> = Vec::new();
 
         // One chain per distinct list of ranges, shared by every table entry
         let mut range_chains: Vec<(&[usize], Entry)> = Vec::new();
 
-        for blocks in ranges.iter().map(|(.., blocks)| blocks.as_slice()) {
-            if range_chains.iter().any(|(ex, ..)| *ex == blocks) {
-                continue;
+        let ranges_table = if !ranges.is_empty() {
+            // The second table is for the ranges.
+            let ranges_table = self.push_switch();
+            self.emit(Op::Switch(ranges_table));
+
+            for blocks in ranges.iter().map(|(.., blocks)| blocks.as_slice()) {
+                if range_chains.iter().any(|(ex, ..)| *ex == blocks) {
+                    continue;
+                }
+                let entry = self.arm_chain(sw, blocks, &mut to_body, &mut to_default);
+                range_chains.push((blocks, entry));
             }
-            let entry = self.arm_chain(sw, blocks, &mut to_body, &mut to_default);
-            range_chains.push((blocks, entry));
-        }
+
+            ranges_table
+        } else {
+            0
+        };
 
         // Bodies, one per arm something can reach. An arm behind a constant
         // false guard, or one whose range the parser dropped for being empty,
@@ -616,13 +616,14 @@ impl Lowering {
 
         let mut body_at: Vec<(usize, u32)> = Vec::with_capacity(wanted.len());
         let mut to_end: Vec<usize> = Vec::with_capacity(wanted.len());
+
         for block in wanted {
             body_at.push((block, self.here()));
             // An arm body is an ordinary expression, and a block one goes
             // through the same path as `let y = { .. }`.
             self.expression(&sw.expressions[block].rhs);
             if self.defeated {
-                self.unwind_to(unwind_depth);
+                self.stack_surplus -= 1;
                 return false;
             }
             to_end.push(self.emit_jump());
@@ -645,20 +646,28 @@ impl Lowering {
             }
         };
 
-        // Unwind at the end of the switch.
-        //
         // The last body emitted falls into it when there is nothing between the
         // two — which is every `switch` with a `_` arm, because then the default
         // is a body already emitted rather than a unit put here.
         self.drop_idle_jump(&mut to_end);
         let unwind_at = self.here();
-        self.unwind_to(unwind_depth);
+
+        // At the end of the switch, surface and drop the switch subject value
+        // that was kept on the stack.
+        self.emit(Op::Rotate(1));
+        self.emit(Op::Pop);
 
         for site in to_end {
             self.patch_to(site, unwind_at);
         }
-        for site in to_ranges {
-            self.patch_to(site, ranges_dispatch);
+        if ranges.is_empty() {
+            for site in to_ranges {
+                self.patch_to(site, default_at);
+            }
+        } else {
+            for site in to_ranges {
+                self.patch_to(site, ranges_dispatch);
+            }
         }
         for site in to_default {
             self.patch_to(site, default_at);
@@ -673,23 +682,17 @@ impl Lowering {
                 .find(|(ex, ..)| *ex == blocks)
                 .map(|(.., entry)| *entry)
                 .expect("every list got a chain above");
-            match entry {
-                Entry::Body(block) => at(block),
-                Entry::At(target) => target,
-                Entry::Default => ranges_dispatch,
-            }
-        };
 
-        let range_target = |blocks: &[usize]| {
-            let entry = range_chains
-                .iter()
-                .find(|(ex, ..)| *ex == blocks)
-                .map(|(.., entry)| *entry)
-                .expect("every list got a chain above");
             match entry {
                 Entry::Body(block) => at(block),
                 Entry::At(target) => target,
-                Entry::Default => default_at,
+                Entry::Default => {
+                    if ranges.is_empty() {
+                        default_at
+                    } else {
+                        ranges_dispatch
+                    }
+                }
             }
         };
 
@@ -709,19 +712,42 @@ impl Lowering {
                     .collect(),
             ),
             ranges: Vec::new(),
-            default: ranges_dispatch,
+            default: if ranges.is_empty() {
+                default_at
+            } else {
+                ranges_dispatch
+            },
         };
-        self.switches[ranges_table as usize] = Switch {
-            cases: None,
-            ranges: ranges
-                .iter()
-                .map(|(range, blocks)| SwitchRange {
-                    target: range_target(blocks),
-                    ..*range
-                })
-                .collect(),
-            default: default_at,
-        };
+
+        if !ranges.is_empty() {
+            let range_target = |blocks: &[usize]| {
+                let entry = range_chains
+                    .iter()
+                    .find(|(ex, ..)| *ex == blocks)
+                    .map(|(.., entry)| *entry)
+                    .expect("every list got a chain above");
+
+                match entry {
+                    Entry::Body(block) => at(block),
+                    Entry::At(target) => target,
+                    Entry::Default => default_at,
+                }
+            };
+
+            self.switches[ranges_table as usize] = Switch {
+                cases: None,
+                ranges: ranges
+                    .iter()
+                    .map(|(range, blocks)| SwitchRange {
+                        target: range_target(blocks),
+                        ..*range
+                    })
+                    .collect(),
+                default: default_at,
+            };
+        }
+
+        self.stack_surplus -= 1;
 
         true
     }
@@ -1409,6 +1435,7 @@ impl Lowering {
                 let loop_handlers = active.handlers;
                 let owns_iterator = active.owns_iterator;
                 let (break_depth, continue_depth) = (active.break_depth, active.continue_depth);
+                let pop_surplus = self.stack_surplus - active.stack_surplus;
                 let is_break = flags.contains(ASTFlags::BREAK);
 
                 // A jump out of a loop skips whatever the straight-line path
@@ -1416,12 +1443,31 @@ impl Lowering {
                 // iterators are live is known here — a `break` inside a `try`
                 // inside a `for` has one to drop, and `continue` has none
                 // because it re-enters the loop that owns it.
+                //
+                // Any stack surplus needs to pop.
                 if is_break {
+                    // If there is a break value, it must first be rotated beyond
+                    // any switch subjects still on the stack.
+                    //
+                    // `Op::Rotate` can only handle up to 255 slots.
+                    let Ok(stack_surplus) = u8::try_from(pop_surplus) else {
+                        return Lowered::Defeated;
+                    };
                     match value {
-                        Some(expr) => self.expression(expr),
-                        None if active.has_break_value => self.emit(Op::Unit),
+                        Some(expr) => {
+                            self.expression(expr);
+                            self.emit(Op::Rotate(stack_surplus));
+                        }
+                        None if active.has_break_value => {
+                            self.emit(Op::Unit);
+                            self.emit(Op::Rotate(stack_surplus));
+                        }
                         None => {}
                     }
+                    for _ in 0..stack_surplus {
+                        self.emit(Op::Pop);
+                    }
+
                     // Out of the loop entirely, so its own iterator goes too —
                     // `loop_iters` counts from inside the loop and therefore
                     // already includes it.
@@ -1431,6 +1477,9 @@ impl Lowering {
                     let site = self.emit_jump();
                     self.loops.last_mut().expect("checked").breaks.push(site);
                 } else {
+                    for _ in 0..pop_surplus {
+                        self.emit(Op::Pop);
+                    }
                     // Back into the same loop, so its iterator and its loop
                     // variable both have to survive.
                     self.pop_handlers(loop_handlers);
@@ -2315,6 +2364,7 @@ impl Lowering {
             continue_depth: depth,
             iters: self.iters,
             handlers: self.handlers,
+            stack_surplus: self.stack_surplus,
             owns_iterator: false,
             breaks: Vec::new(),
             has_break_value,
@@ -2331,6 +2381,7 @@ impl Lowering {
             continue_depth: u16::try_from(self.slots.depth()).expect("slot count is bounded"),
             iters: self.iters,
             handlers: self.handlers,
+            stack_surplus: self.stack_surplus,
             owns_iterator: true,
             breaks: Vec::new(),
             has_break_value,

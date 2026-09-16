@@ -485,6 +485,7 @@ pub const CASES: &[Case] = &[
     // matters more than being clever about it.
     case("switch_range_subject_never_matches", "let r = 0..5; switch r { 0..5 => \"same\", _ => \"no\" }"),
     case("switch_break_from_loop", "let s = 0; let i = 0; while i < 10 { switch i { 3 => break, _ => () } s += 1; i += 1; } s"),
+    case("switch_with_guards", "let x = 42; switch 2 { 1 => (), 2 if x < 40 => 'a', 42 => true, _ => 123 }"),
     // --- blocks used for their value ---------------------------------------
     // Rhai wraps a block in `Expr::Stmt` wherever a value is wanted, so these
     // are one construct in three disguises. Each declares inside the block, so

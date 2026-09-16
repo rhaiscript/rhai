@@ -4119,10 +4119,12 @@ impl<'e> Vm<'e> {
                     let table = program
                         .switch(index)
                         .ok_or_else(|| malformed(format!("no switch {index}")))?;
-                    let subject = self.pop()?;
+                    // Only inspect the subject but do not pop it.
+                    // Popping is done after the switch dispatches.
+                    let subject = self.inspect()?;
                     // Always a jump: an arm that matched nothing still has the
                     // default to go to.
-                    transfer!(table.dispatch(&subject) as usize);
+                    transfer!(table.dispatch(subject) as usize);
                     continue;
                 }
 

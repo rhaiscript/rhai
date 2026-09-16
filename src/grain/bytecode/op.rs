@@ -278,7 +278,15 @@ pub enum Op {
     /// the other arguments, and this puts it back in argument order.
     Rotate(u8),
 
-    /// Pop a subject and jump to wherever switch table `.0` sends it.
+    /// Inspect the subject on the top of the operand stack and jump to wherever
+    /// switch table `.0` sends it.
+    ///
+    /// The subject is not automatically popped due to the need to sometimes
+    /// call `Switch` a second time to handle ranges.
+    ///
+    /// The subject must be manually popped at the end of the statement,
+    /// or when control flow jumps out from inside the switch statement,
+    /// exiting a loop, or via an error caught by a `try` block.
     ///
     /// Always jumps — the table's default is where a subject that matches
     /// nothing goes, and an absent `_` arm compiles to a jump past the
