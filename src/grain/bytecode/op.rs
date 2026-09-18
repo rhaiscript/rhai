@@ -50,7 +50,7 @@ pub enum Receiver {
 
     /// A variable no slot addresses: the caller's, a module's, or nothing.
     ///
-    /// ### Note
+    /// ## Note
     ///
     /// [`Op::LoadNamed`] has already resolved the name and left its value as
     /// argument zero, which is what raises
@@ -64,7 +64,7 @@ pub enum Receiver {
     /// * a module's constant,
     /// * a `const`.
     ///
-    /// ### Cost
+    /// ## Cost
     ///
     /// The by-reference path pays for a clone it discards. Worth removing only
     /// if a profile of a host-heavy script says so; a local, which is the common
@@ -73,7 +73,7 @@ pub enum Receiver {
 
     /// The frame's receiver, for `f(this, ..)`.
     ///
-    /// ### Order Difference
+    /// ## Order Difference
     ///
     /// Rhai applies the same rewrite to `this` as to a variable, but only when
     /// the receiver is neither shared nor curried.
@@ -83,7 +83,7 @@ pub enum Receiver {
     /// out to be usable by reference — the deferral [`Receiver::Local`] already
     /// makes for a read-only entry.
     ///
-    /// ### Implications
+    /// ## Implications
     ///
     /// [`Op::LoadThis`] pushes `this` *before* the remaining arguments.
     ///
@@ -102,12 +102,12 @@ pub enum Receiver {
 ///
 /// [`Program`]: crate::grain::Program
 ///
-/// ### A Stack Machine
+/// ## A Stack Machine
 ///
 /// Operands are pushed and consumed on an operand stack, and locals live in
 /// slots addressed directly.
 ///
-/// ### Residual Fragments
+/// ## Residual Fragments
 ///
 /// [`Op::EvalAst`] is the escape hatch that hands a fragment back to Rhai's
 /// [`AST`][crate::AST] interpreter, so anything the compiler cannot yet lower
@@ -116,13 +116,13 @@ pub enum Receiver {
 /// Lowering more of it converts residuals into instructions rather than adding
 /// coverage.
 ///
-/// ### Not the Executed Form
+/// ## Not the Executed Form
 ///
 /// A [`Program`]'s code is a byte slice, and dispatched on directly, so a
 /// loaded [`Program`] can borrow its instructions from the artifact rather than
 /// building sixteen bytes of enum per instruction.
 ///
-/// ### Positions
+/// ## Positions
 ///
 /// Instructions carry no source position.
 ///
@@ -133,7 +133,7 @@ pub enum Receiver {
 /// Keeping it out means the diagnostics can be stripped from an artifact
 /// without touching the code.
 ///
-/// ### Operand Width
+/// ## Operand Width
 ///
 /// Anything too wide for an operand is a `u32` index into one of the
 /// [`Program`]'s pools, which is also what keeps a repeated operator or name
@@ -149,6 +149,15 @@ pub enum Op {
 
     /// Push the value in local slot `.0`.
     LoadLocal(u16),
+
+    /// Export local slot `slot` with alias `alias`.
+    ExportLocal {
+        /// The local slot index.
+        slot: u16,
+        /// The alias name index.
+        alias: u32,
+    },
+
     /// Pop and write into local slot `.0`, which must already exist.
     StoreLocal {
         /// The slot index
@@ -166,6 +175,22 @@ pub enum Op {
     /// A reverse scan of the [`Scope`][crate::Scope] is needed — only emitted
     /// for a name that cannot be resolved.
     LoadNamed(u32),
+
+    /// Push the value of a `namespace`-qualified variable named `name`.
+    LoadNamedWithNs {
+        /// Index into the string table for the namespace name.
+        namespace: u32,
+        /// Index into the string table for the variable name.
+        name: u32,
+    },
+
+    /// Export variable `name` with alias `alias`.
+    ExportNamed {
+        /// The variable name index.
+        name: u32,
+        /// The alias name index.
+        alias: u32,
+    },
 
     /// Pop a value and assign it to the variable named `name`, optionally
     /// through an operator.
@@ -213,6 +238,8 @@ pub enum Op {
         name: u32,
         /// Whether the variable is declared `const`.
         is_const: bool,
+        /// Whether the variable is declared at root (global) level.
+        is_global: bool,
     },
 
     /// Discard the top of the operand stack.
@@ -229,7 +256,7 @@ pub enum Op {
     ///
     /// Both exist so `&&` and `||` lower without an extra negation.
     ///
-    /// ### Position
+    /// ## Position
     ///
     /// Its position-table entry is the condition's own position, because Rhai
     /// rejects a non-boolean guard against the guard expression rather than the
@@ -243,7 +270,7 @@ pub enum Op {
     ///
     /// Both exist so `&&` and `||` lower without an extra negation.
     ///
-    /// ### Position
+    /// ## Position
     ///
     /// Its position-table entry is the condition's own position, because Rhai
     /// rejects a non-boolean guard against the guard expression rather than the
@@ -265,25 +292,25 @@ pub enum Op {
     /// Pop `argc` arguments and call the function named by `name`, pushing the
     /// result.
     ///
-    /// ### Function Dispatch
+    /// ## Function Dispatch
     ///
     /// Dispatch goes through Rhai, so every registered function, operator and
     /// script function resolves identically to Rhai.
     ///
-    /// ### Syntactic Function Calls
+    /// ## Syntactic Function Calls
     ///
     /// Calls that Rhai handles syntactically before dispatch — `Fn`, `call`,
     /// `curry`, `eval`, `is_def_var` — are excluded as they are implemented
     /// natively.
     ///
-    /// ### Position
+    /// ## Position
     ///
     /// The position table's entry for this instruction is the call site.
     ///
     /// Rhai's dispatch path takes one and reports failures against it so an error
     /// that comes back without a position gets this one.
     ///
-    /// ### Operator Call
+    /// ## Operator Call
     ///
     /// `op` indexes the operator pool when the call is an operator, and names
     /// the token the built-in lookup keys on.
@@ -303,7 +330,7 @@ pub enum Op {
     /// Pop `argc` arguments and call the function named by `name` with a variable
     /// as its first argument, taken by reference, pushing the result.
     ///
-    /// ### Rewrite to `&mut`
+    /// ## Rewrite to `&mut`
     ///
     /// Rhai rewrites `f(x, ..)` into `x.f(..)` whenever the first argument is a
     /// plain variable, so that a `&mut` first parameter mutates the variable
@@ -330,9 +357,22 @@ pub enum Op {
         capture_parent_scope: bool,
     },
 
+    /// Pop `argc` arguments and call the `namespace`-qualified function named
+    /// by `name`, pushing the result.
+    ///
+    /// Dispatch goes through Rhai.
+    CallWithNs {
+        /// Index into the string table for the namespace name.
+        namespace: u32,
+        /// Index into the string table for the function name.
+        name: u32,
+        /// How many arguments to pop.
+        argc: u8,
+    },
+
     /// Move the top of the operand stack down past `.0` values.
     ///
-    /// ### Uses
+    /// ## Uses
     ///
     /// A [`Receiver::Named`] receiver is resolved by [`Op::LoadNamed`] after
     /// the other arguments, and this puts it back in argument order.
@@ -347,18 +387,18 @@ pub enum Op {
     /// The subject is not automatically popped due to the need to sometimes
     /// call `Switch` a second time to handle ranges.
     ///
-    /// ### Clean Up
+    /// ## Clean Up
     ///
     /// The subject must be manually popped at the end of the statement,
     /// or when control flow jumps out from inside the switch statement,
     /// exiting a loop, or via an error caught by a `try` block.
     ///
-    /// ### Always Jumps
+    /// ## Always Jumps
     ///
     /// The table's default is where a subject that matches nothing goes,
     /// and an absent `_` arm compiles to a jump past the statement.
     ///
-    /// ### Switch Pool
+    /// ## Switch Pool
     ///
     /// The table is in the program's switch pool rather than in the
     /// instruction because it is unbounded, and because two arms of one
@@ -367,7 +407,7 @@ pub enum Op {
 
     /// Turn local slot `.0` into a shared cell, so a closure can capture it.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// Sharing is what makes closures capture, and the enclosing
     /// [`Scope`][crate::Scope] see the same value afterwards.
@@ -379,7 +419,7 @@ pub enum Op {
     /// Turn a variable no slot names — one the caller supplied - into a
     /// shared cell, so a closure can capture it.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// Sharing is what makes closures capture, and the enclosing
     /// [`Scope`][crate::Scope] see the same value afterwards.
@@ -387,7 +427,7 @@ pub enum Op {
 
     /// Push local slot `.0` without flattening it.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// A read normally hands back what a shared cell contains, which is right
     /// for a value and wrong for a capture.
@@ -399,7 +439,7 @@ pub enum Op {
     /// Push a variable no slot names — one the caller supplied - without
     /// flattening it.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// A read normally hands back what a shared cell contains, which is right
     /// for a value and wrong for a capture.
@@ -425,7 +465,7 @@ pub enum Op {
 
     /// Push the receiver bound to the running frame's `this` without flattening it.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// A read normally hands back what a shared cell contains, which is right
     /// for a value and wrong for a capture.
@@ -437,7 +477,7 @@ pub enum Op {
     /// Raise [`ErrorUnboundThis`][crate::EvalAltResult::ErrorUnboundThis]
     /// if the frame's `this` is not bound to a value.
     ///
-    /// ### Order
+    /// ## Order
     ///
     /// `this = v` checks *before* it evaluates `v`, unlike the variable arm,
     /// which evaluates the value first.
@@ -467,14 +507,14 @@ pub enum Op {
 
     /// Push a [function pointer][crate::FnPtr] to the compiled function named `.0`.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// A closure, whose name the parser makes up (`anon$…`) and which
     /// [`Op::MakeFnPtr`] would refuse — Rhai only builds pointers to names a
     /// script could have written. The name is known here, so unlike
     /// `MakeFnPtr` it needs no operand on the stack.
     ///
-    /// ### Deprecated
+    /// ## Deprecated
     ///
     /// This Op is deprecated and no longer used.
     MakeClosure(u32),
@@ -495,7 +535,7 @@ pub enum Op {
     /// Pop `argc` arguments and a target, and call a
     /// [function pointer][crate::FnPtr].
     ///
-    /// ### Function Dispatch
+    /// ## Function Dispatch
     ///
     /// A compiled function of that name and arity is called directly, with the
     /// curried arguments spliced in front.
@@ -503,7 +543,7 @@ pub enum Op {
     /// Anything else — a native function, a name that resolves elsewhere —
     /// is dispatched by Rhai.
     ///
-    /// ### Method Call
+    /// ## Method Call
     ///
     /// `is_method` distinguishes `f.call(x)` from `call(f, x)`, which are
     /// not the same call.
@@ -532,7 +572,7 @@ pub enum Op {
 
     /// Push an empty buffer for an interpolated string to be built in.
     ///
-    /// ### Size Checking
+    /// ## Size Checking
     ///
     /// Interpolation is three instructions rather than one because Rhai checks
     /// the size limit after **every** segment and blames the segment that went
@@ -554,7 +594,7 @@ pub enum Op {
 
     /// Pop an interpolated string segment and append it to the buffer beneath it.
     ///
-    /// ### Note
+    /// ## Note
     ///
     /// Not `+`, which is what it looks like: `+` is overridable and
     /// interpolation is not, and the `{string} + {anything}` operator skips
@@ -570,7 +610,7 @@ pub enum Op {
 
     /// Pop `.0` values and push them as an array.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// Only for a literal whose elements are not all constant — one that is
     /// gets folded into the pool by Rhai's own optimizer before this sees it.
@@ -578,12 +618,12 @@ pub enum Op {
 
     /// Build a map from a template and `.0` key/value pairs above it.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// An entirely constant map never reaches here: the optimizer has already
     /// folded it into the template alone.
     ///
-    /// ### Note
+    /// ## Note
     ///
     /// The operand stack holds `[template, k0, v0, .., k(.0-1), v(.0-1)]`.
     ///
@@ -598,7 +638,7 @@ pub enum Op {
     /// [`ErrorDataTooLarge`][crate::EvalAltResult::ErrorDataTooLarge]
     /// if the running total is over.
     ///
-    /// ### Note
+    /// ## Note
     ///
     /// The operand is the element's index within its literal: zero starts a
     /// fresh total, and [`Op::MakeArray`] / [`Op::MakeMap`] discards it.
@@ -606,7 +646,7 @@ pub enum Op {
     /// That is what keeps `[a, [b, c], d]` straight — the inner literal's total
     /// is pushed and popped inside the outer one's.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// A separate instruction rather than work inside [`Op::MakeArray`] /
     /// [`Op::MakeMap`] because Rhai blames the *element* that tipped the total
@@ -630,20 +670,20 @@ pub enum Op {
     ///
     /// Pushes the value for a read, or unit for an assignment.
     ///
-    /// ### Note
+    /// ## Note
     ///
     /// One instruction for the whole chain rather than one per step, because
     /// the walk holds a `&mut` into the container at every level and a borrow
     /// cannot survive a trip round the dispatch loop.
     ///
-    /// ### Evaluation Order
+    /// ## Evaluation Order
     ///
     /// Index values and method arguments were pushed before it, in step order.
     Chain(u32),
 
     /// Truncate the [`Scope`][crate::Scope] back to `.0` slots.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// Upon exiting a statements block, everything the block declared must be
     /// dropped.
@@ -655,7 +695,7 @@ pub enum Op {
     ///
     /// Emitted on loops.
     ///
-    /// ### Behavioral Differences
+    /// ## Behavioral Differences
     ///
     /// Rhai ticks per [`AST`][crate::AST] node, but the VM ticks only upon
     /// entering a loop, and on jump back-edges, so the operation counts
@@ -664,7 +704,7 @@ pub enum Op {
     /// What this preserves is that a *limit* is enforced and an interrupt is
     /// honoured, which is what allows `loop {}` to be killed.
     ///
-    /// ### Position
+    /// ## Position
     ///
     /// Its table entry is read on every iteration rather than only on failure,
     /// which is why the in-memory position table is dense.
@@ -673,7 +713,7 @@ pub enum Op {
     /// Record the current [`Scope`][crate::Scope] length as the depth an error
     /// escaping this chunk unwinds to.
     ///
-    /// ### Note
+    /// ## Note
     ///
     /// Rhai rewinds a nested block whether it left normally or by a `throw`,
     /// and never rewinds the top level of a chunk.
@@ -682,7 +722,7 @@ pub enum Op {
     /// straight past — so the frame needs a floor to fall back to, and the
     /// last top-level statement boundary is exactly it.
     ///
-    /// ### Cost
+    /// ## Cost
     ///
     /// Emitted once before each top-level statement of a chunk that runs in the
     /// caller's [`Scope`][crate::Scope], so it costs nothing per iteration and
@@ -701,7 +741,7 @@ pub enum Op {
     ///
     /// Without it, a `next` over an `if` would step into its body.
     ///
-    /// ### Behavioral Differences
+    /// ## Behavioral Differences
     ///
     /// Rhai runs its callback per [`AST`][crate::AST] node and a chunk has
     /// no nodes, so the compiler records where the statements were and the
@@ -710,7 +750,7 @@ pub enum Op {
     /// Without this, there is nothing for the debugger to stop at, and
     /// break-points and stepping will be inert.
     ///
-    /// ### Cost
+    /// ## Cost
     ///
     /// Emitted only under the `debugging` feature.
     ///
@@ -752,13 +792,13 @@ pub enum Op {
     ///
     /// `catch_var` names the variable the error is bound to.
     ///
-    /// ### Catching Errors
+    /// ## Catching Errors
     ///
     /// Only errors Rhai considers *catchable* are caught: `return`, `break`,
     /// `continue` and `exit` unwind as errors too and must pass straight
     /// through.
     ///
-    /// ### Position
+    /// ## Position
     ///
     /// Its table entry is the `catch_var` variable's position, which is what
     /// Rhai reports
@@ -787,7 +827,7 @@ pub enum Op {
     /// something that cannot be re-created, so it is made once here and lives
     /// until the loop ends.
     ///
-    /// ### Position
+    /// ## Position
     ///
     /// Its table entry is the iterable's *start* position, which is what
     /// [`ErrorFor`][crate::EvalAltResult::ErrorFor] is reported against —
@@ -797,12 +837,12 @@ pub enum Op {
     /// Advance the current iterator: push the next item and fall through, or
     /// drop the iterator and jump to `exit`.
     ///
-    /// ### Stack Behavior
+    /// ## Stack Behavior
     ///
     /// The only instruction whose two edges leave different amounts on the
     /// operand stack, which is why the verifier gives it explicit successors.
     ///
-    /// ### Position
+    /// ## Position
     ///
     /// Its table entry is the iterable's position — `position`, not
     /// `start_position` — because that is what a fallible iterator's error is
@@ -826,7 +866,7 @@ pub enum Op {
     /// Pop a value and write it into local slot `.0`, through a shared cell
     /// rather than over it.
     ///
-    /// ### Purpose
+    /// ## Purpose
     ///
     /// Distinct from [`Op::StoreLocal`] only in intent: a `for` loop's
     /// variables are written once per iteration and a closure in the body
@@ -840,7 +880,7 @@ pub enum Op {
     /// carrying the value — Rhai wraps nothing and converts nothing, so any
     /// type can be thrown.
     ///
-    /// ### Position
+    /// ## Position
     ///
     /// Its table entry is the `throw` keyword's own position, not the
     /// expression's.
@@ -848,6 +888,12 @@ pub enum Op {
 
     /// End the chunk, yielding the top of the operand stack, or unit if empty.
     Return,
+
+    /// Pop a module path and import it with alias `export`.
+    Import {
+        /// Index into the name pool for the module alias, or empty string.
+        alias: u32,
+    },
 }
 
 impl Op {
@@ -880,11 +926,16 @@ impl Op {
                     format!("{self:?} : {}", program.name(*var_name).unwrap(),)
                 }
             }
-            Op::DeclareLocal { name, is_const } => {
+            Op::DeclareLocal {
+                name,
+                is_const,
+                is_global,
+            } => {
                 format!(
-                    "{self:?} : {} {}",
+                    "{self:?} : {} {}{}",
                     if *is_const { "const" } else { "let" },
-                    program.name(*name).unwrap()
+                    program.name(*name).unwrap(),
+                    if *is_global { " (global)" } else { "" }
                 )
             }
             Op::Call { name, op, .. } => {
@@ -898,8 +949,17 @@ impl Op {
                     format!("{self:?} : {}", program.name(*name).unwrap(),)
                 }
             }
+            Op::CallRef { name, .. } => format!("{self:?} : {}", program.name(*name).unwrap()),
+            Op::CallWithNs {
+                namespace, name, ..
+            } => {
+                format!(
+                    "{self:?} : {}::{}",
+                    program.name(*namespace).unwrap(),
+                    program.name(*name).unwrap()
+                )
+            }
 
-            Op::CallRef { name, .. } => format!("{self:?} : {}", program.name(*name).unwrap(),),
             Op::Switch(idx) => format!(
                 "Switch({idx}) {}",
                 program.switch(*idx).unwrap().disassemble(program),
@@ -912,7 +972,7 @@ impl Op {
                     program.assign_op(op.unwrap()).unwrap().disassemble(program)
                 )
             }
-            Op::MakeClosure(name) => format!("{self:?} : {}", program.name(*name).unwrap(),),
+            Op::MakeClosure(name) => format!("{self:?} : {}", program.name(*name).unwrap()),
             Op::Chain(idx) => {
                 let chain = program.chain(*idx).unwrap();
                 format!(
@@ -921,6 +981,18 @@ impl Op {
                     chain.disassemble(program),
                 )
             }
+
+            Op::ExportLocal { alias, .. } => {
+                format!("{self:?} : as {}", program.name(*alias).unwrap())
+            }
+            Op::ExportNamed { name, alias } => {
+                format!(
+                    "{self:?} : {} as {}",
+                    program.name(*name).unwrap(),
+                    program.name(*alias).unwrap()
+                )
+            }
+            Op::Import { alias } => format!("{self:?} : {}", program.name(*alias).unwrap()),
 
             _ => format!("{self:?}"),
         }

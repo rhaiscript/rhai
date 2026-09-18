@@ -542,6 +542,10 @@ fn required_caps(op: &Op, pools: &Pools) -> Caps {
         Op::MakeArray(..) => Caps::ARRAY,
         Op::MakeMap(..) => Caps::MAP,
         Op::IsShared => Caps::SHARING,
+
+        Op::ExportLocal { .. } | Op::ExportNamed { .. } => Caps::EXPORT,
+        Op::Import { .. } => Caps::IMPORT,
+        Op::LoadNamedWithNs { .. } | Op::CallWithNs { .. } => Caps::MODULE,
     }
 }
 
@@ -565,6 +569,7 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
         | Op::Bool(..)
         | Op::LoadLocal(..)
         | Op::LoadNamed(..)
+        | Op::LoadNamedWithNs { .. }
         | Op::LoadShared(..)
         | Op::LoadSharedNamed(..)
         | Op::MakeClosure(..)
@@ -601,7 +606,7 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
         Op::SkipIfNotUnit { .. } => (1, 0, 0),
 
         // Arguments in, result out.
-        Op::Call { argc, .. } => (*argc as usize, *argc as usize, 1),
+        Op::Call { argc, .. } | Op::CallWithNs { argc, .. } => (*argc as usize, *argc as usize, 1),
 
         // A named receiver's value is argument zero like any other, and so is
         // `this` — which is pushed first rather than last, but the depth is the
@@ -652,6 +657,9 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
         // Pops the thrown value; nothing follows, so what it leaves is moot.
         Op::Throw | Op::StoreShared(..) => (1, 1, 0),
 
+        Op::ExportLocal { .. } | Op::ExportNamed { .. } => (0, 0, 0),
+        Op::Import { .. } => (1, 1, 0),
+
         // The iterable goes onto the iterator stack, not back onto this one.
         Op::IterInit => (1, 1, 0),
         // Its two edges disagree, so the successor match does the work.
@@ -679,7 +687,9 @@ fn check_indices(at: usize, code: &[u8], pools: &Pools) -> Result<(), VerifyErro
 
     match code[at] {
         tag::CONST => bounded(index(1), "constant", pools.consts),
-        tag::DECLARE_LOCAL | tag::DECLARE_CONST => bounded(index(1), "name", pools.names),
+        tag::DECLARE_LOCAL | tag::DECLARE_CONST | tag::DECLARE_GLOBAL_CONST => {
+            bounded(index(1), "name", pools.names)
+        }
         tag::CALL
         | tag::CALL_CAPTURE
         | tag::CALL_LOCAL_REF
@@ -697,12 +707,26 @@ fn check_indices(at: usize, code: &[u8], pools: &Pools) -> Result<(), VerifyErro
             bounded(index(1), "name", pools.names)?;
             bounded(index(4), "operator", pools.tokens)
         }
-        tag::ASSIGN_LOCAL => bounded(index(3), "name", pools.names),
+        tag::CALL_WITH_NS => {
+            bounded(index(1), "name", pools.names)?;
+            bounded(index(3), "name", pools.names)
+        }
+        // The receiver's name, which the write-back resolves the scope entry
+        // by. A local's slot is not a pool index and is checked against the
+        // scope when it runs, as every other slot is.
+        tag::CALL_FN_PTR_ON_NAMED => bounded(index(2), "name", pools.names),
+
         tag::LOAD_NAMED
         | tag::LOAD_SHARED_NAMED
         | tag::ASSIGN_NAMED
         | tag::SHARE_NAMED
         | tag::MAKE_CLOSURE => bounded(index(1), "name", pools.names),
+        tag::LOAD_NAMED_WITH_NS => {
+            bounded(index(1), "name", pools.names)?;
+            bounded(index(3), "name", pools.names)
+        }
+
+        tag::ASSIGN_LOCAL => bounded(index(3), "name", pools.names),
         tag::ASSIGN_NAMED_OP => {
             bounded(index(1), "name", pools.names)?;
             bounded(index(3), "op-assignment", pools.assign_ops)
@@ -715,17 +739,23 @@ fn check_indices(at: usize, code: &[u8], pools: &Pools) -> Result<(), VerifyErro
         // omitting this would hand `program.assign_op` an unchecked index out
         // of a corrupt artifact.
         tag::ASSIGN_THIS_OP => bounded(index(1), "op-assignment", pools.assign_ops),
-        // The receiver's name, which the write-back resolves the scope entry
-        // by. A local's slot is not a pool index and is checked against the
-        // scope when it runs, as every other slot is.
-        tag::CALL_FN_PTR_ON_NAMED => bounded(index(2), "name", pools.names),
+
+        tag::EXPORT_LOCAL => bounded(index(3), "name", pools.names),
+        tag::EXPORT_NAMED => {
+            bounded(index(1), "name", pools.names)?;
+            bounded(index(3), "name", pools.names)
+        }
+        tag::IMPORT => bounded(index(1), "name", pools.names),
+
         #[cfg(not(feature = "no_ast"))]
         tag::EVAL_AST | tag::EVAL_AST_KEEP => bounded(index(1), "fragment", pools.residuals),
+
         tag::CHAIN => {
             bounded(index(1), "chain", pools.chains.len())?;
             check_chain_indices(at, &pools.chains[index(1) as usize], pools)
         }
         tag::SWITCH => bounded(index(1), "switch", pools.switches.len()),
+
         _ => Ok(()),
     }
 }

@@ -1,4 +1,4 @@
-use crate::func::{calc_switch_value_hash, StraightHashMap};
+use crate::func::{calc_switch_value_hash, FnAccess, StraightHashMap};
 use crate::types::{fn_ptr::FnPtrType, StringsInterner, Token};
 use crate::{Dynamic, FnPtr, ThinVec};
 use std::convert::{TryFrom, TryInto};
@@ -195,6 +195,11 @@ pub(super) fn read(bytes: &[u8]) -> Result<Program<'_>, ReadError> {
     let mut functions = Vec::new();
     for _ in 0..cursor.uvarint()? {
         let name = cursor.index()?;
+        let access = match cursor.uvarint()? {
+            0 => FnAccess::Public,
+            1 => FnAccess::Private,
+            _ => return Err(ReadError::Truncated),
+        };
         // Zero is "untyped"; anything else is an index one higher.
         let this_type = match cursor.uvarint()? {
             0 => None,
@@ -207,6 +212,7 @@ pub(super) fn read(bytes: &[u8]) -> Result<Program<'_>, ReadError> {
         functions.push(Function {
             name,
             this_type,
+            access,
             params,
             chunk: get_chunk(&mut cursor)?,
         });

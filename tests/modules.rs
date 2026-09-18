@@ -590,3 +590,183 @@ fn test_module_dynamic() {
 
     assert_eq!(engine.eval::<INT>(r#"import "test" as test; test::test("test", 38);"#).unwrap(), 42);
 }
+
+#[test]
+#[cfg(feature = "grain")]
+#[cfg(not(feature = "no_function"))]
+fn test_module_from_grain() {
+    use rhai::grain::Compiler;
+
+    let mut engine = Engine::new();
+
+    let mut resolver1 = StaticModuleResolver::new();
+    let mut sub_module = Module::new();
+    sub_module.set_var("foo", true);
+    resolver1.insert("another module", sub_module);
+
+    let ast = engine
+        .compile(
+            r#"
+                // Functions become module functions
+                fn calc(x) {
+                    x + 1
+                }
+                fn add_len(x, y) {
+                    x + len(y)
+                }
+                fn cross_call(x) {
+                    calc(x)
+                }
+                private fn hidden() {
+                    throw "you shouldn't see me!";
+                }
+
+                // Imported modules become sub-modules
+                import "another module" as extra;
+
+                // Variables defined at global level become module variables
+                export const x = 123;
+                let foo = 41;
+                let hello;
+
+                // Final variable values become constant module variable values
+                foo = calc(foo);
+                hello = `hello, ${foo} worlds!`;
+
+                export x as abc;
+                export x as xxx;
+                export foo;
+                export hello;
+            "#,
+        )
+        .unwrap();
+
+    engine.set_module_resolver(resolver1);
+
+    let program = Compiler::new().compile(&ast);
+    let module = Module::eval_grain_as_new(Scope::new(), program, &engine).unwrap();
+
+    let mut resolver2 = StaticModuleResolver::new();
+    resolver2.insert("testing", module);
+    engine.set_module_resolver(resolver2);
+
+    assert_eq!(engine.eval::<INT>(r#"import "testing" as ttt; ttt::abc"#).unwrap(), 123);
+    assert_eq!(engine.eval::<INT>(r#"import "testing" as ttt; ttt::x"#).unwrap(), 123);
+    assert_eq!(engine.eval::<INT>(r#"import "testing" as ttt; ttt::xxx"#).unwrap(), 123);
+    assert_eq!(engine.eval::<INT>(r#"import "testing" as ttt; ttt::foo"#).unwrap(), 42);
+    assert!(engine.eval::<bool>(r#"import "testing" as ttt; ttt::extra::foo"#).unwrap());
+    assert_eq!(engine.eval::<String>(r#"import "testing" as ttt; ttt::hello"#).unwrap(), "hello, 42 worlds!");
+    assert_eq!(engine.eval::<INT>(r#"import "testing" as ttt; ttt::calc(999)"#).unwrap(), 1000);
+    assert_eq!(engine.eval::<INT>(r#"import "testing" as ttt; ttt::cross_call(999)"#).unwrap(), 1000);
+    assert_eq!(engine.eval::<INT>(r#"import "testing" as ttt; ttt::add_len(ttt::foo, ttt::hello)"#).unwrap(), 59);
+    assert!(matches!(
+        *engine
+            .run(r#"import "testing" as ttt; ttt::hidden()"#)
+            .unwrap_err(),
+        EvalAltResult::ErrorFunctionNotFound(fn_name, ..) if fn_name == "ttt::hidden ()"
+    ));
+}
+
+#[test]
+#[cfg(feature = "grain")]
+#[cfg(not(feature = "no_std"))]
+#[cfg(any(not(target_family = "wasm"), not(target_os = "unknown")))]
+#[cfg(not(feature = "no_function"))]
+fn test_grain_file_module_resolver() {
+    use rhai::grain::Compiler;
+    use rhai::module_resolvers::FileModuleResolver;
+
+    let engine = Engine::new();
+
+    // Compile a Grain artifact
+    let module_ast = engine
+        .compile(
+            r#"
+                export const ANSWER = 42;
+                fn get_answer(x) { x + 1 }
+                private fn secret() { 99 }
+                fn reveal() { secret() }
+            "#,
+        )
+        .unwrap();
+
+    let program = Compiler::new().compile(&module_ast);
+    let bytes = program.write().expect("must serialize grain program");
+
+    let temp_dir = std::env::temp_dir().join(format!("rhai_grain_test_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let artifact_path = temp_dir.join("my_grain_mod.rgrn");
+    std::fs::write(&artifact_path, bytes).unwrap();
+
+    let mut resolver = FileModuleResolver::new_with_path(&temp_dir);
+    resolver.enable_cache(true);
+
+    let mut engine_with_resolver = Engine::new();
+    engine_with_resolver.set_module_resolver(resolver);
+
+    // Test resolving with extension omitted
+    let res1 = engine_with_resolver
+        .eval::<INT>(
+            r#"
+                import "my_grain_mod" as gm;
+                gm::ANSWER + gm::get_answer(41) + gm::reveal()
+            "#,
+        )
+        .unwrap();
+    assert_eq!(res1, 42 + 42 + 99);
+
+    // Test resolving with explicit .rgrn extension
+    let res2 = engine_with_resolver
+        .eval::<INT>(
+            r#"
+                import "my_grain_mod.rgrn" as gm;
+                gm::get_answer(41)
+            "#,
+        )
+        .unwrap();
+    assert_eq!(res2, 42);
+
+    // Clean up
+    let _ = std::fs::remove_file(artifact_path);
+    let _ = std::fs::remove_dir(temp_dir);
+}
+
+#[test]
+#[cfg(feature = "grain")]
+#[cfg(not(feature = "no_function"))]
+fn test_grain_vm_export_and_import() {
+    use rhai::grain::{Compiler, Vm};
+
+    let mut engine = Engine::new();
+
+    let mut sub_module = Module::new();
+    sub_module.set_var("sub_val", 100 as INT);
+    sub_module.set_native_fn("double", |x: INT| Ok(x * 2));
+
+    let mut resolver = StaticModuleResolver::new();
+    resolver.insert("sub_mod", sub_module);
+    engine.set_module_resolver(resolver);
+
+    let script = r#"
+        import "sub_mod" as s;
+        export let a = s::sub_val;
+        export const b = s::double(a);
+        fn calc_total() {
+            a + b
+        }
+        export a as exported_a;
+    "#;
+
+    let ast = engine.compile(script).unwrap();
+    let program = Compiler::new().compile(&ast);
+
+    let mut scope = Scope::new();
+    let mut vm = Vm::new(&engine);
+    let _ = vm.eval_with_scope(&mut scope, &program).unwrap();
+
+    let module = Module::eval_grain_as_new(Scope::new(), program, &engine).unwrap();
+    assert_eq!(module.get_var_value::<INT>("a").unwrap(), 100);
+    assert_eq!(module.get_var_value::<INT>("b").unwrap(), 200);
+    assert_eq!(module.get_var_value::<INT>("exported_a").unwrap(), 100);
+}

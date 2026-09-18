@@ -2,8 +2,6 @@ use std::mem;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
-use rhai_codegen::expose_under_internals;
-
 #[cfg(not(feature = "unchecked"))]
 #[cfg(not(all(feature = "no_index", feature = "no_object")))]
 use crate::eval::calc_data_sizes;
@@ -21,14 +19,18 @@ use crate::Array;
 #[cfg(not(feature = "no_object"))]
 use crate::Map;
 use crate::VarDefInfo;
+use crate::{
+    expose_under_internals, Dynamic, Engine, EvalAltResult, EvalContext, FnArgsVec, FnPtr,
+    ImmutableString, Locked, Position, RhaiResult, RhaiResultOf, Scope, Shared, SharedModule,
+    StaticVec, FUNC_TO_STRING, INT,
+};
 #[cfg(not(feature = "no_function"))]
 use crate::{types::dynamic::Variant, CallFnOptions};
-use crate::{
-    Dynamic, Engine, EvalAltResult, EvalContext, FnArgsVec, FnPtr, ImmutableString, Position,
-    RhaiResult, RhaiResultOf, Scope, SharedModule, StaticVec, FUNC_TO_STRING, INT,
-};
 
 mod callback;
+
+#[cfg(not(feature = "no_function"))]
+pub(crate) use callback::wrappers as callback_wrappers;
 
 use crate::grain::bytecode::{code, AssignOp, Chain, Chunk, Receiver, Root, Step, StepFlags, Tail};
 use crate::grain::program::{Program, SharedProgram};
@@ -294,14 +296,14 @@ fn malformed(detail: String) -> Box<EvalAltResult> {
 pub struct Fault {
     /// Byte offset of the instruction this frame stopped at.
     pub address: usize,
-    /// Which chain slot raised, for an `Op::Chain`.
+    /// Which chain slot raised, for an [`Op::Chain`][crate::grain::bytecode::Op::Chain].
     ///
     /// One instruction walks every step of `a.b[i].c` and gets one address
     /// between them, so the slot is what separates them.
     pub slot: Option<u32>,
 }
 
-/// Executes a [`Program`] against an `Engine`.
+/// A VM that executes a [`Program`] against an `Engine`.
 pub struct Vm<'e> {
     engine: &'e Engine,
     global: GlobalRuntimeState,
@@ -425,16 +427,44 @@ struct Handler {
 }
 
 impl<'e> Vm<'e> {
-    /// A [VM][Vm] that dispatches through [`Engine`].
+    /// Create a new [Vm] that dispatches through [`Engine`].
+    #[inline(always)]
     #[must_use]
     pub fn new(engine: &'e Engine) -> Self {
-        let mut global = engine.new_global_runtime_state();
+        Self::with_global_state(engine, engine.new_global_runtime_state())
+    }
 
-        // Eagerly, because a callback gets a *clone* of this state and a clone
-        // of `None` is a separate `None`. Allocating on first fault would leave
-        // every callback recording into a cell of its own.
-        global.grain_faults = Some(crate::Shared::new(crate::Locked::new(Vec::new())));
-
+    /// Create a new [`Vm`] for a call arriving from inside a native function.
+    ///
+    /// ## Global Runtime State
+    ///
+    /// The caller's [runtime state][GlobalRuntimeState] is *cloned* rather
+    /// than shared, and the [functions resolution cache][Caches] starts empty.
+    ///
+    /// The clone is what carries the imported modules, the source name and —
+    /// the part that matters here — the function library holding the
+    /// wrappers, so a closure reached from a native can hand out a pointer of
+    /// its own.
+    ///
+    /// ## Functions Resolution Cache
+    ///
+    /// The empty [`Caches`] is the cost, and it is the one thing a [`Vm`]
+    /// normally exists to avoid.
+    ///
+    /// This cannot be helped: the outer [`Vm`] is borrowed by the frame still
+    /// running beneath this one. Rhai pays the same on its own callbacks —
+    /// but, similar to [`Vm`], it also skips resolution entirely for a
+    /// [function pointer][crate::FnPtr] that is known to be a scripted function
+    /// and carries its own hash.
+    ///
+    /// ## Operation Counting
+    ///
+    /// Operation counting has the same shape and the same reason: increments
+    /// inside the callback land on the clone and are lost when it drops, as
+    /// they are for any re-entrant call Rhai makes.
+    #[inline(always)]
+    #[must_use]
+    pub fn with_global_state(engine: &'e Engine, global: GlobalRuntimeState) -> Self {
         Self {
             engine,
             global,
@@ -450,60 +480,6 @@ impl<'e> Vm<'e> {
             owns_trace: true,
             chain_step: 0,
             pending_slot: None,
-            #[cfg(feature = "debugging")]
-            pending_steps: Vec::new(),
-        }
-    }
-
-    /// A [VM][`Vm`] for a call arriving from inside a native function.
-    ///
-    /// ### Global runtime state
-    ///
-    /// The caller's runtime state is *cloned* rather than shared, and the
-    /// resolution cache starts empty.
-    ///
-    /// The clone is what carries the imported modules, the source name and —
-    /// the part that matters here — the function library holding the
-    /// wrappers, so a closure reached from a native can hand out a pointer of
-    /// its own.
-    ///
-    /// ### Functions resolution cache
-    ///
-    /// The empty `Caches` is the cost, and it is the one thing a `Vm` normally
-    /// exists to avoid. It cannot be helped: the outer `Vm` is borrowed by the
-    /// frame still running beneath this one. Rhai pays the same on its own
-    /// callbacks — but, similar to `Vm`, it also skips resolution entirely
-    /// for a pointer that is known to be a scripted function and carries its
-    /// own hash.
-    ///
-    /// ### Operation counting
-    ///
-    /// Operation counting has the same shape and the same reason: increments
-    /// inside the callback land on the clone and are lost when it drops, as
-    /// they are for any re-entrant call Rhai makes.
-    #[must_use]
-    pub fn with_global_state(engine: &'e Engine, global: GlobalRuntimeState) -> Self {
-        Self {
-            engine,
-            global,
-            caches: Caches::new(),
-            stack: Vec::new(),
-            iterators: FnArgsVec::new_const(),
-            handlers: StaticVec::new_const(),
-            #[cfg(not(feature = "unchecked"))]
-            #[cfg(not(all(feature = "no_index", feature = "no_object")))]
-            sizes: StaticVec::new_const(),
-            unwind_floor: 0,
-            // A crossing carries no receiver: Rhai binds one only where it
-            // dispatches a method, and this arrives through `call_fn_raw`.
-            this: None,
-            // `global` is a clone, so the trace is shared with the run that
-            // called in and is not this call's to clear.
-            owns_trace: false,
-            chain_step: 0,
-            pending_slot: None,
-            // A step belongs to the statement that asked for it, and that
-            // statement is running in the `Vm` this crossing came from.
             #[cfg(feature = "debugging")]
             pending_steps: Vec::new(),
         }
@@ -555,7 +531,7 @@ impl<'e> Vm<'e> {
         let faults = self
             .global
             .grain_faults
-            .get_or_insert_with(|| crate::Shared::new(crate::Locked::new(Vec::new())));
+            .get_or_insert_with(|| Shared::new(Locked::new(Vec::new())));
 
         if let Some(mut faults) = crate::func::native::locked_write(faults) {
             faults.push(fault);
@@ -564,7 +540,7 @@ impl<'e> Vm<'e> {
 
     /// Forget where a run failed, because it did not or has not yet.
     ///
-    /// A no-op on a re-entrant `Vm`: the trace belongs to the run that called it.
+    /// A no-op on a re-entrant [`Vm`]: the trace belongs to the run that called it.
     fn clear_faults(&mut self) {
         if !self.owns_trace {
             return;
@@ -842,7 +818,7 @@ impl<'e> Vm<'e> {
         return if program.functions().is_empty() {
             self.run_with(program, scope, None)
         } else {
-            let wrappers = callback::wrappers(self, program).into();
+            let wrappers = callback::wrappers(self.engine, program).into();
             self.run_with(program, scope, Some(wrappers))
         };
         #[cfg(feature = "no_function")]
@@ -1938,6 +1914,59 @@ impl<'e> Vm<'e> {
         }
 
         Err(missing(name, pos))
+    }
+
+    /// Push the value of a namespace-qualified variable (`ns::bar`).
+    #[cfg(not(feature = "no_module"))]
+    fn load_qualified_named(&mut self, namespace: &str, name: &str, pos: Position) -> RhaiResult {
+        let root = namespace
+            .split(crate::engine::NAMESPACE_SEPARATOR)
+            .next()
+            .unwrap_or(namespace);
+
+        if let Some(module) = self.global.find_import(root).map_or_else(
+            || self.engine.global_sub_modules.get(root).cloned(),
+            |offset| self.global.get_shared_import(offset),
+        ) {
+            let hash_var =
+                crate::calc_var_hash(namespace.split(crate::engine::NAMESPACE_SEPARATOR), name);
+
+            if let Some(mut target) = module
+                .get_qualified_var(hash_var)
+                .or_else(|| module.get_var(name))
+            {
+                target.set_access_mode(crate::types::dynamic::AccessMode::ReadOnly);
+                return Ok(target);
+            }
+
+            let sep = crate::engine::NAMESPACE_SEPARATOR;
+            return Err(Box::new(EvalAltResult::ErrorVariableNotFound(
+                format!("{namespace}{sep}{name}"),
+                pos,
+            )));
+        }
+
+        #[cfg(not(feature = "no_function"))]
+        if namespace == crate::engine::KEYWORD_GLOBAL {
+            if let Some(ref constants) = self.global.constants {
+                if let Some(value) = crate::func::locked_write(constants).unwrap().get_mut(name) {
+                    let mut target = value.clone();
+                    target.set_access_mode(crate::types::dynamic::AccessMode::ReadOnly);
+                    return Ok(target);
+                }
+            }
+
+            let sep = crate::engine::NAMESPACE_SEPARATOR;
+            return Err(Box::new(EvalAltResult::ErrorVariableNotFound(
+                format!("{namespace}{sep}{name}"),
+                pos,
+            )));
+        }
+
+        Err(Box::new(EvalAltResult::ErrorModuleNotFound(
+            namespace.to_string(),
+            pos,
+        )))
     }
 
     /// Ask the resolver a host registered with `Engine::on_var`, if there is one.
@@ -3520,6 +3549,58 @@ impl<'e> Vm<'e> {
                     self.stack.push(value);
                 }
 
+                #[cfg(not(feature = "no_module"))]
+                code::tag::LOAD_NAMED_WITH_NS => {
+                    let ns_index = u32::from(small(1)?);
+                    let namespace = program
+                        .name(ns_index)
+                        .ok_or_else(|| malformed(format!("no namespace {ns_index}")))?;
+                    let name_index = u32::from(small(3)?);
+                    let name = program
+                        .name(name_index)
+                        .ok_or_else(|| malformed(format!("no name {name_index}")))?;
+
+                    let value = self.load_qualified_named(namespace, name, pos())?;
+                    self.stack.push(value);
+                }
+
+                #[cfg(not(feature = "no_module"))]
+                code::tag::EXPORT_LOCAL => {
+                    let slot = small(1)?;
+                    let index = base + slot as usize;
+                    if index >= scope.len() {
+                        return Err(malformed(format!("local slot {slot} is out of scope")));
+                    }
+                    let alias = u32::from(small(3)?);
+                    let alias = program
+                        .name(alias)
+                        .ok_or_else(|| malformed(format!("no name {alias}")))?;
+
+                    scope.add_alias_by_index(index, self.engine.get_interned_string(alias));
+                }
+
+                #[cfg(not(feature = "no_module"))]
+                code::tag::EXPORT_NAMED => {
+                    let name_idx = u32::from(small(1)?);
+                    let name = program
+                        .name(name_idx)
+                        .ok_or_else(|| malformed(format!("no name {name_idx}")))?;
+                    let alias = u32::from(small(3)?);
+                    let alias = program
+                        .name(alias)
+                        .ok_or_else(|| malformed(format!("no name {alias}")))?;
+
+                    if !alias.is_empty() {
+                        let Some(index) = scope.search(name) else {
+                            return Err(Box::new(EvalAltResult::ErrorVariableNotFound(
+                                name.to_string(),
+                                pos(),
+                            )));
+                        };
+                        scope.add_alias_by_index(index, self.engine.get_interned_string(alias));
+                    }
+                }
+
                 code::tag::ASSIGN_NAMED | code::tag::ASSIGN_NAMED_OP => {
                     let index = u32::from(small(1)?);
                     let name = program
@@ -3541,7 +3622,9 @@ impl<'e> Vm<'e> {
                     self.assign_named(program, op, name, rhs, scope, pos())?;
                 }
 
-                code::tag::DECLARE_LOCAL | code::tag::DECLARE_CONST => {
+                code::tag::DECLARE_LOCAL
+                | code::tag::DECLARE_CONST
+                | code::tag::DECLARE_GLOBAL_CONST => {
                     let index = u32::from(small(1)?);
                     // A `Scope` entry name is an `Identifier`, which is a
                     // `SmartString` — short names live inline, so handing it a
@@ -3609,13 +3692,30 @@ impl<'e> Vm<'e> {
 
                     scope.push_entry(
                         self.engine.get_interned_string(name),
-                        if tag == code::tag::DECLARE_CONST {
+                        if tag != code::tag::DECLARE_LOCAL {
                             AccessMode::ReadOnly
                         } else {
                             AccessMode::ReadWrite
                         },
                         value,
                     );
+
+                    #[cfg(not(feature = "no_function"))]
+                    #[cfg(not(feature = "no_module"))]
+                    if tag == code::tag::DECLARE_GLOBAL_CONST
+                        && (!program.functions().is_empty()
+                            || self.global.lib.iter().any(|module| !module.is_empty()))
+                    {
+                        let value = scope
+                            .get(name)
+                            .expect("the declaration just pushed this scope entry")
+                            .clone();
+                        crate::func::locked_write(self.global.constants.get_or_insert_with(|| {
+                            Shared::new(Locked::new(std::collections::BTreeMap::new()))
+                        }))
+                        .unwrap()
+                        .insert(self.engine.get_interned_string(name), value);
+                    }
                 }
 
                 code::tag::ASSIGN_LOCAL | code::tag::ASSIGN_LOCAL_OP => {
@@ -3895,6 +3995,46 @@ impl<'e> Vm<'e> {
                         pos(),
                     )?;
                     self.stack.truncate(first);
+                    self.stack.push(value);
+                }
+
+                #[cfg(not(feature = "no_module"))]
+                code::tag::CALL_WITH_NS => {
+                    let namespace = u32::from(small(1)?);
+                    let namespace = program
+                        .name(namespace)
+                        .ok_or_else(|| malformed(format!("no namespace {namespace}")))?;
+                    let name = u32::from(small(3)?);
+                    let name = program
+                        .name(name)
+                        .ok_or_else(|| malformed(format!("no name {name}")))?;
+                    let argc = code[pc + 5] as usize;
+
+                    if self.stack.len() < argc {
+                        return Err(malformed("operand stack underflow".to_string()));
+                    }
+
+                    let first_arg = self.stack.len() - argc;
+                    let mut arg_values: FnArgsVec<Dynamic> = self
+                        .stack
+                        .drain(first_arg..)
+                        .map(Dynamic::flatten)
+                        .collect();
+                    let mut args: FnArgsVec<&mut Dynamic> = arg_values.iter_mut().collect();
+
+                    let ns = namespace.split(crate::engine::NAMESPACE_SEPARATOR);
+                    let hash = crate::calc_fn_hash(ns, name, args.len());
+
+                    let value = self.engine.exec_qualified_fn_call(
+                        &mut self.global,
+                        &mut self.caches,
+                        namespace,
+                        name,
+                        &mut args,
+                        hash,
+                        pos(),
+                    )?;
+
                     self.stack.push(value);
                 }
 
@@ -4302,6 +4442,90 @@ impl<'e> Vm<'e> {
                     *place(scope.get_mut_by_index(index), "", pos())? = value;
                 }
 
+                #[cfg(not(feature = "no_module"))]
+                code::tag::IMPORT => {
+                    use crate::ModuleResolver;
+
+                    let alias = u32::from(small(1)?);
+                    let alias = program
+                        .name(alias)
+                        .ok_or_else(|| malformed(format!("no name {alias}")))?;
+
+                    // Guard against too many modules
+                    #[cfg(not(feature = "unchecked"))]
+                    if self.global.num_modules_loaded >= self.engine.max_modules() {
+                        return Err(Box::new(EvalAltResult::ErrorTooManyModules(pos())));
+                    }
+
+                    let v = self.pop()?.flatten();
+                    let path_pos = pos();
+
+                    let path = v.try_cast_result::<ImmutableString>().map_err(|v| {
+                        self.engine
+                            .make_type_mismatch_err::<ImmutableString>(v.type_name(), path_pos)
+                    })?;
+
+                    let resolver = self.global.embedded_module_resolver.clone();
+
+                    let module = resolver
+                        .as_ref()
+                        .and_then(|r| {
+                            match r.resolve_raw(
+                                self.engine,
+                                &mut self.global,
+                                scope,
+                                &path,
+                                path_pos,
+                            ) {
+                                Err(err)
+                                    if matches!(*err, EvalAltResult::ErrorModuleNotFound(..)) =>
+                                {
+                                    None
+                                }
+                                result => Some(result),
+                            }
+                        })
+                        .or_else(|| {
+                            match self.engine.module_resolver().resolve_raw(
+                                self.engine,
+                                &mut self.global,
+                                scope,
+                                &path,
+                                path_pos,
+                            ) {
+                                Err(err)
+                                    if matches!(*err, EvalAltResult::ErrorModuleNotFound(..)) =>
+                                {
+                                    None
+                                }
+                                result => Some(result),
+                            }
+                        })
+                        .unwrap_or_else(|| {
+                            Err(Box::new(EvalAltResult::ErrorModuleNotFound(
+                                path.to_string(),
+                                path_pos,
+                            )))
+                        })?;
+
+                    let (alias, must_be_indexed) = if alias.is_empty() {
+                        (self.engine.const_empty_string(), false)
+                    } else {
+                        (self.engine.get_interned_string(alias), true)
+                    };
+
+                    if !must_be_indexed || module.is_indexed() {
+                        self.global.push_import(alias, module);
+                    } else {
+                        // Index the module (making a clone copy if necessary) if it is not indexed
+                        let mut m = crate::func::shared_take_or_clone(module);
+                        m.build_index();
+                        self.global.push_import(alias, m);
+                    }
+
+                    self.global.num_modules_loaded += 1;
+                }
+
                 code::tag::THROW => {
                     // Flattened, as Rhai does, so a shared cell is thrown as
                     // its value rather than as the cell.
@@ -4401,6 +4625,7 @@ mod tests {
             .map(|(index, span)| Function {
                 name: index as u32,
                 params: Vec::new(),
+                access: crate::FnAccess::Public,
                 this_type: None,
                 chunk: Chunk::new(end_of(span.start), end_of(span.end), 8),
             })

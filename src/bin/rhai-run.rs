@@ -93,6 +93,8 @@ fn run_grain_bytecode(filename: &Path) {
         }
     };
 
+    program.set_source(engine.get_interned_string(filename.to_string_lossy().as_ref()));
+
     let mut scope = rhai::Scope::new();
     let mut vm = Vm::new(&engine);
 

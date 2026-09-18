@@ -2469,6 +2469,166 @@ impl Module {
         Ok(module)
     }
 
+    /// Create a new [`Module`] by evaluating a Rhai Grain program.
+    ///
+    /// The entire program is encapsulated into each function,
+    /// allowing functions to cross-call each other.
+    #[cfg(not(feature = "no_module"))]
+    #[cfg(feature = "grain")]
+    #[inline(always)]
+    pub fn eval_grain_as_new(
+        scope: crate::Scope,
+        program: impl Into<crate::grain::SharedProgram>,
+        engine: &crate::Engine,
+    ) -> RhaiResultOf<Self> {
+        let mut scope = scope;
+        let global = &mut engine.new_global_runtime_state();
+
+        Self::eval_grain_as_new_raw(engine, &mut scope, global, program)
+    }
+
+    /// Create a new [`Module`] by evaluating a Rhai Grain program.
+    ///
+    /// The entire program is encapsulated into each function,
+    /// allowing functions to cross-call each other.
+    ///
+    /// # WARNING - Low Level API
+    ///
+    /// This function is very low level.
+    ///
+    /// In particular, the [`global`][crate::GlobalRuntimeState] parameter allows the entire
+    /// calling environment to be encapsulated, including automatic global constants.
+    #[cfg(not(feature = "no_module"))]
+    #[cfg(feature = "grain")]
+    pub fn eval_grain_as_new_raw(
+        engine: &crate::Engine,
+        scope: &mut crate::Scope,
+        global: &mut crate::eval::GlobalRuntimeState,
+        program: impl Into<crate::grain::SharedProgram>,
+    ) -> RhaiResultOf<Self> {
+        let program = program.into();
+
+        // Save global state
+        let orig_scope_len = scope.len();
+        let orig_imports_len = global.num_imports();
+        let orig_source = global.source.clone();
+
+        #[cfg(not(feature = "no_function"))]
+        let orig_lib_len = global.lib.len();
+
+        #[cfg(not(feature = "no_function"))]
+        let orig_constants = std::mem::take(&mut global.constants);
+
+        // Run the Grain program
+        let mut vm = crate::grain::Vm::with_global_state(
+            engine,
+            std::mem::replace(global, engine.new_global_runtime_state()),
+        );
+        let result = vm.eval_with_callbacks(scope, &program);
+        *global = vm.into_global_state();
+
+        // Create new module
+        let mut module = Self::new();
+
+        // Extra modules left become sub-modules
+        let imports = if result.is_ok() {
+            global
+                .scan_imports_raw()
+                .skip(orig_imports_len)
+                .map(|(k, m)| (k.clone(), m.clone()))
+                .collect()
+        } else {
+            crate::ThinVec::new()
+        };
+        imports.iter().for_each(|(k, m)| {
+            module.set_sub_module(k.clone(), m.clone());
+        });
+
+        // Restore global state
+        #[cfg(not(feature = "no_function"))]
+        let constants = std::mem::replace(&mut global.constants, orig_constants);
+
+        global.truncate_imports(orig_imports_len);
+
+        #[cfg(not(feature = "no_function"))]
+        global.lib.truncate(orig_lib_len);
+
+        global.source = orig_source;
+
+        // The return value is thrown away and not used
+        let _ = result?;
+
+        // Encapsulated environment
+        #[cfg(not(feature = "no_function"))]
+        let mut lib: crate::StaticVec<_> = program.lib().cloned().into_iter().collect();
+        #[cfg(not(feature = "no_function"))]
+        if !program.functions().is_empty() {
+            let wrappers = crate::grain::callback_wrappers(engine, &program);
+            lib.push(wrappers.into());
+        }
+
+        #[cfg(not(feature = "no_function"))]
+        let env = Shared::new(crate::func::EncapsulatedEnviron {
+            #[cfg(not(feature = "no_function"))]
+            lib,
+            imports,
+            #[cfg(not(feature = "no_function"))]
+            constants,
+        });
+
+        // Variables with an alias left in the scope become module variables
+        let mut i = scope.len();
+        while i > 0 {
+            i -= 1;
+
+            let (mut _value, mut aliases) = if i >= orig_scope_len {
+                let (_, v, a) = scope.pop_entry().unwrap();
+                (v, a)
+            } else {
+                let (_, v, a) = scope.get_entry_by_index(i);
+                (v.clone(), a.to_vec())
+            };
+
+            match aliases.len() {
+                0 => (),
+                1 => {
+                    let alias = aliases.pop().unwrap();
+                    if !module.contains_var(&alias) {
+                        module.set_var(alias, _value);
+                    }
+                }
+                _ => {
+                    // Avoid cloning the last value
+                    let mut first_alias = None;
+
+                    for alias in aliases {
+                        if module.contains_var(&alias) {
+                            continue;
+                        }
+                        if first_alias.is_none() {
+                            first_alias = Some(alias);
+                        } else {
+                            module.set_var(alias, _value.clone());
+                        }
+                    }
+
+                    if let Some(alias) = first_alias {
+                        module.set_var(alias, _value);
+                    }
+                }
+            }
+        }
+
+        #[cfg(not(feature = "no_function"))]
+        crate::grain::export_functions_to_module(&program, &mut module, &env);
+
+        module.id = program.source().cloned();
+
+        module.build_index();
+
+        Ok(module)
+    }
+
     /// Does the [`Module`] contain indexed functions that have been exposed to the global namespace?
     ///
     /// # Panics

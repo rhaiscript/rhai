@@ -187,6 +187,18 @@ pub mod tag {
     pub const STATEMENT: u8 = 0x47;
     /// [`Op::StoreLocal`](super::Op::StoreLocal) as a constant.
     pub const STORE_CONST: u8 = 0x48;
+    /// [`Op::DeclareLocal`](super::Op::DeclareLocal) for a global-level constant.
+    pub const DECLARE_GLOBAL_CONST: u8 = 0x49;
+    /// [`Op::LoadNamedWithNs`](super::Op::LoadNamedWithNs).
+    pub const LOAD_NAMED_WITH_NS: u8 = 0x4a;
+    /// [`Op::ExportLocal`](super::Op::ExportLocal).
+    pub const EXPORT_LOCAL: u8 = 0x4b;
+    /// [`Op::ExportNamed`](super::Op::ExportNamed).
+    pub const EXPORT_NAMED: u8 = 0x4c;
+    /// [`Op::Import`](super::Op::Import).
+    pub const IMPORT: u8 = 0x4d;
+    /// [`Op::CallWithNs`](super::Op::CallWithNs).
+    pub const CALL_WITH_NS: u8 = 0x4e;
 }
 
 /// How wide each tag's instruction is, with 0 for the tags that are not one.
@@ -257,30 +269,36 @@ static WIDTHS: [u8; 256] = {
     widths[tag::STORE_CONST as usize] = 3;
     widths[tag::DECLARE_LOCAL as usize] = 3;
     widths[tag::DECLARE_CONST as usize] = 3;
+    widths[tag::DECLARE_GLOBAL_CONST as usize] = 3;
     widths[tag::UNWIND_TO as usize] = 3;
-    #[cfg(not(feature = "no_ast"))]
-    {
-        widths[tag::EVAL_AST as usize] = 3;
-        widths[tag::EVAL_AST_KEEP as usize] = 3;
-    }
     widths[tag::CHAIN as usize] = 3;
     widths[tag::MAKE_ARRAY as usize] = 3;
     widths[tag::SWITCH as usize] = 3;
     widths[tag::LOAD_NAMED as usize] = 3;
     widths[tag::ASSIGN_NAMED as usize] = 3;
+    widths[tag::IMPORT as usize] = 3;
 
-    widths[tag::ASSIGN_NAMED_OP as usize] = 5;
+    #[cfg(not(feature = "no_ast"))]
+    {
+        widths[tag::EVAL_AST as usize] = 3;
+        widths[tag::EVAL_AST_KEEP as usize] = 3;
+    }
 
     widths[tag::CALL as usize] = 4;
     widths[tag::CALL_CAPTURE as usize] = 4;
 
     widths[tag::ASSIGN_LOCAL as usize] = 5;
+    widths[tag::ASSIGN_NAMED_OP as usize] = 5;
+    widths[tag::EXPORT_LOCAL as usize] = 5;
+    widths[tag::EXPORT_NAMED as usize] = 5;
+    widths[tag::LOAD_NAMED_WITH_NS as usize] = 5;
     widths[tag::JUMP as usize] = 5;
     widths[tag::JUMP_IF_TRUE as usize] = 5;
     widths[tag::JUMP_IF_FALSE as usize] = 5;
     widths[tag::SKIP_IF_NOT_UNIT as usize] = 5;
 
     widths[tag::CALL_OP as usize] = 6;
+    widths[tag::CALL_WITH_NS as usize] = 6;
     widths[tag::CALL_LOCAL_REF as usize] = 6;
     widths[tag::CALL_LOCAL_REF_CAPTURE as usize] = 6;
     widths[tag::CALL_NAMED_REF as usize] = 6;
@@ -456,6 +474,21 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 code.push(tag::LOAD_NAMED);
                 code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
             }
+            Op::LoadNamedWithNs { namespace, name } => {
+                code.push(tag::LOAD_NAMED_WITH_NS);
+                code.extend_from_slice(&small(*namespace as usize, "names")?.to_le_bytes());
+                code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
+            }
+            Op::ExportLocal { slot, alias } => {
+                code.push(tag::EXPORT_LOCAL);
+                code.extend_from_slice(&slot.to_le_bytes());
+                code.extend_from_slice(&small(*alias as usize, "names")?.to_le_bytes());
+            }
+            Op::ExportNamed { name, alias } => {
+                code.push(tag::EXPORT_NAMED);
+                code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
+                code.extend_from_slice(&small(*alias as usize, "names")?.to_le_bytes());
+            }
 
             Op::AssignNamed { name, op: None } => {
                 code.push(tag::ASSIGN_NAMED);
@@ -472,9 +505,17 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 );
             }
 
-            Op::DeclareLocal { name, is_const } => {
+            Op::DeclareLocal {
+                name,
+                is_const,
+                is_global,
+            } => {
                 code.push(if *is_const {
-                    tag::DECLARE_CONST
+                    if *is_global {
+                        tag::DECLARE_GLOBAL_CONST
+                    } else {
+                        tag::DECLARE_CONST
+                    }
                 } else {
                     tag::DECLARE_LOCAL
                 });
@@ -567,6 +608,17 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 if let Some((_, operand)) = operand {
                     code.extend_from_slice(&operand.to_le_bytes());
                 }
+            }
+
+            Op::CallWithNs {
+                namespace,
+                name,
+                argc,
+            } => {
+                code.push(tag::CALL_WITH_NS);
+                code.extend_from_slice(&small(*namespace as usize, "names")?.to_le_bytes());
+                code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
+                code.push(*argc);
             }
 
             Op::Rotate(under) => {
@@ -708,6 +760,11 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
             }
             Op::Return => code.push(tag::RETURN),
 
+            Op::Import { alias } => {
+                code.push(tag::IMPORT);
+                code.extend_from_slice(&small(*alias as usize, "names")?.to_le_bytes());
+            }
+
             #[cfg(not(feature = "no_ast"))]
             Op::EvalAst {
                 residual,
@@ -814,6 +871,8 @@ fn encoded_width(op: &Op) -> usize {
         | Op::AssignThis { op: Some(..) }
         | Op::CheckSize { .. } => 3,
 
+        Op::Import { .. } => 3,
+
         #[cfg(not(feature = "no_ast"))]
         Op::EvalAst { .. } => 3,
 
@@ -822,6 +881,7 @@ fn encoded_width(op: &Op) -> usize {
             receiver: Receiver::This,
             ..
         } => 4,
+
         Op::AssignLocal { op: None, .. }
         | Op::AssignNamed { op: Some(..), .. }
         | Op::Jump(..)
@@ -834,6 +894,16 @@ fn encoded_width(op: &Op) -> usize {
         | Op::PushHandler {
             catch_var: None, ..
         } => 5,
+
+        Op::LoadNamedWithNs { .. } | Op::ExportLocal { .. } | Op::ExportNamed { .. } => 5,
+
+        Op::Call { op: Some(..), .. }
+        | Op::CallRef {
+            receiver: Receiver::Local(..) | Receiver::Named(..),
+            ..
+        }
+        | Op::CallWithNs { .. } => 6,
+
         Op::IterNext {
             counter_slot: Some(_),
             ..
@@ -842,11 +912,7 @@ fn encoded_width(op: &Op) -> usize {
             catch_var: Some(..),
             ..
         } => 7,
-        Op::Call { op: Some(..), .. }
-        | Op::CallRef {
-            receiver: Receiver::Local(..) | Receiver::Named(..),
-            ..
-        } => 6,
+
         Op::AssignLocal { op: Some(..), .. } => 7,
     }
 }
@@ -875,6 +941,10 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
             slot: small(1)?,
             is_const: true,
         },
+        tag::EXPORT_LOCAL => Op::ExportLocal {
+            slot: small(1)?,
+            alias: u32::from(small(3)?),
+        },
 
         tag::ASSIGN_LOCAL => Op::AssignLocal {
             slot: small(1)?,
@@ -888,6 +958,15 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         },
 
         tag::LOAD_NAMED => Op::LoadNamed(u32::from(small(1)?)),
+        tag::LOAD_NAMED_WITH_NS => Op::LoadNamedWithNs {
+            namespace: u32::from(small(1)?),
+            name: u32::from(small(3)?),
+        },
+        tag::EXPORT_NAMED => Op::ExportNamed {
+            name: u32::from(small(1)?),
+            alias: u32::from(small(3)?),
+        },
+
         tag::ASSIGN_NAMED => Op::AssignNamed {
             name: u32::from(small(1)?),
             op: None,
@@ -908,10 +987,17 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         tag::DECLARE_LOCAL => Op::DeclareLocal {
             name: u32::from(small(1)?),
             is_const: false,
+            is_global: false,
         },
         tag::DECLARE_CONST => Op::DeclareLocal {
             name: u32::from(small(1)?),
             is_const: true,
+            is_global: false,
+        },
+        tag::DECLARE_GLOBAL_CONST => Op::DeclareLocal {
+            name: u32::from(small(1)?),
+            is_const: true,
+            is_global: true,
         },
 
         tag::POP => Op::Pop,
@@ -938,6 +1024,11 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
             argc: code[at + 3],
             op: Some(u32::from(small(4)?)),
             capture_parent_scope: false,
+        },
+        tag::CALL_WITH_NS => Op::CallWithNs {
+            namespace: u32::from(small(1)?),
+            name: u32::from(small(3)?),
+            argc: code[at + 5],
         },
 
         tag @ (tag::CALL_LOCAL_REF | tag::CALL_LOCAL_REF_CAPTURE) => Op::CallRef {
@@ -1035,6 +1126,10 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         },
         tag::RETURN => Op::Return,
 
+        tag::IMPORT => Op::Import {
+            alias: u32::from(small(1)?),
+        },
+
         #[cfg(not(feature = "no_ast"))]
         tag::EVAL_AST => Op::EvalAst {
             residual: u32::from(small(1)?),
@@ -1050,10 +1145,13 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
     })
 }
 
-/// Every instruction in a chunk, paired with its address.
+/// _(internals)_ Every instruction in a chunk, paired with its address.
+/// Exported under the `internals` feature only.
 ///
 /// Stops at the first thing it cannot decode, so it is safe to point at
-/// anything. For a chunk that verified, it reaches the end.
+/// anything.
+///
+/// For a chunk that verified, it reaches the end.
 #[crate::expose_under_internals]
 fn disassemble(code: &[u8]) -> impl Iterator<Item = (usize, Op)> + '_ {
     let mut at = 0usize;
@@ -1108,10 +1206,17 @@ mod tests {
             Op::DeclareLocal {
                 name: 8,
                 is_const: false,
+                is_global: false,
             },
             Op::DeclareLocal {
                 name: 9,
                 is_const: true,
+                is_global: false,
+            },
+            Op::DeclareLocal {
+                name: 10,
+                is_const: true,
+                is_global: true,
             },
             Op::Pop,
             Op::Call {

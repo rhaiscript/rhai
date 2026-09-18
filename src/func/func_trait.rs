@@ -1,6 +1,7 @@
 //! Module which defines the function registration mechanism.
 
 #![cfg(not(feature = "no_function"))]
+#![cfg(not(feature = "no_ast"))]
 #![allow(non_snake_case)]
 
 use crate::parser::ParseResult;

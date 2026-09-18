@@ -37,7 +37,6 @@ pub const KEYWORD_IS_DEF_FN: &str = "is_def_fn";
 pub const KEYWORD_THIS: &str = "this";
 #[cfg(not(feature = "no_function"))]
 #[cfg(not(feature = "no_module"))]
-#[cfg(not(feature = "no_ast"))]
 pub const KEYWORD_GLOBAL: &str = "global";
 #[cfg(not(feature = "no_object"))]
 pub const FN_GET: &str = "get$";
