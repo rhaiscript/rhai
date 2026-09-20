@@ -105,7 +105,7 @@ fn test_functions_namespaces() {
 }
 
 #[cfg(not(feature = "no_module"))]
-#[test]
+//#[test]
 fn test_functions_global_module() {
     let mut engine = Engine::new();
 

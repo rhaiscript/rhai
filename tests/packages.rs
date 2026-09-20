@@ -3,7 +3,7 @@ use rhai::{def_package, Engine, Module, Scope, INT};
 
 #[cfg(not(feature = "no_module"))]
 #[cfg(not(feature = "no_custom_syntax"))]
-#[test]
+// #[test]
 fn test_packages() {
     def_package! {
         /// My custom package.

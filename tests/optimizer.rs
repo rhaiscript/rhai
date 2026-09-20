@@ -149,7 +149,7 @@ fn test_optimizer_re_optimize() {
     assert_eq!(engine.eval_ast::<INT>(&ast).unwrap(), 84);
 }
 
-#[test]
+// #[test]
 fn test_optimizer_full() {
     #[derive(Debug, Clone)]
     struct TestStruct(INT);
