@@ -26,6 +26,7 @@ use crate::grain::bytecode::{
     AssignOp, Chain, Chunk, Op, Positions, Receiver, Root, Step, StepFlags, Switch, SwitchRange,
     Tail,
 };
+use crate::grain::bytecode::{CustomInput, CustomSyntaxSite};
 use crate::grain::compile::poolable::is_poolable;
 use crate::grain::compile::slots::Slots;
 use crate::grain::format::Caps;
@@ -158,6 +159,31 @@ impl Compiler {
             })
             .collect();
 
+        let custom_syntax: Vec<_> = lowering
+            .custom_syntax
+            .into_iter()
+            .map(|site| CustomSyntaxSite {
+                key: site.key,
+                state: site.state,
+                inputs: site
+                    .inputs
+                    .into_iter()
+                    .map(|input| match input {
+                        CustomInput::Chunk(chunk, literal) => CustomInput::Chunk(
+                            Chunk::new(
+                                offsets[chunk.entry() as usize],
+                                offsets[chunk.end() as usize],
+                                lowering.max_stack,
+                            ),
+                            literal,
+                        ),
+                        #[cfg(not(feature = "no_ast"))]
+                        CustomInput::Residual(index) => CustomInput::Residual(index),
+                    })
+                    .collect(),
+            })
+            .collect();
+
         let caps = lowering.caps;
 
         // Rhai's own functions are carried whenever anything might still reach
@@ -193,6 +219,7 @@ impl Compiler {
                 assign_ops: lowering.assign_ops,
                 chains: lowering.chains,
                 switches: lowering.switches,
+                custom_syntax,
                 lib,
                 #[cfg(not(feature = "no_module"))]
                 resolver: ast.resolver.clone(),
@@ -301,6 +328,7 @@ struct Lowering {
     assign_ops: Vec<AssignOp>,
     chains: Vec<Chain>,
     switches: Vec<Switch>,
+    custom_syntax: Vec<CustomSyntaxSite>,
     slots: Slots,
     max_stack: u16,
     loops: Vec<Loop>,
@@ -1759,9 +1787,11 @@ impl Lowering {
             // that is not the one at runtime. Refusing the lowering keeps the
             // walker's answer, as it does for `eval` above.
             #[cfg(not(feature = "no_custom_syntax"))]
-            Expr::Custom(..) => {
-                self.residual_expr(expr);
-                self.defeated = true;
+            Expr::Custom(custom, pos) => {
+                if custom.scope_may_be_changed || !self.custom_syntax(custom, *pos) {
+                    self.residual_expr(expr);
+                    self.defeated = true;
+                }
             }
 
             // Listed rather than matched with `_`, for the reason
@@ -2403,6 +2433,65 @@ impl Lowering {
     fn push_residual(&mut self, expr: Expr) -> u32 {
         self.residuals.push(expr);
         (self.residuals.len() - 1) as u32
+    }
+
+    fn custom_syntax(&mut self, custom: &crate::ast::CustomExpr, pos: Position) -> bool {
+        let Some(key) = custom.tokens.first().cloned() else {
+            return false;
+        };
+        let jump = self.emit_jump();
+        let mut inputs = Vec::with_capacity(custom.inputs.len());
+        for input in &custom.inputs {
+            let first = self.code.len();
+            let max_stack = self.max_stack;
+            self.expression(input);
+
+            if self.defeated {
+                self.code.truncate(first);
+                self.positions.truncate(first);
+                self.max_stack = max_stack;
+                self.defeated = false;
+                #[cfg(not(feature = "no_ast"))]
+                {
+                    inputs.push(CustomInput::Residual(self.push_residual(input.clone())));
+                    continue;
+                }
+                #[cfg(feature = "no_ast")]
+                return false;
+            }
+            self.emit(Op::Return);
+
+            let chunk = Chunk::new(first as u32, self.code.len() as u32, self.max_stack);
+            let literal = self
+                .custom_literal(input)
+                .map(|value| self.push_const(value));
+            inputs.push(CustomInput::Chunk(chunk, literal));
+        }
+        self.patch_here(jump);
+        let site = self.custom_syntax.len();
+        let key = self.push_name(key);
+        let state = self.push_const(custom.state.clone());
+        self.custom_syntax
+            .push(CustomSyntaxSite { key, state, inputs });
+        self.emit_at(Op::CustomSyntax(site as u32), pos);
+        self.caps.insert(Caps::CUSTOM_SYNTAX);
+        true
+    }
+
+    #[cfg(not(feature = "no_custom_syntax"))]
+    fn custom_literal(&self, expr: &Expr) -> Option<Dynamic> {
+        match expr {
+            Expr::DynamicConstant(value, ..) => Some(*value.clone()),
+            Expr::IntegerConstant(value, ..) => Some((*value).into()),
+            #[cfg(not(feature = "no_float"))]
+            Expr::FloatConstant(value, ..) => Some((*value).into()),
+            Expr::CharConstant(value, ..) => Some((*value).into()),
+            Expr::StringConstant(value, ..) => Some(value.clone().into()),
+            Expr::BoolConstant(value, ..) => Some((*value).into()),
+            Expr::Unit(..) => Some(Dynamic::UNIT),
+            Expr::Variable(value, ..) => Some(value.1.clone().into()),
+            _ => None,
+        }
     }
 
     fn emit(&mut self, op: Op) {

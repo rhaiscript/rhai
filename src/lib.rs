@@ -228,6 +228,7 @@ use once_cell::race::OnceBox as OnceCell;
 
 pub use api::build_type::{CustomType, TypeBuilder};
 #[cfg(not(feature = "no_custom_syntax"))]
+#[cfg(any(not(feature = "no_ast"), feature = "grain"))]
 pub use api::custom_syntax::Expression;
 #[cfg(not(feature = "no_ast"))]
 #[cfg(not(feature = "no_std"))]
@@ -382,6 +383,7 @@ pub use ast::{
 
 #[cfg(feature = "internals")]
 #[cfg(not(feature = "no_custom_syntax"))]
+#[cfg(not(feature = "no_ast"))]
 pub use ast::CustomExpr;
 
 #[cfg(feature = "internals")]

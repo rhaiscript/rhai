@@ -11,6 +11,7 @@ use crate::grain::bytecode::{
     site_to_position, sites, AssignOp, Chain, Chunk, Code, Pools, Positions, Strings, Switch,
     TableError,
 };
+use crate::grain::bytecode::{CustomInput, CustomSyntaxSite};
 use crate::grain::format::{Caps, Sidecar};
 
 /// _(internals)_ One compiled script function.
@@ -72,6 +73,7 @@ pub type SharedProgram = Shared<Program<'static>>;
 ///
 /// [`AST`]: crate::AST
 /// [`Engine`]: crate::Engine
+#[derive(Clone)]
 pub struct Program<'a> {
     /// The capabilities required by this program's instructions.
     caps: Caps,
@@ -142,6 +144,10 @@ pub struct Program<'a> {
     /// One dispatch table per `switch`, for the same reason.
     switches: Vec<Switch>,
 
+    /// One record per `Op::CustomSyntax` site: the custom syntax to invoke
+    /// and its (possibly only partially lowered) inputs.
+    custom_syntax: Vec<CustomSyntaxSite>,
+
     /// Script functions the compiler did not lower, as Rhai's own library, so
     /// a fragment can still call one the ordinary way.
     ///
@@ -176,6 +182,9 @@ impl core::fmt::Debug for Program<'_> {
         #[cfg(not(feature = "no_ast"))]
         f.field("residuals", &self.residuals.len());
 
+        #[cfg(not(feature = "no_custom_syntax"))]
+        f.field("custom_syntax_sites", &self.custom_syntax.len());
+
         f.field("compiled_fns", &self.functions.len())
             .field(
                 "walked_fns",
@@ -209,8 +218,10 @@ fn unsupported_kind(node: &ASTNode) -> Option<&'static str> {
         },
         ASTNode::Expr(expr) => match expr {
             Expr::InterpolatedString(..) => "string interpolation",
+            // Only "unsupported" when it may change the scope's shape --
+            // otherwise it lowers to `Op::CustomSyntax`, per input.
             #[cfg(not(feature = "no_custom_syntax"))]
-            Expr::Custom(..) => "custom syntax",
+            Expr::Custom(custom, ..) if custom.scope_may_be_changed => "custom syntax",
             Expr::Map(..) => "a non-constant map literal",
             _ => return None,
         },
@@ -243,6 +254,7 @@ pub(crate) struct Parts<'a> {
     pub assign_ops: Vec<AssignOp>,
     pub chains: Vec<Chain>,
     pub switches: Vec<Switch>,
+    pub custom_syntax: Vec<CustomSyntaxSite>,
     pub lib: Option<SharedModule>,
     #[cfg(not(feature = "no_module"))]
     pub resolver: Option<Shared<StaticModuleResolver>>,
@@ -286,6 +298,7 @@ impl<'a> Program<'a> {
             assign_ops: parts.assign_ops,
             chains: parts.chains,
             switches: parts.switches,
+            custom_syntax: parts.custom_syntax,
             lib: parts.lib,
             #[cfg(not(feature = "no_module"))]
             resolver: parts.resolver,
@@ -316,6 +329,7 @@ impl<'a> Program<'a> {
             assign_ops: self.assign_ops,
             chains: self.chains,
             switches: self.switches,
+            custom_syntax: self.custom_syntax,
             lib: self.lib,
             #[cfg(not(feature = "no_module"))]
             resolver: self.resolver,
@@ -350,7 +364,34 @@ impl<'a> Program<'a> {
     fn chunks(&self) -> Vec<Chunk> {
         core::iter::once(self.main)
             .chain(self.functions.iter().map(|f| f.chunk))
+            .chain(self.custom_syntax_chunks())
             .collect()
+    }
+
+    /// Every custom-syntax input lowered to a chunk, in pool order.
+    ///
+    /// Each one needs its own reachability pass -- it runs at its own entry
+    /// point with a fresh operand-stack depth, exactly as a function body
+    /// does, even though it shares the enclosing frame's `Slots`/scope base.
+    fn custom_syntax_chunks(&self) -> impl Iterator<Item = Chunk> + '_ {
+        self.custom_syntax.iter().flat_map(|site| {
+            site.inputs.iter().filter_map(|input| match input {
+                CustomInput::Chunk(chunk, ..) => Some(*chunk),
+                #[cfg(not(feature = "no_ast"))]
+                CustomInput::Residual(..) => None,
+            })
+        })
+    }
+
+    /// The same, mutably, for [`Program::tighten_stack`].
+    fn custom_syntax_chunks_mut(&mut self) -> impl Iterator<Item = &mut Chunk> {
+        self.custom_syntax.iter_mut().flat_map(|site| {
+            site.inputs.iter_mut().filter_map(|input| match input {
+                CustomInput::Chunk(chunk, ..) => Some(chunk),
+                #[cfg(not(feature = "no_ast"))]
+                CustomInput::Residual(..) => None,
+            })
+        })
     }
 
     pub(crate) fn pools(&self) -> Pools<'_> {
@@ -363,6 +404,7 @@ impl<'a> Program<'a> {
             residuals: self.residuals.len(),
             chains: &self.chains,
             switches: &self.switches,
+            custom_syntax: &self.custom_syntax,
         }
     }
 
@@ -382,8 +424,11 @@ impl<'a> Program<'a> {
         if let Some(main) = measured.next() {
             self.main.set_max_stack(main);
         }
-        for (function, high_water) in self.functions.iter_mut().zip(measured) {
+        for (function, high_water) in self.functions.iter_mut().zip(&mut measured) {
             function.chunk.set_max_stack(high_water);
+        }
+        for (chunk, high_water) in self.custom_syntax_chunks_mut().zip(&mut measured) {
+            chunk.set_max_stack(high_water);
         }
         self.recompute_max_stack();
     }
@@ -516,6 +561,7 @@ impl<'a> Program<'a> {
             .iter()
             .map(|f| f.chunk.max_stack())
             .chain(core::iter::once(self.main.max_stack()))
+            .chain(self.custom_syntax_chunks().map(|chunk| chunk.max_stack()))
             .max()
             .unwrap_or(0);
     }
@@ -557,6 +603,16 @@ impl<'a> Program<'a> {
     #[must_use]
     pub(crate) fn switches(&self) -> &[Switch] {
         &self.switches
+    }
+
+    #[must_use]
+    pub(crate) fn custom_syntax_site(&self, index: u32) -> Option<&CustomSyntaxSite> {
+        self.custom_syntax.get(index as usize)
+    }
+
+    #[must_use]
+    pub(crate) fn custom_syntax(&self) -> &[CustomSyntaxSite] {
+        &self.custom_syntax
     }
 
     /// _(internals)_ Where instruction `pc` came from, or [`Position::NONE`][rhai::Position::NONE]
@@ -791,6 +847,7 @@ mod tests {
                 assign_ops: Vec::new(),
                 chains: Vec::new(),
                 switches: Vec::new(),
+                custom_syntax: Vec::new(),
                 lib: None,
                 #[cfg(not(feature = "no_module"))]
                 resolver: None,

@@ -189,6 +189,8 @@ pub mod tag {
     pub const STORE_CONST: u8 = 0x48;
     /// [`Op::CallFnPtr`](super::Op::CallFnPtr) capturing the parent's scope.
     pub const CALL_FN_PTR_CAPTURE: u8 = 0x49;
+    /// [`Op::CustomSyntax`](super::Op::CustomSyntax).
+    pub const CUSTOM_SYNTAX: u8 = 0x4a;
 }
 
 /// How wide each tag's instruction is, with 0 for the tags that are not one.
@@ -266,6 +268,7 @@ static WIDTHS: [u8; 256] = {
         widths[tag::EVAL_AST as usize] = 3;
         widths[tag::EVAL_AST_KEEP as usize] = 3;
     }
+    widths[tag::CUSTOM_SYNTAX as usize] = 3;
     widths[tag::CHAIN as usize] = 3;
     widths[tag::MAKE_ARRAY as usize] = 3;
     widths[tag::SWITCH as usize] = 3;
@@ -713,6 +716,13 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
             }
             Op::Return => code.push(tag::RETURN),
 
+            Op::CustomSyntax(index) => {
+                code.push(tag::CUSTOM_SYNTAX);
+                code.extend_from_slice(
+                    &small(*index as usize, "custom syntax sites")?.to_le_bytes(),
+                );
+            }
+
             #[cfg(not(feature = "no_ast"))]
             Op::EvalAst {
                 residual,
@@ -821,6 +831,8 @@ fn encoded_width(op: &Op) -> usize {
 
         #[cfg(not(feature = "no_ast"))]
         Op::EvalAst { .. } => 3,
+
+        Op::CustomSyntax(..) => 3,
 
         Op::Call { op: None, .. }
         | Op::CallRef {
@@ -1062,6 +1074,8 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
             rewind_scope: false,
         },
 
+        tag::CUSTOM_SYNTAX => Op::CustomSyntax(u32::from(small(1)?)),
+
         _ => return None,
     })
 }
@@ -1229,6 +1243,7 @@ mod tests {
             Op::UnwindTo(6),
             Op::Tick,
             Op::Statement { depth: 2 },
+            Op::CustomSyntax(2),
             Op::EvalAst {
                 residual: 0,
                 rewind_scope: true,

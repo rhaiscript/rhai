@@ -1,5 +1,6 @@
 use crate::grain::bytecode::code::{self, tag};
 use crate::grain::bytecode::{Chain, Chunk, Op, Receiver, Root, Step, Switch, Tail};
+use crate::grain::bytecode::{CustomInput, CustomSyntaxSite};
 use crate::grain::format::Caps;
 use crate::grain::program::Function;
 use crate::Dynamic;
@@ -29,6 +30,8 @@ pub struct Pools<'a> {
     pub chains: &'a [Chain],
     /// The switch pool.
     pub switches: &'a [Switch],
+    /// The custom-syntax site pool.
+    pub custom_syntax: &'a [CustomSyntaxSite],
 }
 
 /// Why a chunk was rejected.
@@ -542,6 +545,8 @@ fn required_caps(op: &Op, pools: &Pools) -> Caps {
         Op::MakeArray(..) => Caps::ARRAY,
         Op::MakeMap(..) => Caps::MAP,
         Op::IsShared => Caps::SHARING,
+
+        Op::CustomSyntax(..) => Caps::CUSTOM_SYNTAX,
     }
 }
 
@@ -659,6 +664,8 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
 
         // Consumes whatever is left, so depth afterwards is not meaningful.
         Op::Return => (0, 0, 0),
+
+        Op::CustomSyntax(..) => (0, 0, 1),
     }
 }
 
@@ -721,6 +728,11 @@ fn check_indices(at: usize, code: &[u8], pools: &Pools) -> Result<(), VerifyErro
         tag::CALL_FN_PTR_ON_NAMED => bounded(index(2), "name", pools.names),
         #[cfg(not(feature = "no_ast"))]
         tag::EVAL_AST | tag::EVAL_AST_KEEP => bounded(index(1), "fragment", pools.residuals),
+        #[cfg(not(feature = "no_custom_syntax"))]
+        tag::CUSTOM_SYNTAX => {
+            bounded(index(1), "custom syntax site", pools.custom_syntax.len())?;
+            check_custom_syntax_indices(at, &pools.custom_syntax[index(1) as usize], pools)
+        }
         tag::CHAIN => {
             bounded(index(1), "chain", pools.chains.len())?;
             check_chain_indices(at, &pools.chains[index(1) as usize], pools)
@@ -728,6 +740,50 @@ fn check_indices(at: usize, code: &[u8], pools: &Pools) -> Result<(), VerifyErro
         tag::SWITCH => bounded(index(1), "switch", pools.switches.len()),
         _ => Ok(()),
     }
+}
+
+/// Check the pool references *inside* a custom-syntax site record.
+///
+/// A site is one instruction over an unbounded record, so nearly all of what
+/// it names lives in the pool rather than in the code -- exactly the reason
+/// [`check_chain_indices`] exists for [`Op::Chain`].
+fn check_custom_syntax_indices(
+    at: usize,
+    site: &CustomSyntaxSite,
+    pools: &Pools,
+) -> Result<(), VerifyError> {
+    let bounded = |index: u32, what: &'static str, len: usize| {
+        if index as usize >= len {
+            Err(VerifyError::BadIndex { at, what, index })
+        } else {
+            Ok(())
+        }
+    };
+
+    bounded(site.key, "name", pools.names)?;
+    bounded(site.state, "constant", pools.consts)?;
+
+    for input in &site.inputs {
+        match input {
+            CustomInput::Chunk(_, literal) => {
+                if let Some(index) = literal {
+                    if *index as usize >= pools.consts {
+                        return Err(VerifyError::BadIndex {
+                            what: "constant",
+                            at,
+                            index: *index,
+                        });
+                    }
+                }
+            }
+            #[cfg(not(feature = "no_ast"))]
+            CustomInput::Residual(index) => {
+                bounded(*index, "fragment", pools.residuals)?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Check the pool references *inside* a chain record.
@@ -793,6 +849,7 @@ mod tests {
             residuals: 0,
             chains: &[],
             switches: &[],
+            custom_syntax: &[],
         }
     }
 

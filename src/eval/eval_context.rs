@@ -188,8 +188,10 @@ impl<'a, 's, 'ps, 'g, 'c, 't> EvalContext<'a, 's, 'ps, 'g, 'c, 't> {
     ///
     /// # WARNING - Low Level API
     ///
-    /// This function is very low level.  It evaluates an expression from an [`AST`][crate::AST].
+    /// This function is very low level.  It evaluates an expression from an [`AST`][crate::AST],
+    /// or runs a compiled Rhai Grain chunk (requires `grain`).
     #[cfg(not(feature = "no_custom_syntax"))]
+    #[cfg(any(not(feature = "no_ast"), feature = "grain"))]
     #[inline(always)]
     pub fn eval_expression_tree(&mut self, expr: &crate::Expression) -> crate::RhaiResult {
         #[allow(deprecated)]
@@ -207,8 +209,10 @@ impl<'a, 's, 'ps, 'g, 'c, 't> EvalContext<'a, 's, 'ps, 'g, 'c, 't> {
     ///
     /// # WARNING - Low Level API
     ///
-    /// This function is _extremely_ low level.  It evaluates an expression from an [`AST`][crate::AST].
+    /// This function is _extremely_ low level.  It evaluates an expression from an [`AST`][crate::AST],
+    /// or runs a compiled Rhai Grain chunk (requires `grain`).
     #[cfg(not(feature = "no_custom_syntax"))]
+    #[cfg(any(not(feature = "no_ast"), feature = "grain"))]
     #[deprecated = "This API is NOT deprecated, but it is considered volatile and may change in the future."]
     #[inline]
     pub fn eval_expression_tree_raw(
@@ -216,22 +220,53 @@ impl<'a, 's, 'ps, 'g, 'c, 't> EvalContext<'a, 's, 'ps, 'g, 'c, 't> {
         expr: &crate::Expression,
         rewind_scope: bool,
     ) -> crate::RhaiResult {
-        let expr: &crate::ast::Expr = expr;
-        let this_ptr = self.this_ptr.as_deref_mut();
+        // An `Expr`.
+        #[cfg(not(feature = "no_ast"))]
+        if let Some(expr) = expr.as_ast() {
+            let this_ptr = self.this_ptr.as_deref_mut();
 
-        match expr {
-            crate::ast::Expr::Stmt(stmts) => self.engine.eval_stmt_block(
-                self.global,
-                self.caches,
-                self.scope,
-                this_ptr,
-                stmts.statements(),
-                rewind_scope,
-            ),
-            _ => self
-                .engine
-                .eval_expr(self.global, self.caches, self.scope, this_ptr, expr),
+            return match expr {
+                crate::ast::Expr::Stmt(stmts) => self.engine.eval_stmt_block(
+                    self.global,
+                    self.caches,
+                    self.scope,
+                    this_ptr,
+                    stmts.statements(),
+                    rewind_scope,
+                ),
+                _ => self
+                    .engine
+                    .eval_expr(self.global, self.caches, self.scope, this_ptr, expr),
+            };
         }
+
+        // A Grain-compiled chunk.
+        #[cfg(feature = "grain")]
+        if let Some(grain) = expr.as_grain() {
+            let global = self.global.clone();
+            let mut vm = crate::grain::Vm::with_global_state(self.engine, global);
+
+            let this = self.this_ptr.as_deref_mut().map(|v| v.clone());
+
+            let (result, new_this) = vm.run_expression_chunk(
+                &grain.program,
+                grain.chunk,
+                grain.base,
+                &mut *self.scope,
+                this,
+            );
+
+            // Write back the `this` pointer value.
+            if let (Some(this_ptr), Some(new_this)) = (self.this_ptr.as_deref_mut(), new_this) {
+                *this_ptr = new_this;
+            }
+
+            *self.global = vm.into_global_state();
+
+            return result;
+        }
+
+        unreachable!();
     }
 
     /// Call a function inside the [evaluation context][`EvalContext`] with the provided arguments.

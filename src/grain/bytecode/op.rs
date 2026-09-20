@@ -744,6 +744,28 @@ pub enum Op {
         rewind_scope: bool,
     },
 
+    /// Dispatch to a registered custom syntax, indexing the custom-syntax
+    /// site pool.
+    ///
+    /// Pushes the value the registered handler returns.
+    ///
+    /// ### Per-Input, Not Whole-Node
+    ///
+    /// Unlike [`Op::EvalAst`], which hands a whole node back to the
+    /// [`AST`][crate::AST] walker, this instruction runs even where the
+    /// custom syntax itself is lowered — only the individual `$expr$`/
+    /// `$block$` inputs the compiler could not account for stay AST
+    /// fragments (see [`CustomInput`](crate::grain::program::CustomInput)),
+    /// so the handler still sees the same [`Expression`][crate::Expression]
+    /// slice it always has, mixing lowered chunks and residual fragments
+    /// freely.
+    ///
+    /// Only ever emitted for a custom syntax whose `scope_may_be_changed` is
+    /// `false`: one that may change the scope's shape stays a whole-node
+    /// [`Op::EvalAst`] instead, because what it declares is invisible to the
+    /// slot model.
+    CustomSyntax(u32),
+
     /// Arm a handler covering the instructions up to the matching
     /// [`Op::PopHandler`], catching to `target`.
     ///
@@ -922,6 +944,10 @@ impl Op {
                     chain.operands,
                     chain.disassemble(program),
                 )
+            }
+            Op::CustomSyntax(idx) => {
+                let custom_syntax = program.custom_syntax_site(*idx).unwrap();
+                format!("{self:?} : {}", custom_syntax.disassemble(program))
             }
 
             _ => format!("{self:?}"),

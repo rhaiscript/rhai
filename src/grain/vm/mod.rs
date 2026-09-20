@@ -27,13 +27,15 @@ use crate::VarDefInfo;
 #[cfg(not(feature = "no_function"))]
 use crate::{types::dynamic::Variant, CallFnOptions};
 use crate::{
-    Dynamic, Engine, EvalAltResult, EvalContext, FnArgsVec, FnPtr, ImmutableString, Position,
-    RhaiResult, RhaiResultOf, Scope, SharedModule, StaticVec, FUNC_TO_STRING, INT,
+    Dynamic, Engine, EvalAltResult, EvalContext, Expression, FnArgsVec, FnPtr, ImmutableString,
+    Position, RhaiResult, RhaiResultOf, Scope, SharedModule, StaticVec, FUNC_TO_STRING, INT,
 };
 
 mod callback;
 
-use crate::grain::bytecode::{code, AssignOp, Chain, Chunk, Receiver, Root, Step, StepFlags, Tail};
+use crate::grain::bytecode::{
+    code, AssignOp, Chain, Chunk, CustomInput, Receiver, Root, Step, StepFlags, Tail,
+};
 use crate::grain::program::{Program, SharedProgram};
 
 /// Whether a value is a shared cell.
@@ -660,6 +662,41 @@ impl<'e> Vm<'e> {
 
         self.stack.truncate(first);
         (result, this)
+    }
+
+    /// Run a compiled Rhai Grain chunk for one custom-syntax input, in the *caller's own frame*.
+    ///
+    /// Unlike [`Vm::call_function_with_this`], this does **not** start a new call frame:
+    /// the chunk was lowered while reusing the surrounding code's `Slots` table rather than a
+    /// fresh one as a normal function body's is, so it has to run against the exact same `base`
+    /// offset into `scope` the enclosing frame is already using.
+    ///
+    /// Its evaluation is not a nested function call: no call-stack level increment, no
+    /// [`ErrorInFunctionCall`][crate::error::ErrorInFunctionCall] wrapping, no new scope entries
+    /// left behind (the compiler only ever lowers this way for a custom syntax whose
+    /// `scope_may_be_changed` is `false`).
+    ///
+    /// The receiver comes back however the call ended, mirroring [`Vm::call_function_with_this`].
+    pub(crate) fn run_expression_chunk(
+        &mut self,
+        program: &Program,
+        chunk: Chunk,
+        base: usize,
+        scope: &mut Scope,
+        this: Option<Dynamic>,
+    ) -> (RhaiResult, Option<Dynamic>) {
+        let pos = program.position(chunk.entry() as usize);
+
+        if let Err(err) = self.engine.track_operation(&mut self.global, pos) {
+            return (Err(err), this);
+        }
+
+        let saved_this = mem::replace(&mut self.this, this);
+
+        let mut reached = chunk.entry() as usize;
+        let result = self.execute(program, scope, chunk, base, &mut reached);
+
+        (result, mem::replace(&mut self.this, saved_this))
     }
 
     /// Call a function inside a [`Program`] by name, returning its value.
@@ -3869,6 +3906,67 @@ impl<'e> Vm<'e> {
                     self.stack.push(value);
                 }
 
+                code::tag::CUSTOM_SYNTAX => {
+                    let index = u32::from(small(1)?);
+                    let site = program
+                        .custom_syntax_site(index)
+                        .ok_or_else(|| malformed(format!("no custom syntax site {index}")))?;
+                    let key = program
+                        .name(site.key)
+                        .ok_or_else(|| malformed(format!("no custom syntax name {}", site.key)))?;
+                    let custom_syntax = self.engine.custom_syntax.get(key).ok_or_else(|| {
+                        Box::new(EvalAltResult::ErrorCustomSyntax(
+                            format!("Invalid custom syntax prefix: {key}"),
+                            vec![key.to_string()],
+                            pos(),
+                        ))
+                    })?;
+
+                    let state = program.constant(site.state).ok_or_else(|| {
+                        malformed(format!("no custom syntax state {}", site.state))
+                    })?;
+
+                    let shared_program = program.clone().into_shared();
+
+                    let expressions = site
+                        .inputs
+                        .iter()
+                        .map(|input| match input {
+                            CustomInput::Chunk(chunk, literal) => {
+                                let literal =
+                                    literal.and_then(|index| program.constant(index).cloned());
+                                Expression::from_grain(
+                                    shared_program.clone(),
+                                    *chunk,
+                                    base,
+                                    literal,
+                                )
+                            }
+                            #[cfg(not(feature = "no_ast"))]
+                            CustomInput::Residual(residual) => Expression::from(
+                                program
+                                    .residual(*residual)
+                                    .expect("verified residual index"),
+                            ),
+                        })
+                        .collect::<StaticVec<_>>();
+
+                    let mut context = EvalContext::new(
+                        self.engine,
+                        &mut self.global,
+                        &mut self.caches,
+                        scope,
+                        self.this.as_mut(),
+                    );
+
+                    let value = (custom_syntax.func)(&mut context, &expressions, state)?;
+
+                    #[cfg(not(feature = "unchecked"))]
+                    self.engine.check_data_size(&value, pos())?;
+
+                    self.stack.push(value);
+                }
+
                 code::tag::JUMP => {
                     transfer!(wide(1)? as usize);
                     continue;
@@ -4500,6 +4598,7 @@ mod tests {
                 assign_ops: Vec::new(),
                 chains,
                 switches: Vec::new(),
+                custom_syntax: Vec::new(),
                 lib: None,
                 #[cfg(not(feature = "no_module"))]
                 resolver: None,
