@@ -6,8 +6,8 @@ use std::convert::{TryFrom, TryInto};
 use std::prelude::v1::*;
 
 use crate::grain::bytecode::{
-    AssignOp, BadTable, Chain, Chunk, Positions, Root, Step, StepFlags, Strings, Switch,
-    SwitchRange, TableError, Tail, VerifyError,
+    AssignOp, BadTable, Chain, Chunk, CustomSyntaxSite, Positions, Root, Step, StepFlags, Strings,
+    Switch, SwitchRange, TableError, Tail, VerifyError,
 };
 use crate::grain::format::abi::{Abi, AbiMismatch, Caps};
 use crate::grain::format::{constant, root_tag, step_tag, tail_tag, Cursor, MAGIC, VERSION};
@@ -190,6 +190,8 @@ pub(super) fn read(bytes: &[u8]) -> Result<Program<'_>, ReadError> {
 
     let switches = get_switches(&mut cursor, &consts)?;
 
+    let custom_syntax = get_custom_syntax(&mut cursor)?;
+
     let main = get_chunk(&mut cursor)?;
 
     let mut functions = Vec::new();
@@ -248,8 +250,7 @@ pub(super) fn read(bytes: &[u8]) -> Result<Program<'_>, ReadError> {
             assign_ops,
             chains,
             switches,
-            // Script functions are still ASTs, so `write` refuses a program
-            // that has any and a loaded one never does.
+            custom_syntax,
             lib: None,
             #[cfg(not(feature = "no_module"))]
             resolver: None,
@@ -409,6 +410,22 @@ fn get_switches(cursor: &mut Cursor, consts: &[Dynamic]) -> Result<Vec<Switch>, 
         });
     }
     Ok(switches)
+}
+
+fn get_custom_syntax(cursor: &mut Cursor) -> Result<Vec<CustomSyntaxSite>, ReadError> {
+    let mut custom_syntax = Vec::new();
+    for _ in 0..cursor.uvarint()? {
+        let key = cursor.index()?;
+        let state = cursor.index()?;
+        let mut inputs = Vec::new();
+        for _ in 0..cursor.uvarint()? {
+            let chunk = get_chunk(cursor)?;
+            let literal = cursor.index()?;
+            inputs.push((chunk, (literal != u32::MAX).then_some(literal)));
+        }
+        custom_syntax.push(CustomSyntaxSite { key, state, inputs });
+    }
+    Ok(custom_syntax)
 }
 
 /// Narrow a written bound back to this build's `INT`.

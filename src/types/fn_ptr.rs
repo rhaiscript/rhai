@@ -1,6 +1,5 @@
 //! The `FnPtr` type.
 
-use crate::eval::Caches;
 use crate::func::{is_valid_function_name, FnCallArgs};
 use crate::types::Token;
 use crate::types::{
@@ -466,17 +465,14 @@ impl FnPtr {
                 let Some((fn_def, env)) = linked_script else {
                     unreachable!()
                 };
-
-                let args = &mut arg_values.iter_mut().collect::<FnArgsVec<_>>();
-
                 return context.engine().call_script_fn(
                     global.into(),
-                    &mut Caches::new(),
+                    &mut crate::eval::Caches::new(),
                     scope,
                     this_ptr,
                     env.map(|e| &**e),
                     fn_def,
-                    args,
+                    &mut arg_values.iter_mut().collect::<FnArgsVec<_>>(),
                     true,
                     context.call_position(),
                 );
@@ -520,13 +516,11 @@ impl FnPtr {
                 // Check if a script-defined function exists with the name and number of parameters.
                 // If not, then it'll hit a native Rust function.
                 #[cfg(not(feature = "no_function"))]
-                let is_native = {
-                    let hash_script = crate::calc_fn_hash(None, self.fn_name(), arg_values.len());
-                    let mut caches = crate::eval::Caches::new();
-                    !context
-                        .engine()
-                        .has_script_fn(global, &mut caches, hash_script)
-                };
+                let is_native = !context.engine().has_script_fn(
+                    global,
+                    &mut crate::eval::Caches::new(),
+                    crate::calc_fn_hash(None, self.fn_name(), arg_values.len()),
+                );
                 // No script-defined functions under `no_function`.
                 #[cfg(feature = "no_function")]
                 let is_native = true;

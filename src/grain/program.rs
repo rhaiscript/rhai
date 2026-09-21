@@ -8,6 +8,7 @@ use crate::engine::KEYWORD_EVAL;
 use crate::module_resolvers::StaticModuleResolver;
 use crate::{expose_under_internals, types::Token, Dynamic, ImmutableString, Shared, SharedModule};
 
+use crate::grain::bytecode::CustomSyntaxSite;
 use crate::grain::bytecode::{
     site_to_position, sites, AssignOp, Chain, Chunk, Code, Pools, Positions, Strings, Switch,
     TableError,
@@ -73,6 +74,7 @@ pub type SharedProgram = Shared<Program<'static>>;
 ///
 /// [`AST`]: crate::AST
 /// [`Engine`]: crate::Engine
+#[derive(Clone)]
 pub struct Program<'a> {
     /// The capabilities required by this program's instructions.
     caps: Caps,
@@ -143,6 +145,10 @@ pub struct Program<'a> {
     /// One dispatch table per `switch`, for the same reason.
     switches: Vec<Switch>,
 
+    /// One record per `Op::CustomSyntax` site: the custom syntax to invoke
+    /// and its (possibly only partially lowered) inputs.
+    custom_syntax: Vec<CustomSyntaxSite>,
+
     /// Script functions the compiler did not lower, as Rhai's own library, so
     /// a fragment can still call one the ordinary way.
     ///
@@ -176,6 +182,8 @@ impl core::fmt::Debug for Program<'_> {
 
         #[cfg(not(feature = "no_ast"))]
         f.field("residuals", &self.residuals.len());
+
+        f.field("custom_syntax_sites", &self.custom_syntax.len());
 
         f.field("compiled_fns", &self.functions.len())
             .field(
@@ -240,6 +248,7 @@ pub(crate) struct Parts<'a> {
     pub assign_ops: Vec<AssignOp>,
     pub chains: Vec<Chain>,
     pub switches: Vec<Switch>,
+    pub custom_syntax: Vec<CustomSyntaxSite>,
     pub lib: Option<SharedModule>,
     #[cfg(not(feature = "no_module"))]
     pub resolver: Option<Shared<StaticModuleResolver>>,
@@ -283,6 +292,7 @@ impl<'a> Program<'a> {
             assign_ops: parts.assign_ops,
             chains: parts.chains,
             switches: parts.switches,
+            custom_syntax: parts.custom_syntax,
             lib: parts.lib,
             #[cfg(not(feature = "no_module"))]
             resolver: parts.resolver,
@@ -313,6 +323,7 @@ impl<'a> Program<'a> {
             assign_ops: self.assign_ops,
             chains: self.chains,
             switches: self.switches,
+            custom_syntax: self.custom_syntax,
             lib: self.lib,
             #[cfg(not(feature = "no_module"))]
             resolver: self.resolver,
@@ -345,9 +356,9 @@ impl<'a> Program<'a> {
 
     /// Every chunk, main first, in the order they sit in the code.
     fn chunks(&self) -> Vec<Chunk> {
-        core::iter::once(self.main)
+        return core::iter::once(self.main)
             .chain(self.functions.iter().map(|f| f.chunk))
-            .collect()
+            .collect();
     }
 
     pub(crate) fn pools(&self) -> Pools<'_> {
@@ -360,6 +371,7 @@ impl<'a> Program<'a> {
             residuals: self.residuals.len(),
             chains: &self.chains,
             switches: &self.switches,
+            custom_syntax: &self.custom_syntax,
         }
     }
 
@@ -379,7 +391,7 @@ impl<'a> Program<'a> {
         if let Some(main) = measured.next() {
             self.main.set_max_stack(main);
         }
-        for (function, high_water) in self.functions.iter_mut().zip(measured) {
+        for (function, high_water) in self.functions.iter_mut().zip(&mut measured) {
             function.chunk.set_max_stack(high_water);
         }
         self.recompute_max_stack();
@@ -554,6 +566,17 @@ impl<'a> Program<'a> {
     #[must_use]
     pub(crate) fn switches(&self) -> &[Switch] {
         &self.switches
+    }
+
+    #[cfg(any(feature = "internals", not(feature = "no_custom_syntax")))]
+    #[must_use]
+    pub(crate) fn custom_syntax_site(&self, index: u32) -> Option<&CustomSyntaxSite> {
+        self.custom_syntax.get(index as usize)
+    }
+
+    #[must_use]
+    pub(crate) fn custom_syntax(&self) -> &[CustomSyntaxSite] {
+        &self.custom_syntax
     }
 
     /// _(internals)_ Where instruction `pc` came from, or [`Position::NONE`][rhai::Position::NONE]
@@ -788,6 +811,7 @@ mod tests {
                 assign_ops: Vec::new(),
                 chains: Vec::new(),
                 switches: Vec::new(),
+                custom_syntax: Vec::new(),
                 lib: None,
                 #[cfg(not(feature = "no_module"))]
                 resolver: None,

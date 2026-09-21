@@ -41,10 +41,12 @@ pub use eval_context::EvalContext;
 pub use eval_context::EvalContextFrameGuard;
 pub use switch::RangeCase;
 
+#[cfg(not(feature = "no_function"))]
+pub use global_state::GlobalRef;
+pub use global_state::GlobalRuntimeState;
 #[cfg(not(feature = "no_module"))]
 #[cfg(not(feature = "no_function"))]
 pub use global_state::SharedGlobalConstants;
-pub use global_state::{GlobalRef, GlobalRuntimeState};
 #[cfg(not(feature = "no_index"))]
 pub use target::calc_offset_len;
 pub use target::{calc_index, Target};

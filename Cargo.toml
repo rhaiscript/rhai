@@ -102,8 +102,9 @@ no_closure = []
 no_module = []
 ## Remove support for custom syntax.
 no_custom_syntax = []
-## Remove the AST, tokenizer, parser and optimizer for a minimal build (implies [`no_optimize`](#feature-no_optimize) and [`no_custom_syntax`](#feature-no_custom_syntax)). Use with [`grain`](#feature-grain) to run bytecodes exclusively.
-no_ast = ["no_optimize", "no_custom_syntax"]
+## Remove the AST, tokenizer, parser and optimizer for a minimal build (implies [`no_optimize`](#feature-no_optimize)).
+## Use with [`grain`](#feature-grain) to run VM bytecodes exclusively.
+no_ast = ["no_optimize"]
 
 #! ### Performance-Related Features
 

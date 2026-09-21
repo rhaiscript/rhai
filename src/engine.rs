@@ -11,13 +11,11 @@ use crate::packages::{Package, StandardPackage};
 use crate::types::StringsInterner;
 use crate::types::Token;
 use crate::{Dynamic, Identifier, ImmutableString, Locked, SharedModule};
-#[cfg(not(feature = "no_ast"))]
 use std::num::NonZeroU8;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 use std::{collections::BTreeSet, fmt};
 
-#[cfg(not(feature = "no_ast"))]
 pub type Precedence = NonZeroU8;
 
 pub const KEYWORD_PRINT: &str = "print";
@@ -113,6 +111,7 @@ pub struct Engine {
     pub(crate) custom_keywords: std::collections::BTreeMap<Identifier, Option<Precedence>>,
     /// Custom syntax.
     #[cfg(not(feature = "no_custom_syntax"))]
+    #[cfg(all(any(not(feature = "no_ast"), feature = "grain")))]
     pub(crate) custom_syntax:
         std::collections::BTreeMap<Identifier, Box<crate::api::custom_syntax::CustomSyntax>>,
 
@@ -181,7 +180,11 @@ impl fmt::Debug for Engine {
         f.field("disabled_symbols", &self.disabled_symbols);
 
         #[cfg(not(feature = "no_custom_syntax"))]
-        f.field("custom_keywords", &self.custom_keywords).field(
+        f.field("custom_keywords", &self.custom_keywords);
+
+        #[cfg(not(feature = "no_custom_syntax"))]
+        #[cfg(any(not(feature = "no_ast"), feature = "grain"))]
+        f.field(
             "custom_syntax",
             &self
                 .custom_syntax
@@ -260,6 +263,7 @@ impl Engine {
         #[cfg(not(feature = "no_custom_syntax"))]
         custom_keywords: std::collections::BTreeMap::new(),
         #[cfg(not(feature = "no_custom_syntax"))]
+        #[cfg(any(not(feature = "no_ast"), feature = "grain"))]
         custom_syntax: std::collections::BTreeMap::new(),
 
         def_var_filter: None,

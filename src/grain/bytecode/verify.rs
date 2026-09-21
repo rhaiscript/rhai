@@ -1,5 +1,7 @@
 use crate::grain::bytecode::code::{self, tag};
-use crate::grain::bytecode::{Chain, Chunk, Op, Receiver, Root, Step, Switch, Tail};
+use crate::grain::bytecode::{
+    Chain, Chunk, CustomSyntaxSite, Op, Receiver, Root, Step, Switch, Tail,
+};
 use crate::grain::format::Caps;
 use crate::grain::program::Function;
 use crate::Dynamic;
@@ -29,6 +31,8 @@ pub struct Pools<'a> {
     pub chains: &'a [Chain],
     /// The switch pool.
     pub switches: &'a [Switch],
+    /// The custom-syntax site pool.
+    pub custom_syntax: &'a [CustomSyntaxSite],
 }
 
 /// Why a chunk was rejected.
@@ -542,6 +546,8 @@ fn required_caps(op: &Op, pools: &Pools) -> Caps {
         Op::MakeArray(..) => Caps::ARRAY,
         Op::MakeMap(..) => Caps::MAP,
         Op::IsShared => Caps::SHARING,
+
+        Op::CustomSyntax(..) => Caps::CUSTOM_SYNTAX,
     }
 }
 
@@ -659,6 +665,8 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
 
         // Consumes whatever is left, so depth afterwards is not meaningful.
         Op::Return => (0, 0, 0),
+
+        Op::CustomSyntax(..) => (0, 0, 1),
     }
 }
 
@@ -728,6 +736,10 @@ fn check_indices(at: usize, code: &[u8], pools: &Pools) -> Result<(), VerifyErro
         tag::SWITCH => {
             bounded(index(1), "switch", pools.switches.len())?;
             check_switch_indices(at, &pools.switches[index(1) as usize], pools)
+        }
+        tag::CUSTOM_SYNTAX => {
+            bounded(index(1), "custom syntax site", pools.custom_syntax.len())?;
+            check_custom_syntax_indices(at, &pools.custom_syntax[index(1) as usize], pools)
         }
         _ => Ok(()),
     }
@@ -803,6 +815,42 @@ fn check_switch_indices(at: usize, switch: &Switch, pools: &Pools) -> Result<(),
     Ok(())
 }
 
+/// Check the pool references *inside* a custom-syntax site record.
+///
+/// A site is one instruction over an unbounded record, so nearly all of what
+/// it names lives in the pool rather than in the code -- exactly the reason
+/// [`check_chain_indices`] exists for [`Op::Chain`].
+fn check_custom_syntax_indices(
+    at: usize,
+    site: &CustomSyntaxSite,
+    pools: &Pools,
+) -> Result<(), VerifyError> {
+    let bounded = |index: u32, what: &'static str, len: usize| {
+        if index as usize >= len {
+            Err(VerifyError::BadIndex { at, what, index })
+        } else {
+            Ok(())
+        }
+    };
+
+    bounded(site.key, "name", pools.names)?;
+    bounded(site.state, "constant", pools.consts)?;
+
+    for (_, literal) in &site.inputs {
+        if let Some(index) = literal {
+            if *index as usize >= pools.consts {
+                return Err(VerifyError::BadIndex {
+                    what: "constant",
+                    at,
+                    index: *index,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -819,6 +867,7 @@ mod tests {
             residuals: 0,
             chains: &[],
             switches: &[],
+            custom_syntax: &[],
         }
     }
 

@@ -19,7 +19,7 @@
 // that run all of them.
 use super::corpus;
 
-use rhai::grain::{Compiler, Vm};
+use rhai::grain::{Compiler, Program, Vm};
 use rhai::{Dynamic, Engine, EvalAltResult, Module, Scope, INT};
 
 /// What a run produced, in a form two runs can be compared on.
@@ -488,6 +488,31 @@ fn custom_syntax_keeps_the_walkers_answer() {
     for source in [r#"declare foo = 41; foo + 1"#, r#"declare bar = 5; 10"#] {
         agree_with(&engine, source, |_| {}, false);
     }
+}
+
+#[test]
+#[cfg(not(feature = "no_custom_syntax"))]
+fn lowerable_custom_syntax_runs_as_grain() {
+    let mut engine = corpus::engine();
+    engine
+        .register_custom_syntax(["twice", "$expr$"], false, |context, inputs| {
+            let value = context.eval_expression_tree(&inputs[0])?.cast::<INT>();
+            Ok(Dynamic::from(value * 2))
+        })
+        .expect("the custom syntax must register");
+    engine
+        .register_custom_syntax(["literal", "$int$"], false, |_context, inputs| Ok(Dynamic::from(inputs[0].get_literal_value::<INT>().expect("literal input"))))
+        .expect("the literal custom syntax must register");
+
+    agree_with(&engine, r#"twice 21"#, |_| {}, true);
+    agree_with(&engine, r#"literal 21"#, |_| {}, true);
+
+    let ast = engine.compile(r#"literal 21"#).expect("must compile");
+    let program = Compiler::new().compile(&ast);
+    let artifact = program.write().expect("custom syntax should be writable");
+    let loaded = Program::read(&artifact).expect("custom syntax artifact should load");
+    let value = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &loaded).expect("loaded custom syntax should run");
+    assert_eq!(value.cast::<INT>(), 21);
 }
 
 /// The first of the three, and the one a VM would most plausibly skip: a
