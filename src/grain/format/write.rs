@@ -5,7 +5,7 @@ use crate::Map;
 use crate::{Array, Blob};
 use crate::{Dynamic, FnPtr, INT};
 
-use crate::grain::bytecode::{AssignOp, Chain, Root, Step, Tail};
+use crate::grain::bytecode::{AssignOp, Chain, CustomSyntaxSite, Root, Step, Tail};
 use crate::grain::format::abi::Abi;
 use crate::grain::format::{
     constant, put_ivarint, put_str, put_uvarint, root_tag, step_tag, tail_tag, MAGIC, VERSION,
@@ -153,6 +153,8 @@ pub(super) fn write(program: &Program, positions: Positions) -> Result<Vec<u8>, 
     }
 
     put_switches(&mut out, program.switches());
+
+    put_custom_syntax(&mut out, program.custom_syntax());
 
     // Chunks: main first, then one per compiled function. Entry offsets are
     // into the single code buffer below.
@@ -315,6 +317,19 @@ fn put_chunk(out: &mut Vec<u8>, chunk: &crate::grain::bytecode::Chunk) {
     put_uvarint(out, u64::from(chunk.entry()));
     put_uvarint(out, u64::from(chunk.end()));
     put_uvarint(out, u64::from(chunk.max_stack()));
+}
+
+fn put_custom_syntax(out: &mut Vec<u8>, custom_syntax: &[CustomSyntaxSite]) {
+    put_uvarint(out, custom_syntax.len() as u64);
+    for site in custom_syntax {
+        put_uvarint(out, u64::from(site.key));
+        put_uvarint(out, u64::from(site.state));
+        put_uvarint(out, site.inputs.len() as u64);
+        for (chunk, literal) in &site.inputs {
+            put_chunk(out, chunk);
+            put_uvarint(out, u64::from(literal.unwrap_or(u32::MAX)));
+        }
+    }
 }
 
 /// Store an operator token as its syntax, and prove that reading it back gives

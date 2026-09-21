@@ -21,6 +21,8 @@ use crate::types::fn_ptr::FnPtrType;
 use crate::ast::Expr;
 #[cfg(not(feature = "no_index"))]
 use crate::Array;
+#[cfg(not(feature = "no_custom_syntax"))]
+use crate::Expression;
 #[cfg(not(feature = "no_object"))]
 use crate::Map;
 use crate::VarDefInfo;
@@ -641,7 +643,8 @@ impl<'e> Vm<'e> {
         pos: Position,
         this: Option<Dynamic>,
     ) -> (RhaiResult, Option<Dynamic>) {
-        // An entry point in its own right so the trace starts here rather than at `run_main`.
+        // An entry point in its own right so the trace starts here rather than
+        // at `run_main`.
         self.clear_faults();
         // A step a previous run left waiting is not this one's to honour.
         #[cfg(feature = "debugging")]
@@ -660,6 +663,45 @@ impl<'e> Vm<'e> {
 
         self.stack.truncate(first);
         (result, this)
+    }
+
+    /// Run a compiled Rhai Grain chunk for one custom-syntax input, in the
+    /// *caller's own frame*.
+    ///
+    /// Unlike [`Vm::call_function_with_this`], this does **not** start a new
+    /// call frame: the chunk was lowered while reusing the surrounding code's
+    /// `Slots` table rather than a fresh one as a normal function body's is,
+    /// so it has to run against the exact same `base` offset into `scope` the
+    /// enclosing frame is already using.
+    ///
+    /// Its evaluation is not a nested function call: no call-stack level
+    /// increment, no [`ErrorInFunctionCall`][crate::error::ErrorInFunctionCall]
+    /// wrapping, no new scope entries left behind (the compiler only ever lowers
+    /// this way for a custom syntax whose `scope_may_be_changed` is `false`).
+    ///
+    /// The receiver comes back however the call ended, mirroring
+    /// [`Vm::call_function_with_this`].
+    #[cfg(not(feature = "no_custom_syntax"))]
+    pub(crate) fn run_custom_syntax_expression_chunk(
+        &mut self,
+        program: &Program,
+        chunk: Chunk,
+        base: usize,
+        scope: &mut Scope,
+        this: Option<Dynamic>,
+    ) -> (RhaiResult, Option<Dynamic>) {
+        let pos = program.position(chunk.entry() as usize);
+
+        if let Err(err) = self.engine.track_operation(&mut self.global, pos) {
+            return (Err(err), this);
+        }
+
+        let saved_this = mem::replace(&mut self.this, this);
+
+        let mut reached = chunk.entry() as usize;
+        let result = self.execute(program, scope, chunk, base, &mut reached);
+
+        (result, mem::replace(&mut self.this, saved_this))
     }
 
     /// Call a function inside a [`Program`] by name, returning its value.
@@ -3835,18 +3877,6 @@ impl<'e> Vm<'e> {
                         .ok_or_else(|| malformed(format!("no residual {index}")))?;
                     let rewind_scope = tag == code::tag::EVAL_AST;
 
-                    // Straight to the walker's own entry points rather than
-                    // through `EvalContext::eval_expression_tree_raw`, which
-                    // is the same two calls behind a shim that only exists
-                    // under `custom_syntax`. Total language coverage rests on
-                    // this, so it must not depend on a feature.
-                    //
-                    // The frame's receiver goes with it, by reference. A body
-                    // that uses `this` can still hold a fragment — `this?.x`,
-                    // or a `this` body containing an `import` — and the walker
-                    // has to read and write the same receiver the surrounding
-                    // instructions do. The engine is copied out first so the
-                    // four borrows below are of disjoint fields.
                     let engine = self.engine;
                     let value = match expr {
                         Expr::Stmt(block) => engine.eval_stmt_block(
@@ -3865,6 +3895,55 @@ impl<'e> Vm<'e> {
                             expr,
                         ),
                     }?;
+
+                    self.stack.push(value);
+                }
+
+                #[cfg(not(feature = "no_custom_syntax"))]
+                code::tag::CUSTOM_SYNTAX => {
+                    let index = u32::from(small(1)?);
+                    let site = program
+                        .custom_syntax_site(index)
+                        .ok_or_else(|| malformed(format!("no custom syntax site {index}")))?;
+                    let key = program
+                        .name(site.key)
+                        .ok_or_else(|| malformed(format!("no custom syntax name {}", site.key)))?;
+                    let custom_syntax = self.engine.custom_syntax.get(key).ok_or_else(|| {
+                        Box::new(EvalAltResult::ErrorCustomSyntax(
+                            format!("Invalid custom syntax prefix: {key}"),
+                            vec![key.to_string()],
+                            pos(),
+                        ))
+                    })?;
+
+                    let state = program.constant(site.state).ok_or_else(|| {
+                        malformed(format!("no custom syntax state {}", site.state))
+                    })?;
+
+                    let shared_program = program.clone().into_shared();
+
+                    let expressions = site
+                        .inputs
+                        .iter()
+                        .map(|(chunk, literal)| {
+                            let literal =
+                                literal.and_then(|index| program.constant(index).cloned());
+                            Expression::from_grain(shared_program.clone(), *chunk, base, literal)
+                        })
+                        .collect::<StaticVec<_>>();
+
+                    let mut context = EvalContext::new(
+                        self.engine,
+                        &mut self.global,
+                        &mut self.caches,
+                        scope,
+                        self.this.as_mut(),
+                    );
+
+                    let value = (custom_syntax.func)(&mut context, &expressions, state)?;
+
+                    #[cfg(not(feature = "unchecked"))]
+                    self.engine.check_data_size(&value, pos())?;
 
                     self.stack.push(value);
                 }
@@ -4500,6 +4579,7 @@ mod tests {
                 assign_ops: Vec::new(),
                 chains,
                 switches: Vec::new(),
+                custom_syntax: Vec::new(),
                 lib: None,
                 #[cfg(not(feature = "no_module"))]
                 resolver: None,

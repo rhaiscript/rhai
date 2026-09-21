@@ -584,7 +584,7 @@ fn host_capabilities() {
         (Caps::SHARING, !cfg!(feature = "no_closure"), "shared values"),
         (Caps::IMPORT, !cfg!(feature = "no_module"), "imports modules"),
         (Caps::EXPORT, !cfg!(feature = "no_module"), "exports data in modules"),
-        (Caps::CUSTOM_SYNTAX, false, "custom syntax"),
+        (Caps::CUSTOM_SYNTAX, !cfg!(feature = "no_custom_syntax"), "custom syntax"),
     ];
 
     let host = Abi::host();

@@ -30,7 +30,6 @@ pub mod events;
 
 pub mod formatting;
 
-#[cfg(not(feature = "no_ast"))]
 pub mod custom_syntax;
 
 pub mod build_type;
@@ -222,6 +221,7 @@ impl Engine {
             Some(Token::Custom(..)) => (),
             // Active standard keywords cannot be made custom
             // Disabled keywords are OK
+            #[cfg(not(feature = "no_ast"))]
             Some(token)
                 if token.is_standard_keyword()
                     && !self.is_symbol_disabled(token.literal_syntax()) =>
@@ -229,6 +229,7 @@ impl Engine {
                 return Err(format!("'{keyword}' is a reserved keyword"))
             }
             // Active standard symbols cannot be made custom
+            #[cfg(not(feature = "no_ast"))]
             Some(token)
                 if token.is_standard_symbol()
                     && !self.is_symbol_disabled(token.literal_syntax()) =>
@@ -236,6 +237,7 @@ impl Engine {
                 return Err(format!("'{keyword}' is a reserved operator"))
             }
             // Active standard symbols cannot be made custom
+            #[cfg(not(feature = "no_ast"))]
             Some(token) if !self.is_symbol_disabled(token.literal_syntax()) => {
                 return Err(format!("'{keyword}' is a reserved symbol"))
             }
