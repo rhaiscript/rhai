@@ -17,9 +17,8 @@ use std::prelude::v1::*;
 use crate::{
     func::{ScriptFuncDef, ScriptFuncPayload},
     grain::program::SharedProgram,
-    grain::vm::Vm,
     types::Span,
-    FnAccess, Module,
+    Engine, Module,
 };
 
 /// A wrapper per compiled function, for Rhai to resolve a pointer against.
@@ -27,7 +26,7 @@ use crate::{
 /// Built once per run rather than cached on the program: the closures hold the
 /// program, so anything the program held back would be a cycle.
 #[cfg(not(feature = "no_function"))]
-pub(super) fn wrappers(vm: &mut Vm, program: &SharedProgram) -> Module {
+pub(crate) fn wrappers(engine: &Engine, program: &SharedProgram) -> Module {
     let mut module = Module::new();
 
     // What Rhai reports as the source of a function it found here. Its own
@@ -46,7 +45,7 @@ pub(super) fn wrappers(vm: &mut Vm, program: &SharedProgram) -> Module {
             .params
             .iter()
             .map(|&index| program.name(index).unwrap_or(""))
-            .map(|name| vm.engine.get_interned_string(name))
+            .map(|name| engine.get_interned_string(name))
             .collect();
 
         module.set_script_fn(ScriptFuncDef {
@@ -59,13 +58,13 @@ pub(super) fn wrappers(vm: &mut Vm, program: &SharedProgram) -> Module {
                     program.position(function.chunk.end() as usize),
                 ),
             },
-            name: vm.engine.get_interned_string(name),
-            access: FnAccess::Private,
+            name: engine.get_interned_string(name),
+            access: function.access,
             #[cfg(not(feature = "no_object"))]
             this_type: function
                 .this_type
                 .and_then(|index| program.name(index))
-                .map(|name| vm.engine.get_interned_string(name)),
+                .map(|name| engine.get_interned_string(name)),
             params,
             #[cfg(feature = "metadata")]
             comments: Default::default(),

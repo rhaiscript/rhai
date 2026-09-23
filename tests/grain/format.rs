@@ -432,13 +432,9 @@ fn the_same_source_compiles_to_the_same_bytes() {
 /// depends on Rhai's copy cannot be written — silently dropping it would
 /// produce an artifact that loads and then cannot find its own function.
 #[test]
-#[cfg(not(feature = "no_module"))]
-#[cfg(not(feature = "no_function"))]
 fn a_function_the_compiler_cannot_lower_refuses_to_write() {
     let engine = corpus::engine();
-    // `import` declares into the caller's scope, which the slot model cannot
-    // account for. `this` used to be the example here, and is not one any more.
-    let ast = engine.compile(r#"fn m() { import "x" as y; 1 } m()"#).expect("must compile");
+    let ast = engine.compile(r#"fn m(x) { eval("let x = 42;"); x } m(1)"#).expect("must compile");
     let program = Compiler::new().compile(&ast);
 
     assert!(program.functions().is_empty(), "a body the slot model cannot account for must not become a chunk",);
@@ -584,6 +580,7 @@ fn host_capabilities() {
         (Caps::SHARING, !cfg!(feature = "no_closure"), "shared values"),
         (Caps::IMPORT, !cfg!(feature = "no_module"), "imports modules"),
         (Caps::EXPORT, !cfg!(feature = "no_module"), "exports data in modules"),
+        (Caps::MODULE, !cfg!(feature = "no_module"), "accesses modules via namespace qualifiers"),
         (Caps::CUSTOM_SYNTAX, !cfg!(feature = "no_custom_syntax"), "custom syntax"),
     ];
 

@@ -92,8 +92,9 @@ const CAP_FLAGS: &[(Caps, &'static str, bool)] = &[
     (Caps::METHOD,      "uses method calling style",        !cfg!(feature = "no_object")),
     (Caps::THIS,        "uses `this`",                      !cfg!(feature = "no_function")),
     (Caps::SHARING,     "uses shared values",               !cfg!(feature = "no_closure")),
+    (Caps::EXPORT,      "exports from modules",             !cfg!(feature = "no_module")),
     (Caps::IMPORT,      "imports modules",                  !cfg!(feature = "no_module")),
-    (Caps::EXPORT,      "exports data in modules",          !cfg!(feature = "no_module")),
+    (Caps::MODULE,      "accesses modules",                 !cfg!(feature = "no_module")),
     // Unsupported features below
     (Caps::CUSTOM_SYNTAX, "uses custom syntax",             !cfg!(feature = "no_custom_syntax")),
 ];

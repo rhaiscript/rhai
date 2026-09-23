@@ -37,4 +37,6 @@ mod grain {
     #[cfg(not(any(feature = "no_float", feature = "no_function", feature = "no_index", feature = "no_object")))]
     mod projection;
     mod scope;
+    #[cfg(not(feature = "no_module"))]
+    mod module;
 }

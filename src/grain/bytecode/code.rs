@@ -38,7 +38,7 @@ use std::prelude::v1::*;
 /// call pays nothing for the one that carries a token.
 pub mod tag {
     /// [`Op::Const`](super::Op::Const).
-    pub const CONST: u8 = 0x01;
+    pub const LOAD_CONST: u8 = 0x01;
     /// [`Op::Unit`](super::Op::Unit).
     pub const UNIT: u8 = 0x02;
     /// [`Op::Bool`](super::Op::Bool) holding `false`.
@@ -191,6 +191,24 @@ pub mod tag {
     pub const CALL_FN_PTR_CAPTURE: u8 = 0x49;
     /// [`Op::CustomSyntax`](super::Op::CustomSyntax).
     pub const CUSTOM_SYNTAX: u8 = 0x4a;
+    /// [`Op::DeclareLocal`](super::Op::DeclareLocal) for a global-level constant.
+    pub const DECLARE_GLOBAL_CONST: u8 = 0x4b;
+    /// [`Op::LoadNamedWithNs`](super::Op::LoadNamedWithNs).
+    pub const LOAD_NAMED_WITH_NS: u8 = 0x4c;
+    /// [`Op::ExportLocal`](super::Op::ExportLocal).
+    pub const EXPORT_LOCAL: u8 = 0x4d;
+    /// [`Op::ExportNamed`](super::Op::ExportNamed).
+    pub const EXPORT_NAMED: u8 = 0x4e;
+    /// [`Op::Import`](super::Op::Import).
+    pub const IMPORT: u8 = 0x4f;
+    /// [`Op::CallWithNs`](super::Op::CallWithNs) with no receiver.
+    pub const CALL_WITH_NS: u8 = 0x50;
+    /// [`Op::CallWithNs`](super::Op::CallWithNs) through [`Receiver::This`](super::Receiver::This).
+    pub const CALL_THIS_REF_WITH_NS: u8 = 0x51;
+    /// [`Op::CallWithNs`](super::Op::CallWithNs) through [`Receiver::Local`](super::Receiver::Local).
+    pub const CALL_LOCAL_REF_WITH_NS: u8 = 0x52;
+    /// [`Op::CallWithNs`](super::Op::CallWithNs) through [`Receiver::Named`](super::Receiver::Named).
+    pub const CALL_NAMED_REF_WITH_NS: u8 = 0x53;
 }
 
 /// How wide each tag's instruction is, with 0 for the tags that are not one.
@@ -205,38 +223,36 @@ static WIDTHS: [u8; 256] = {
     widths[tag::FALSE as usize] = 1;
     widths[tag::TRUE as usize] = 1;
     widths[tag::POP as usize] = 1;
+    widths[tag::ROTATE as usize] = 2;
     widths[tag::TICK as usize] = 1;
     widths[tag::CHECKPOINT as usize] = 1;
+    widths[tag::UNWIND_TO as usize] = 3;
     widths[tag::STATEMENT as usize] = 3;
-    widths[tag::MAKE_MAP as usize] = 3;
-    widths[tag::CHECK_ARRAY_SIZE as usize] = 3;
-    widths[tag::CHECK_MAP_SIZE as usize] = 3;
     widths[tag::RETURN as usize] = 1;
     widths[tag::THROW as usize] = 1;
+
     widths[tag::ITER_INIT as usize] = 1;
-    widths[tag::ITER_DROP as usize] = 1;
-
-    widths[tag::STORE_SHARED as usize] = 3;
-
     widths[tag::ITER_NEXT as usize] = 5;
     widths[tag::ITER_NEXT_INDEXED as usize] = 7;
-    widths[tag::POP_HANDLER as usize] = 1;
+    widths[tag::ITER_DROP as usize] = 1;
+
     widths[tag::INTERPOLATE_START as usize] = 1;
     widths[tag::INTERPOLATE_APPEND as usize] = 1;
     widths[tag::INTERPOLATE_END as usize] = 1;
-    widths[tag::MAKE_FN_PTR as usize] = 1;
-    widths[tag::IS_SHARED as usize] = 1;
 
+    widths[tag::PUSH_HANDLER as usize] = 5;
+    widths[tag::PUSH_HANDLER_VAR as usize] = 7;
+    widths[tag::POP_HANDLER as usize] = 1;
+
+    widths[tag::IS_SHARED as usize] = 1;
+    widths[tag::MAKE_FN_PTR as usize] = 1;
     widths[tag::CURRY as usize] = 2;
-    widths[tag::ROTATE as usize] = 2;
-    widths[tag::CALL_FN_PTR as usize] = 2;
-    widths[tag::CALL_FN_PTR_CAPTURE as usize] = 2;
-    widths[tag::CALL_FN_PTR_METHOD as usize] = 2;
 
     widths[tag::SHARE as usize] = 3;
     widths[tag::SHARE_NAMED as usize] = 3;
     widths[tag::LOAD_SHARED as usize] = 3;
     widths[tag::LOAD_SHARED_NAMED as usize] = 3;
+    widths[tag::STORE_SHARED as usize] = 3;
 
     // `this` is a register, so none of these needs an operand to address it.
     widths[tag::LOAD_THIS as usize] = 1;
@@ -246,53 +262,65 @@ static WIDTHS: [u8; 256] = {
     widths[tag::ASSIGN_THIS_OP as usize] = 3;
     widths[tag::CALL_THIS_REF as usize] = 4;
     widths[tag::CALL_THIS_REF_CAPTURE as usize] = 4;
+    widths[tag::CALL_THIS_REF_WITH_NS as usize] = 6;
 
-    // The receiver's value is on the stack for all of these; only where it came
-    // from differs, and only two of them need an operand to say it.
+    widths[tag::CALL_FN_PTR as usize] = 2;
+    widths[tag::CALL_FN_PTR_CAPTURE as usize] = 2;
+    widths[tag::CALL_FN_PTR_METHOD as usize] = 2;
     widths[tag::CALL_FN_PTR_ON_LOCAL as usize] = 4;
     widths[tag::CALL_FN_PTR_ON_NAMED as usize] = 4;
     widths[tag::CALL_FN_PTR_ON_THIS as usize] = 2;
     widths[tag::MAKE_CLOSURE as usize] = 3;
-    widths[tag::PUSH_HANDLER as usize] = 5;
-    widths[tag::PUSH_HANDLER_VAR as usize] = 7;
 
-    widths[tag::CONST as usize] = 3;
+    widths[tag::LOAD_CONST as usize] = 3;
     widths[tag::LOAD_LOCAL as usize] = 3;
+    widths[tag::LOAD_NAMED as usize] = 3;
+    widths[tag::LOAD_NAMED_WITH_NS as usize] = 5;
+
     widths[tag::STORE_LOCAL as usize] = 3;
     widths[tag::STORE_CONST as usize] = 3;
+
     widths[tag::DECLARE_LOCAL as usize] = 3;
     widths[tag::DECLARE_CONST as usize] = 3;
-    widths[tag::UNWIND_TO as usize] = 3;
+    widths[tag::DECLARE_GLOBAL_CONST as usize] = 3;
+
+    widths[tag::CHAIN as usize] = 3;
+    widths[tag::MAKE_ARRAY as usize] = 3;
+    widths[tag::MAKE_MAP as usize] = 3;
+    widths[tag::CHECK_ARRAY_SIZE as usize] = 3;
+    widths[tag::CHECK_MAP_SIZE as usize] = 3;
+    widths[tag::SWITCH as usize] = 3;
+    widths[tag::CUSTOM_SYNTAX as usize] = 3;
+    widths[tag::EXPORT_LOCAL as usize] = 5;
+    widths[tag::EXPORT_NAMED as usize] = 5;
+    widths[tag::IMPORT as usize] = 3;
+
     #[cfg(not(feature = "no_ast"))]
     {
         widths[tag::EVAL_AST as usize] = 3;
         widths[tag::EVAL_AST_KEEP as usize] = 3;
     }
-    widths[tag::CUSTOM_SYNTAX as usize] = 3;
-    widths[tag::CHAIN as usize] = 3;
-    widths[tag::MAKE_ARRAY as usize] = 3;
-    widths[tag::SWITCH as usize] = 3;
-    widths[tag::LOAD_NAMED as usize] = 3;
-    widths[tag::ASSIGN_NAMED as usize] = 3;
-
-    widths[tag::ASSIGN_NAMED_OP as usize] = 5;
-
-    widths[tag::CALL as usize] = 4;
-    widths[tag::CALL_CAPTURE as usize] = 4;
 
     widths[tag::ASSIGN_LOCAL as usize] = 5;
+    widths[tag::ASSIGN_LOCAL_OP as usize] = 7;
+    widths[tag::ASSIGN_NAMED as usize] = 3;
+    widths[tag::ASSIGN_NAMED_OP as usize] = 5;
+
     widths[tag::JUMP as usize] = 5;
     widths[tag::JUMP_IF_TRUE as usize] = 5;
     widths[tag::JUMP_IF_FALSE as usize] = 5;
     widths[tag::SKIP_IF_NOT_UNIT as usize] = 5;
 
+    widths[tag::CALL as usize] = 4;
+    widths[tag::CALL_CAPTURE as usize] = 4;
     widths[tag::CALL_OP as usize] = 6;
+    widths[tag::CALL_WITH_NS as usize] = 6;
     widths[tag::CALL_LOCAL_REF as usize] = 6;
     widths[tag::CALL_LOCAL_REF_CAPTURE as usize] = 6;
+    widths[tag::CALL_LOCAL_REF_WITH_NS as usize] = 8;
     widths[tag::CALL_NAMED_REF as usize] = 6;
     widths[tag::CALL_NAMED_REF_CAPTURE as usize] = 6;
-
-    widths[tag::ASSIGN_LOCAL_OP as usize] = 7;
+    widths[tag::CALL_NAMED_REF_WITH_NS as usize] = 8;
 
     widths
 };
@@ -403,7 +431,7 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
 
         match op {
             Op::Const(index) => {
-                code.push(tag::CONST);
+                code.push(tag::LOAD_CONST);
                 code.extend_from_slice(&small(*index as usize, "constants")?.to_le_bytes());
             }
             Op::Unit => code.push(tag::UNIT),
@@ -462,6 +490,21 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 code.push(tag::LOAD_NAMED);
                 code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
             }
+            Op::LoadNamedWithNs { namespace, name } => {
+                code.push(tag::LOAD_NAMED_WITH_NS);
+                code.extend_from_slice(&small(*namespace as usize, "names")?.to_le_bytes());
+                code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
+            }
+            Op::ExportLocal { slot, alias } => {
+                code.push(tag::EXPORT_LOCAL);
+                code.extend_from_slice(&slot.to_le_bytes());
+                code.extend_from_slice(&small(*alias as usize, "names")?.to_le_bytes());
+            }
+            Op::ExportNamed { name, alias } => {
+                code.push(tag::EXPORT_NAMED);
+                code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
+                code.extend_from_slice(&small(*alias as usize, "names")?.to_le_bytes());
+            }
 
             Op::AssignNamed { name, op: None } => {
                 code.push(tag::ASSIGN_NAMED);
@@ -478,9 +521,17 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 );
             }
 
-            Op::DeclareLocal { name, is_const } => {
+            Op::DeclareLocal {
+                name,
+                is_const,
+                is_global,
+            } => {
                 code.push(if *is_const {
-                    tag::DECLARE_CONST
+                    if *is_global {
+                        tag::DECLARE_GLOBAL_CONST
+                    } else {
+                        tag::DECLARE_CONST
+                    }
                 } else {
                     tag::DECLARE_LOCAL
                 });
@@ -568,6 +619,37 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                     },
                     |(tag, _)| tag,
                 ));
+                code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
+                code.push(*argc);
+                if let Some((_, operand)) = operand {
+                    code.extend_from_slice(&operand.to_le_bytes());
+                }
+            }
+
+            Op::CallWithNs {
+                namespace,
+                name,
+                argc,
+                receiver,
+            } => {
+                // `this` is a register and needs no operand to address it, so
+                // its encoding is the other two minus the trailing `u16`.
+                let operand = match receiver {
+                    Some(Receiver::Local(slot)) => Some((tag::CALL_LOCAL_REF_WITH_NS, *slot)),
+                    Some(Receiver::Named(var)) => {
+                        Some((tag::CALL_NAMED_REF_WITH_NS, small(*var as usize, "names")?))
+                    }
+                    Some(Receiver::This) | None => None,
+                };
+                code.push(operand.map_or(
+                    if receiver.is_some() {
+                        tag::CALL_THIS_REF_WITH_NS
+                    } else {
+                        tag::CALL_WITH_NS
+                    },
+                    |(tag, _)| tag,
+                ));
+                code.extend_from_slice(&small(*namespace as usize, "names")?.to_le_bytes());
                 code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
                 code.push(*argc);
                 if let Some((_, operand)) = operand {
@@ -723,6 +805,11 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 );
             }
 
+            Op::Import { alias } => {
+                code.push(tag::IMPORT);
+                code.extend_from_slice(&small(*alias as usize, "names")?.to_le_bytes());
+            }
+
             #[cfg(not(feature = "no_ast"))]
             Op::EvalAst {
                 residual,
@@ -801,13 +888,20 @@ fn encoded_width(op: &Op) -> usize {
         | Op::LoadThis
         | Op::LoadThisShared
         | Op::RequireThis
-        | Op::AssignThis { op: None }
         | Op::Return => 1,
+
+        Op::AssignThis { op } => match op {
+            None => 1,
+            Some(_) => 3,
+        },
+
         Op::Curry(..) | Op::Rotate(..) => 2,
+
         Op::CallFnPtr { receiver, .. } => match receiver {
             Some(Receiver::Local(..) | Receiver::Named(..)) => 4,
             Some(Receiver::This) | None => 2,
         },
+
         Op::Const(..)
         | Op::LoadLocal(..)
         | Op::StoreLocal { .. }
@@ -817,7 +911,6 @@ fn encoded_width(op: &Op) -> usize {
         | Op::Chain(..)
         | Op::Switch(..)
         | Op::LoadNamed(..)
-        | Op::AssignNamed { op: None, .. }
         | Op::StoreShared(..)
         | Op::Share(..)
         | Op::ShareNamed(..)
@@ -826,45 +919,55 @@ fn encoded_width(op: &Op) -> usize {
         | Op::MakeClosure(..)
         | Op::MakeArray(..)
         | Op::MakeMap(..)
-        | Op::AssignThis { op: Some(..) }
         | Op::CheckSize { .. } => 3,
+
+        Op::AssignNamed { op, .. } => match op {
+            None => 3,
+            Some(_) => 5,
+        },
+
+        Op::Import { .. } => 3,
 
         #[cfg(not(feature = "no_ast"))]
         Op::EvalAst { .. } => 3,
 
         Op::CustomSyntax(..) => 3,
 
-        Op::Call { op: None, .. }
-        | Op::CallRef {
-            receiver: Receiver::This,
-            ..
-        } => 4,
-        Op::AssignLocal { op: None, .. }
-        | Op::AssignNamed { op: Some(..), .. }
-        | Op::Jump(..)
+        Op::Call { op, .. } => match op {
+            None => 4,
+            Some(_) => 6,
+        },
+        Op::CallRef { receiver, .. } => match receiver {
+            Receiver::Local(..) | Receiver::Named(..) => 6,
+            Receiver::This => 4,
+        },
+
+        Op::Jump(..)
         | Op::JumpIfTrue { .. }
         | Op::JumpIfFalse { .. }
-        | Op::SkipIfNotUnit { .. }
-        | Op::IterNext {
-            counter_slot: None, ..
-        }
-        | Op::PushHandler {
-            catch_var: None, ..
-        } => 5,
-        Op::IterNext {
-            counter_slot: Some(_),
-            ..
-        }
-        | Op::PushHandler {
-            catch_var: Some(..),
-            ..
-        } => 7,
-        Op::Call { op: Some(..), .. }
-        | Op::CallRef {
-            receiver: Receiver::Local(..) | Receiver::Named(..),
-            ..
-        } => 6,
-        Op::AssignLocal { op: Some(..), .. } => 7,
+        | Op::SkipIfNotUnit { .. } => 5,
+
+        Op::AssignLocal { op, .. } => match op {
+            None => 5,
+            Some(_) => 7,
+        },
+
+        Op::IterNext { counter_slot, .. } => match counter_slot {
+            None => 5,
+            Some(_) => 7,
+        },
+
+        Op::PushHandler { catch_var, .. } => match catch_var {
+            None => 5,
+            Some(_) => 7,
+        },
+
+        Op::LoadNamedWithNs { .. } | Op::ExportLocal { .. } | Op::ExportNamed { .. } => 5,
+
+        Op::CallWithNs { receiver, .. } => match receiver {
+            None | Some(Receiver::This) => 6,
+            Some(Receiver::Local(..) | Receiver::Named(..)) => 8,
+        },
     }
 }
 
@@ -878,7 +981,7 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
     let small = |offset: usize| u16_at(code, at + offset);
 
     Some(match code[at] {
-        tag::CONST => Op::Const(u32::from(small(1)?)),
+        tag::LOAD_CONST => Op::Const(u32::from(small(1)?)),
         tag::UNIT => Op::Unit,
         tag::FALSE => Op::Bool(false),
         tag::TRUE => Op::Bool(true),
@@ -891,6 +994,10 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         tag::STORE_CONST => Op::StoreLocal {
             slot: small(1)?,
             is_const: true,
+        },
+        tag::EXPORT_LOCAL => Op::ExportLocal {
+            slot: small(1)?,
+            alias: u32::from(small(3)?),
         },
 
         tag::ASSIGN_LOCAL => Op::AssignLocal {
@@ -905,6 +1012,15 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         },
 
         tag::LOAD_NAMED => Op::LoadNamed(u32::from(small(1)?)),
+        tag::LOAD_NAMED_WITH_NS => Op::LoadNamedWithNs {
+            namespace: u32::from(small(1)?),
+            name: u32::from(small(3)?),
+        },
+        tag::EXPORT_NAMED => Op::ExportNamed {
+            name: u32::from(small(1)?),
+            alias: u32::from(small(3)?),
+        },
+
         tag::ASSIGN_NAMED => Op::AssignNamed {
             name: u32::from(small(1)?),
             op: None,
@@ -925,10 +1041,17 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         tag::DECLARE_LOCAL => Op::DeclareLocal {
             name: u32::from(small(1)?),
             is_const: false,
+            is_global: false,
         },
         tag::DECLARE_CONST => Op::DeclareLocal {
             name: u32::from(small(1)?),
             is_const: true,
+            is_global: false,
+        },
+        tag::DECLARE_GLOBAL_CONST => Op::DeclareLocal {
+            name: u32::from(small(1)?),
+            is_const: true,
+            is_global: true,
         },
 
         tag::POP => Op::Pop,
@@ -955,6 +1078,30 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
             argc: code[at + 3],
             op: Some(u32::from(small(4)?)),
             capture_parent_scope: false,
+        },
+        tag::CALL_WITH_NS => Op::CallWithNs {
+            namespace: u32::from(small(1)?),
+            name: u32::from(small(3)?),
+            argc: code[at + 5],
+            receiver: None,
+        },
+        tag::CALL_THIS_REF_WITH_NS => Op::CallWithNs {
+            namespace: u32::from(small(1)?),
+            name: u32::from(small(3)?),
+            argc: code[at + 5],
+            receiver: Some(Receiver::This),
+        },
+        tag::CALL_LOCAL_REF_WITH_NS => Op::CallWithNs {
+            namespace: u32::from(small(1)?),
+            name: u32::from(small(3)?),
+            argc: code[at + 5],
+            receiver: Some(Receiver::Local(small(6)?)),
+        },
+        tag::CALL_NAMED_REF_WITH_NS => Op::CallWithNs {
+            namespace: u32::from(small(1)?),
+            name: u32::from(small(3)?),
+            argc: code[at + 5],
+            receiver: Some(Receiver::Named(u32::from(small(6)?))),
         },
 
         tag @ (tag::CALL_LOCAL_REF | tag::CALL_LOCAL_REF_CAPTURE) => Op::CallRef {
@@ -1063,6 +1210,10 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         },
         tag::RETURN => Op::Return,
 
+        tag::IMPORT => Op::Import {
+            alias: u32::from(small(1)?),
+        },
+
         #[cfg(not(feature = "no_ast"))]
         tag::EVAL_AST => Op::EvalAst {
             residual: u32::from(small(1)?),
@@ -1080,10 +1231,13 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
     })
 }
 
-/// Every instruction in a chunk, paired with its address.
+/// _(internals)_ Every instruction in a chunk, paired with its address.
+/// Exported under the `internals` feature only.
 ///
 /// Stops at the first thing it cannot decode, so it is safe to point at
-/// anything. For a chunk that verified, it reaches the end.
+/// anything.
+///
+/// For a chunk that verified, it reaches the end.
 #[crate::expose_under_internals]
 fn disassemble(code: &[u8]) -> impl Iterator<Item = (usize, Op)> + '_ {
     let mut at = 0usize;
@@ -1138,10 +1292,17 @@ mod tests {
             Op::DeclareLocal {
                 name: 8,
                 is_const: false,
+                is_global: false,
             },
             Op::DeclareLocal {
                 name: 9,
                 is_const: true,
+                is_global: false,
+            },
+            Op::DeclareLocal {
+                name: 10,
+                is_const: true,
+                is_global: true,
             },
             Op::Pop,
             Op::Call {
@@ -1197,6 +1358,30 @@ mod tests {
                 argc: 2,
                 receiver: Receiver::This,
                 capture_parent_scope: true,
+            },
+            Op::CallWithNs {
+                namespace: 1,
+                name: 1,
+                argc: 2,
+                receiver: None,
+            },
+            Op::CallWithNs {
+                namespace: 1,
+                name: 1,
+                argc: 2,
+                receiver: Some(Receiver::Local(4)),
+            },
+            Op::CallWithNs {
+                namespace: 1,
+                name: 1,
+                argc: 2,
+                receiver: Some(Receiver::Named(5)),
+            },
+            Op::CallWithNs {
+                namespace: 1,
+                name: 1,
+                argc: 2,
+                receiver: Some(Receiver::This),
             },
             Op::CallFnPtr {
                 argc: 1,
@@ -1317,11 +1502,11 @@ mod tests {
     #[test]
     fn an_instruction_cut_short_does_not_decode() {
         assert_eq!(
-            width(&[tag::CONST, 0], 0),
+            width(&[tag::LOAD_CONST, 0], 0),
             None,
             "one byte of a u16 operand"
         );
-        assert_eq!(decode(&[tag::CONST, 0], 0), None);
+        assert_eq!(decode(&[tag::LOAD_CONST, 0], 0), None);
         assert_eq!(decode(&[tag::JUMP, 0, 0], 0), None);
     }
 

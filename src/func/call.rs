@@ -1,7 +1,6 @@
 //! Implement function-calling mechanism for [`Engine`].
+#![cfg(not(feature = "no_ast"))]
 
-#[cfg(not(feature = "no_module"))]
-use super::RhaiFunc;
 use super::{get_builtin_binary_op_fn, FnCallHashes};
 use crate::ast::{Expr, FnCallExpr};
 use crate::engine::{
@@ -13,6 +12,7 @@ use crate::{
     calc_fn_hash, Dynamic, Engine, FnArgsVec, FnPtr, ImmutableString, Position, RhaiResult,
     RhaiResultOf, Scope, ERR,
 };
+#[cfg(not(feature = "no_module"))]
 use std::convert::TryFrom;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
@@ -772,7 +772,7 @@ impl Engine {
     ) -> RhaiResult {
         let arg_values = &mut FnArgsVec::with_capacity(args_expr.len());
         let args = &mut FnArgsVec::with_capacity(args_expr.len());
-        let mut first_arg_value = None;
+        let mut first_arg = None;
 
         #[cfg(not(feature = "no_closure"))]
         let has_non_shared_this_ptr = this_ptr.as_ref().map_or(false, |v| !v.is_shared());
@@ -800,7 +800,7 @@ impl Engine {
 
                 // func(x, ...) -> x.func(...)
                 let (first, rest) = arg_values.split_first_mut().unwrap();
-                first_arg_value = Some(first);
+                first_arg = Some(first);
                 args.push(this_ptr.unwrap());
                 args.extend(rest.iter_mut());
             }
@@ -828,7 +828,7 @@ impl Engine {
                     // Turn it into a method call only if the object is not shared and not a simple value
                     // func(x, ...) -> x.func(...)
                     let (first, rest) = arg_values.split_first_mut().unwrap();
-                    first_arg_value = Some(first);
+                    first_arg = Some(first);
                     let obj_ref = target.take_ref().unwrap();
                     args.push(obj_ref);
                     args.extend(rest.iter_mut());
@@ -851,118 +851,15 @@ impl Engine {
             .search_imports(global, namespace)
             .ok_or_else(|| ERR::ErrorModuleNotFound(namespace.to_string(), namespace.position()))?;
 
-        // First search script-defined functions in namespace (can override built-in)
-        let mut func = module.get_qualified_fn(hash).or_else(|| {
-            // Then search native Rust functions
-            let hash_qualified_fn =
-                super::calc_fn_hash_full(hash, args.iter().map(|a| a.type_id()));
-            module.get_qualified_fn(hash_qualified_fn)
-        });
+        let namespace = namespace
+            .path
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<crate::StaticVec<_>>();
 
-        // Check for `Dynamic` parameters.
-        //
-        // Note - This is done during every function call mismatch without cache,
-        //        so hopefully the number of arguments should not be too many
-        //        (expected because closures cannot be qualified).
-        if func.is_none() && !args.is_empty() {
-            let num_args = args.len();
-            let max_dynamic_count =
-                usize::min(num_args, crate::api::default_limits::MAX_DYNAMIC_PARAMETERS);
-            let max_bitmask = 1usize << max_dynamic_count;
-            let mut bitmask = 1usize; // Bitmask of which parameter to replace with `Dynamic`
-
-            // Try all permutations with `Dynamic` wildcards
-            while bitmask < max_bitmask {
-                let hash_qualified_fn = super::calc_fn_hash_full(
-                    hash,
-                    args.iter().enumerate().map(|(i, a)| {
-                        if i < max_dynamic_count
-                            && bitmask & (1usize << (max_dynamic_count - i - 1)) != 0
-                        {
-                            // Replace with `Dynamic`
-                            std::any::TypeId::of::<Dynamic>()
-                        } else {
-                            a.type_id()
-                        }
-                    }),
-                );
-
-                if let Some(f) = module.get_qualified_fn(hash_qualified_fn) {
-                    func = Some(f);
-                    break;
-                }
-
-                bitmask += 1;
-            }
-        }
-
-        // Clone first argument if the function is not a method after-all
-        if !func.map_or(true, RhaiFunc::is_method) {
-            if let Some(first) = first_arg_value {
-                *first = args[0].clone();
-                args[0] = first;
-            }
-        }
-
-        defer! { let orig_level = global.level; global.level += 1 }
-
-        match func {
-            #[cfg(not(feature = "no_function"))]
-            Some(RhaiFunc::Script { fn_def, env }) => {
-                let env = env.as_deref();
-                let scope = &mut Scope::new();
-
-                let orig_source = std::mem::replace(&mut global.source, module.id_raw().cloned());
-                defer! { global => move |g| g.source = orig_source }
-                let global = global.into();
-
-                self.call_script_fn(global, caches, scope, None, env, fn_def, args, true, pos)
-            }
-
-            Some(f) if !f.is_pure() && args[0].is_read_only() => {
-                // If function is not pure, there must be at least one argument
-                Err(ERR::ErrorNonPureMethodCallOnConstant(fn_name.to_string(), pos).into())
-            }
-
-            Some(RhaiFunc::Plugin { func }) => {
-                let context = func
-                    .has_context()
-                    .then(|| (self, fn_name, module.id(), &*global, pos).into());
-                func.call(context, args)
-                    .and_then(|r| self.check_data_size(r, pos))
-            }
-
-            Some(
-                RhaiFunc::Pure {
-                    func, has_context, ..
-                }
-                | RhaiFunc::Method {
-                    func, has_context, ..
-                },
-            ) => {
-                let context =
-                    has_context.then(|| (self, fn_name, module.id(), &*global, pos).into());
-                func(context, args).and_then(|r| self.check_data_size(r, pos))
-            }
-
-            Some(RhaiFunc::Iterator { .. }) => {
-                unreachable!("iterator functions should not occur here")
-            }
-
-            None => Err(ERR::ErrorFunctionNotFound(
-                if namespace.is_empty() {
-                    self.gen_fn_call_signature(fn_name, args)
-                } else {
-                    format!(
-                        "{namespace}{}{}",
-                        crate::engine::NAMESPACE_SEPARATOR,
-                        self.gen_fn_call_signature(fn_name, args)
-                    )
-                },
-                pos,
-            )
-            .into()),
-        }
+        self.exec_qualified_fn_call_raw(
+            global, caches, &module, &namespace, fn_name, first_arg, args, hash, pos,
+        )
     }
 
     /// Evaluate a text script in place - used primarily for 'eval'.

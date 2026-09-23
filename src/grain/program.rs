@@ -6,7 +6,9 @@ use crate::ast::{ASTNode, Expr, Stmt};
 use crate::engine::KEYWORD_EVAL;
 #[cfg(not(feature = "no_module"))]
 use crate::module_resolvers::StaticModuleResolver;
-use crate::{expose_under_internals, types::Token, Dynamic, ImmutableString, Shared, SharedModule};
+use crate::{
+    expose_under_internals, types::Token, Dynamic, FnAccess, ImmutableString, Shared, SharedModule,
+};
 
 use crate::grain::bytecode::CustomSyntaxSite;
 use crate::grain::bytecode::{
@@ -26,9 +28,13 @@ use crate::grain::format::{Caps, Sidecar};
 pub struct Function {
     /// Index into the name pool.
     pub name: u32,
-    /// Parameter names, in order, as name-pool indices. They become the
-    /// callee's first locals, which is what makes them slot 0 upwards.
+    /// Parameter names, in order, as name-pool indices.
+    ///
+    /// They become the callee's first locals, which is what makes them
+    /// slot 0 upwards.
     pub params: Vec<u32>,
+    /// Function access mode.
+    pub access: FnAccess,
     /// The receiver type this function was declared for, as a name-pool index.
     ///
     /// `None` for an ordinary function, which is nearly all of them.
@@ -767,10 +773,74 @@ impl<'a> Program<'a> {
         self.resolver.as_ref()
     }
 
-    #[inline(always)]
-    pub(crate) fn source(&self) -> Option<&ImmutableString> {
+    /// Script source name, if known.
+    #[must_use]
+    pub fn source(&self) -> Option<&ImmutableString> {
         self.source.as_ref()
     }
+
+    /// Set the script source name.
+    pub fn set_source(&mut self, source: impl Into<ImmutableString>) -> &mut Self {
+        self.source = Some(source.into());
+        self
+    }
+}
+
+/// Export non-private functions into a [`Module`].
+#[cfg(not(feature = "no_function"))]
+#[cfg(not(feature = "no_module"))]
+pub fn export_functions_to_module(
+    program: &SharedProgram,
+    module: &mut crate::Module,
+    env: &Shared<crate::func::EncapsulatedEnviron>,
+) {
+    program
+        .functions()
+        .iter()
+        .filter(|&f| match f.access {
+            crate::func::FnAccess::Public => true,
+            crate::func::FnAccess::Private => false,
+        })
+        .for_each(|f| {
+            let fn_name: ImmutableString =
+                program.name(f.name).expect("valid function name").into();
+            let params: crate::FnArgsVec<ImmutableString> = f
+                .params
+                .iter()
+                .map(|&idx| program.name(idx).expect("valid param name").into())
+                .collect();
+
+            let fn_def = crate::func::ScriptFuncDef {
+                name: fn_name,
+                access: f.access,
+                #[cfg(not(feature = "no_object"))]
+                this_type: f
+                    .this_type
+                    .and_then(|index| program.name(index))
+                    .map(Into::into),
+                params,
+                body: crate::func::ScriptFuncPayload::GrainVM {
+                    program: program.clone(),
+                    params: f.params.iter().copied().collect(),
+                    chunk: f.chunk,
+                    span: crate::types::Span::new(
+                        program.position(f.chunk.entry() as usize),
+                        program.position(f.chunk.end() as usize),
+                    ),
+                },
+                #[cfg(feature = "metadata")]
+                comments: <_>::default(),
+            };
+
+            let hash = module.set_script_fn(fn_def);
+
+            if let Some(crate::func::RhaiFunc::Script { env: ref mut e, .. }) =
+                module.get_script_fn_by_hash_mut(hash)
+            {
+                // Encapsulated environment
+                *e = Some(env.clone());
+            }
+        });
 }
 
 #[cfg(test)]
@@ -790,6 +860,7 @@ mod tests {
             .map(|&(name, this_type, argc)| Function {
                 name,
                 params: vec![0; argc],
+                access: crate::FnAccess::Public,
                 this_type,
                 chunk: whole,
             })

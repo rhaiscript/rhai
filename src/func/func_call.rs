@@ -923,4 +923,168 @@ impl Engine {
 
         result
     }
+
+    /// Call a namespace-qualified function directly with pre-evaluated arguments.
+    #[cfg(not(feature = "no_module"))]
+    #[cfg(feature = "grain")]
+    pub(crate) fn exec_qualified_fn_call<'a>(
+        &self,
+        global: &mut GlobalRuntimeState,
+        caches: &mut Caches,
+        namespace_str: &str,
+        fn_name: &str,
+        first_arg: Option<&'a mut Dynamic>,
+        args: &mut [&'a mut Dynamic],
+        hash: u64,
+        pos: Position,
+    ) -> crate::RhaiResult {
+        let root = match namespace_str.split_once(crate::engine::NAMESPACE_SEPARATOR) {
+            Some((root, _)) => root,
+            None => namespace_str,
+        };
+
+        let module = global
+            .find_import(root)
+            .map_or_else(
+                || self.global_sub_modules.get(root).cloned(),
+                |offset| global.get_shared_import(offset),
+            )
+            .ok_or_else(|| ERR::ErrorModuleNotFound(namespace_str.to_string(), pos))?;
+
+        let namespace = namespace_str
+            .split(crate::engine::NAMESPACE_SEPARATOR)
+            .collect::<crate::StaticVec<_>>();
+
+        self.exec_qualified_fn_call_raw(
+            global, caches, &module, &namespace, fn_name, first_arg, args, hash, pos,
+        )
+    }
+
+    /// Shared core logic for calling a qualified function given its module.
+    #[cfg(not(feature = "no_module"))]
+    pub(crate) fn exec_qualified_fn_call_raw<'a, 's>(
+        &self,
+        global: &mut GlobalRuntimeState,
+        caches: &mut Caches,
+        module: &crate::SharedModule,
+        namespace: &[&'s str],
+        fn_name: &str,
+        first_arg: Option<&'a mut Dynamic>,
+        args: &mut [&'a mut Dynamic],
+        hash: u64,
+        pos: Position,
+    ) -> crate::RhaiResult {
+        use super::RhaiFunc;
+
+        // First search script-defined functions in namespace (can override built-in)
+        let mut func = module.get_qualified_fn(hash).or_else(|| {
+            // Then search native Rust functions
+            let hash_qualified_fn =
+                super::calc_fn_hash_full(hash, args.iter().map(|a| a.type_id()));
+            module.get_qualified_fn(hash_qualified_fn)
+        });
+
+        // Check for `Dynamic` parameters.
+        if func.is_none() && !args.is_empty() {
+            let num_args = args.len();
+            let max_dynamic_count =
+                usize::min(num_args, crate::api::default_limits::MAX_DYNAMIC_PARAMETERS);
+            let max_bitmask = 1usize << max_dynamic_count;
+            let mut bitmask = 1usize;
+
+            while bitmask < max_bitmask {
+                let hash_qualified_fn = super::calc_fn_hash_full(
+                    hash,
+                    args.iter().enumerate().map(|(i, a)| {
+                        if i < max_dynamic_count
+                            && bitmask & (1usize << (max_dynamic_count - i - 1)) != 0
+                        {
+                            std::any::TypeId::of::<Dynamic>()
+                        } else {
+                            a.type_id()
+                        }
+                    }),
+                );
+
+                if let Some(f) = module.get_qualified_fn(hash_qualified_fn) {
+                    func = Some(f);
+                    break;
+                }
+
+                bitmask += 1;
+            }
+        }
+
+        // Clone first argument if the function is not a method after-all
+        if !func.map_or(true, RhaiFunc::is_method) {
+            if let Some(first) = first_arg {
+                *first = args[0].clone();
+                args[0] = first;
+            }
+        }
+
+        defer! { let orig_level = global.level; global.level += 1 }
+
+        match func {
+            #[cfg(not(feature = "no_function"))]
+            Some(RhaiFunc::Script { fn_def, env }) => {
+                let env = env.as_deref();
+                let scope = &mut Scope::new();
+
+                let orig_source = std::mem::replace(&mut global.source, module.id_raw().cloned());
+                defer! { global => move |g| g.source = orig_source }
+                let global = global.into();
+
+                self.call_script_fn(global, caches, scope, None, env, fn_def, args, true, pos)
+            }
+
+            Some(f) if !f.is_pure() && args[0].is_read_only() => {
+                Err(ERR::ErrorNonPureMethodCallOnConstant(fn_name.to_string(), pos).into())
+            }
+
+            Some(RhaiFunc::Plugin { func }) => {
+                let context = func
+                    .has_context()
+                    .then(|| (self, fn_name, module.id(), &*global, pos).into());
+                func.call(context, args)
+                    .and_then(|r| self.check_data_size(r, pos))
+            }
+
+            Some(
+                RhaiFunc::Pure {
+                    func, has_context, ..
+                }
+                | RhaiFunc::Method {
+                    func, has_context, ..
+                },
+            ) => {
+                let context =
+                    has_context.then(|| (self, fn_name, module.id(), &*global, pos).into());
+                func(context, args).and_then(|r| self.check_data_size(r, pos))
+            }
+
+            Some(RhaiFunc::Iterator { .. }) => {
+                unreachable!("iterator functions should not occur here")
+            }
+
+            None => Err(ERR::ErrorFunctionNotFound(
+                if namespace.is_empty() {
+                    self.gen_fn_call_signature(fn_name, args)
+                } else {
+                    format!(
+                        "{}{}{}",
+                        namespace
+                            .iter()
+                            .map(|&s| s)
+                            .collect::<crate::StaticVec<_>>()
+                            .join(crate::engine::NAMESPACE_SEPARATOR),
+                        crate::engine::NAMESPACE_SEPARATOR,
+                        self.gen_fn_call_signature(fn_name, args)
+                    )
+                },
+                pos,
+            )
+            .into()),
+        }
+    }
 }

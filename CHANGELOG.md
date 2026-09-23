@@ -21,6 +21,7 @@ Bug fixes
 New features
 ------------
 
+* Importing modules, the `global::` namespace, the `export` and `import` statements are all supported by Rhai Grain.
 * New `no_ast` feature that excludes the `AST`, its interpreter, the tokenizer, parser and optimizer for a minimized build.  Under this feature flag, the Rhai Grain VM is the only venue to evaluate a script.
 * Custom syntax that does not modify the `scope` is now fully supported in Rhai Grain ([`#1173`](https://github.com/rhaiscript/rhai/pull/1173)). Custom syntax that modifies the `scope` remains non-lowerable fragments.
 
