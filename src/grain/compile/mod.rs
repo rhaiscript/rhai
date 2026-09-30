@@ -10,8 +10,7 @@ use std::mem;
 use std::prelude::v1::*;
 
 use crate::ast::{
-    ASTFlags, ASTNode, Expr, FlowControl, FnCallExpr, OpAssignment, Stmt, StmtBlock,
-    SwitchCasesCollection,
+    ASTFlags, Expr, FlowControl, FnCallExpr, OpAssignment, Stmt, StmtBlock, SwitchCasesCollection,
 };
 #[cfg(not(feature = "no_closure"))]
 use crate::engine::KEYWORD_IS_SHARED;
@@ -208,37 +207,24 @@ impl Compiler {
 }
 
 /// Where `break` and `continue` jump to, and what they must unwind first.
-///
-/// Jump targets are backpatched: `break` sites are collected as they are
-/// emitted and pointed at the instruction after the loop once that address is
-/// known.
 struct Loop {
-    /// Where `continue` goes — the condition test, or the top of the body.
+    /// Where `continue` goes — the condition test, or top of the body.
     continue_target: u32,
-    /// Slot depth a `break` unwinds to. For a `for` loop this is *before* the
-    /// loop variable, which leaving must drop.
+    /// Slot depth a `break` unwinds to, before any `for` variables.
     break_depth: u16,
-    /// Slot depth a `continue` unwinds to. Differs from `break_depth` in a
-    /// `for`, where the loop variable has to survive into the next iteration —
-    /// one field cannot be both.
+    /// Slot depth a `continue` unwinds to, preserving `for` variables.
     continue_depth: u16,
-    /// How many iterators are live *inside* this loop, so a jump out of it
-    /// can drop whatever was made since. A `break` inside a `try` inside a
-    /// `for` skips the straight-line path that would have cleaned up.
+    /// Runtime iteration-stack depth when this loop was entered.
     iters: usize,
-    /// Whether the loop owns an iterator of its own. `break` drops it and
-    /// `continue` must not, which is the other thing one field cannot be.
+    /// Whether the loop has its own entry on the iteration stack.
     owns_iterator: bool,
-    /// How many `try` regions were armed when the loop began, so a jump out
-    /// of the loop disarms the ones inside it.
+    /// Try handlers armed when the loop began.
     handlers: usize,
-    /// How many surplus stack slots enclosed this loop when it began, so a
-    /// jump out of the loop can drop them on the stack.
+    /// Surplus operand values enclosing this point in the lowering.
     stack_surplus: usize,
     /// `Jump` sites awaiting the address after the loop.
     breaks: Vec<usize>,
-    /// Whether any `break` statement in this loop yields an expression value.
-    has_break_value: bool,
+    push_site: usize,
 }
 
 /// Where a `switch` table entry sends control, before the arms have
@@ -304,14 +290,11 @@ struct Lowering {
     slots: Slots,
     max_stack: u16,
     loops: Vec<Loop>,
-    /// How many iterators are live at this point in the lowering, so a jump
-    /// out of a loop knows how many to drop.
+    /// Active iteration-stack entries, including non-iterator loops.
     iters: usize,
-    /// The same for `try` regions: a `break` out of one has to disarm it, or
-    /// the next unrelated error is caught into a block already left.
+    /// Armed try handlers, for break/continue cleanup.
     handlers: usize,
-    /// How many surplus stack slots enclose this point in the lowering, so a
-    /// `break` out of a loop knows how many stack slots to drop.
+    /// Surplus values on the operand stack, such as `switch` subjects.
     stack_surplus: usize,
     /// How many statements enclose the one being lowered, for the marker
     /// [`Lowering::statement`] emits. Restored on the way out, so it is the
@@ -757,7 +740,6 @@ impl Lowering {
         }
 
         self.stack_surplus -= 1;
-
         true
     }
 
@@ -1245,7 +1227,8 @@ impl Lowering {
                 self.expression(&flow.expr);
                 // `ErrorFor` is reported against the iterable's *start*, which
                 // for `a.b` or a call is not its `position`.
-                self.emit_at(Op::IterInit, flow.expr.start_position());
+                let push_site = self.code.len();
+                self.emit(Op::EnterLoop { exit: u32::MAX });
                 self.iters += 1;
 
                 // Counter first, matching the order Rhai pushes them in, so
@@ -1269,9 +1252,16 @@ impl Lowering {
                 self.slots.declare(var.name.clone());
                 let var_slot = self.slots.depth() as u16 - 1;
 
-                self.emit_at(Op::Tick, flow.body.position());
+                // [`Op::EnterLoop`] will perform the [`Op::Tick`] functionality
+                // upon entering any loop.
+                //self.emit_at(Op::Tick, flow.body.position());
 
+                self.begin_for(push_site, u32::MAX, outside);
+                // Put IterInit immediately before IterNext. IterInit sets the
+                // runtime continue target to the following instruction.
+                self.emit_at(Op::IterInit, flow.expr.start_position());
                 let top = self.here();
+                self.patch_compiled_loop_continue(top);
                 let exit = self.code.len();
                 self.emit_at(
                     Op::IterNext {
@@ -1283,21 +1273,18 @@ impl Lowering {
                 // The item is on the operand stack.
                 self.emit(Op::StoreShared(var_slot));
 
-                let has_break_val = flow.body.statements().iter().any(has_break_value);
-                self.begin_for(top, outside, has_break_val);
                 if !self.block_discarding(flow.body.statements()) {
                     return Lowered::Defeated;
                 }
                 self.emit(Op::Jump(top));
-                let breaks = self.end_loop();
+                let loop_info = self.end_loop();
 
-                // Exhausted: `IterNext` dropped the iterator on the way here.
+                // Exhausted: `IterNext` drops the iterator on the way here.
                 self.patch_to(exit, self.here());
-                self.iters -= 1;
                 self.emit(Op::UnwindTo(outside));
                 self.slots.unwind_to(outside as usize);
 
-                self.exit_loop(breaks, has_break_val)
+                self.exit_loop(loop_info)
             }
 
             // Every arm is an expression and the default is a `Unit`, so a
@@ -1380,9 +1367,13 @@ impl Lowering {
                 let FlowControl { expr, body, .. } = &**payload;
                 let unconditional = matches!(expr, Expr::Unit(..) | Expr::BoolConstant(true, ..));
 
-                self.emit_at(Op::Tick, body.position());
+                // [`Op::EnterLoop`] will perform the [`Op::Tick`] functionality
+                // upon entering any loop.
+                //self.emit_at(Op::Tick, body.position());
 
+                self.begin_loop(u32::MAX, self.slots.depth() as u16);
                 let top = self.here();
+                self.patch_compiled_loop_continue(top);
 
                 let exit = if unconditional {
                     None
@@ -1391,35 +1382,35 @@ impl Lowering {
                     Some(self.emit_jump_if_false(expr.position()))
                 };
 
-                let has_break_val = body.statements().iter().any(has_break_value);
-                self.begin_loop(top, has_break_val);
                 if !self.block_discarding(body.statements()) {
                     return Lowered::Defeated;
                 }
                 self.emit(Op::Jump(top));
 
-                let breaks = self.end_loop();
+                let loop_info = self.end_loop();
                 if let Some(exit) = exit {
                     self.patch_here(exit);
+                    self.emit(Op::ExitLoop);
                 }
-                self.exit_loop(breaks, has_break_val)
+                self.exit_loop(loop_info)
             }
 
             Stmt::Do(payload, flags, ..) => {
                 let FlowControl { expr, body, .. } = &**payload;
                 let until = flags.contains(ASTFlags::NEGATED);
 
-                self.emit_at(Op::Tick, body.position());
+                // [`Op::EnterLoop`] will perform the [`Op::Tick`] functionality
+                // upon entering any loop.
+                //self.emit_at(Op::Tick, body.position());
 
+                self.begin_loop(u32::MAX, self.slots.depth() as u16);
                 let top = self.here();
-
-                let has_break_val = body.statements().iter().any(has_break_value);
-                self.begin_loop(top, has_break_val);
                 if !self.block_discarding(body.statements()) {
                     return Lowered::Defeated;
                 }
-                let breaks = self.end_loop();
 
+                let continue_target = self.here();
+                self.patch_compiled_loop_continue(continue_target);
                 self.expression(expr);
                 if until {
                     // `do ... until c` loops while `c` is false, which is a
@@ -1431,7 +1422,9 @@ impl Lowering {
                     self.patch_here(exit);
                 }
 
-                self.exit_loop(breaks, has_break_val)
+                let loop_info = self.end_loop();
+                self.emit(Op::ExitLoop);
+                self.exit_loop(loop_info)
             }
 
             Stmt::BreakLoop(value, flags, ..) => {
@@ -1449,18 +1442,7 @@ impl Lowering {
                 let pop_surplus = self.stack_surplus - active.stack_surplus;
                 let is_break = flags.contains(ASTFlags::BREAK);
 
-                // A jump out of a loop skips whatever the straight-line path
-                // would have cleaned up. The nesting is lexical, so how many
-                // iterators are live is known here — a `break` inside a `try`
-                // inside a `for` has one to drop, and `continue` has none
-                // because it re-enters the loop that owns it.
-                //
-                // Any stack surplus needs to pop.
                 if is_break {
-                    // If there is a break value, it must first be rotated beyond
-                    // any switch subjects still on the stack.
-                    //
-                    // `Op::Rotate` can only handle up to 255 slots.
                     let Ok(stack_surplus) = u8::try_from(pop_surplus) else {
                         return Lowered::Defeated;
                     };
@@ -1469,21 +1451,17 @@ impl Lowering {
                             self.expression(expr);
                             self.emit(Op::Rotate(stack_surplus));
                         }
-                        None if active.has_break_value => {
+                        None => {
                             self.emit(Op::Unit);
                             self.emit(Op::Rotate(stack_surplus));
                         }
-                        None => {}
                     }
                     for _ in 0..stack_surplus {
                         self.emit(Op::Pop);
                     }
 
-                    // Out of the loop entirely, so its own iterator goes too —
-                    // `loop_iters` counts from inside the loop and therefore
-                    // already includes it.
                     self.pop_handlers(loop_handlers);
-                    self.drop_iterators(loop_iters - usize::from(owns_iterator));
+                    self.drop_loops(loop_iters - usize::from(owns_iterator));
                     self.emit(Op::UnwindTo(break_depth));
                     let site = self.emit_jump();
                     self.loops.last_mut().expect("checked").breaks.push(site);
@@ -1491,10 +1469,8 @@ impl Lowering {
                     for _ in 0..pop_surplus {
                         self.emit(Op::Pop);
                     }
-                    // Back into the same loop, so its iterator and its loop
-                    // variable both have to survive.
                     self.pop_handlers(loop_handlers);
-                    self.drop_iterators(loop_iters);
+                    self.drop_loops(loop_iters);
                     self.emit(Op::UnwindTo(continue_depth));
                     self.emit(Op::Jump(continue_target));
                 }
@@ -2252,23 +2228,24 @@ impl Lowering {
             | Op::SkipIfNotUnit { target: slot, .. }
             | Op::IterNext { exit: slot, .. }
             | Op::PushHandler { target: slot, .. } => *slot = target,
+            Op::EnterLoop { exit: slot, .. } => *slot = target,
             other => unreachable!("patched a {other:?}, which is not a jump"),
         }
     }
 
-    /// Emit an `IterDrop` for every iterator live above `floor`.
-    fn drop_iterators(&mut self, floor: usize) {
+    fn patch_compiled_loop_continue(&mut self, target: u32) {
+        self.loops
+            .last_mut()
+            .expect("loop is active when its target is patched")
+            .continue_target = target;
+    }
+
+    fn drop_loops(&mut self, floor: usize) {
         for _ in floor..self.iters {
-            self.emit(Op::IterDrop);
+            self.emit(Op::ExitLoop);
         }
     }
 
-    /// Disarm every `try` region entered above `floor`.
-    ///
-    /// A `break` or `continue` jumps over the `PopHandler` the straight-line
-    /// path would have run. Left armed, the handler keeps a stale target and a
-    /// stale set of depths, and the next error anywhere in the frame is caught
-    /// into a `catch` block that has already been left.
     fn pop_handlers(&mut self, floor: usize) {
         for _ in floor..self.handlers {
             self.emit(Op::PopHandler);
@@ -2277,61 +2254,55 @@ impl Lowering {
 
     /// Open a loop whose `break` and `continue` unwind to the same place —
     /// `while`, `loop` and `do`, which declare nothing of their own.
-    fn begin_loop(&mut self, continue_target: u32, has_break_value: bool) {
-        let depth = u16::try_from(self.slots.depth()).expect("slot count is bounded");
+    fn begin_loop(&mut self, continue_target: u32, break_depth: u16) -> usize {
+        let push_site = self.code.len();
+        self.emit(Op::EnterLoop { exit: u32::MAX });
+        self.iters += 1;
         self.loops.push(Loop {
             continue_target,
-            break_depth: depth,
-            continue_depth: depth,
+            break_depth,
+            continue_depth: break_depth,
             iters: self.iters,
+            owns_iterator: true,
             handlers: self.handlers,
             stack_surplus: self.stack_surplus,
-            owns_iterator: false,
             breaks: Vec::new(),
-            has_break_value,
+            push_site,
         });
+        push_site
     }
 
     /// Open a `for`, which does declare: the loop variable and any counter
     /// live between the two depths, so leaving drops them and going round
     /// again does not.
-    fn begin_for(&mut self, continue_target: u32, break_depth: u16, has_break_value: bool) {
+    fn begin_for(&mut self, push_site: usize, continue_target: u32, break_depth: u16) {
         self.loops.push(Loop {
             continue_target,
             break_depth,
             continue_depth: u16::try_from(self.slots.depth()).expect("slot count is bounded"),
             iters: self.iters,
+            owns_iterator: true,
             handlers: self.handlers,
             stack_surplus: self.stack_surplus,
-            owns_iterator: true,
             breaks: Vec::new(),
-            has_break_value,
+            push_site,
         });
     }
 
-    fn end_loop(&mut self) -> Vec<usize> {
-        self.loops.pop().expect("loop stack is balanced").breaks
+    fn end_loop(&mut self) -> Loop {
+        self.loops.pop().expect("loop stack is balanced")
     }
 
-    /// Push the value a loop has when it runs to completion — unit
-    /// — and land every `break` in it just past that, when a `break`
-    /// value expression is present.
-    ///
-    /// Otherwise, leave nothing on the stack and return [`Lowered::Empty`].
-    fn exit_loop(&mut self, breaks: Vec<usize>, has_break_value: bool) -> Lowered {
-        if has_break_value {
-            self.emit(Op::Unit);
-        }
-        // A valued `break` has already pushed the loop's result, so it must
-        // bypass the unit supplied when the loop ends normally.
-        for site in breaks {
+    /// Push the value a loop has when it runs to completion — unit — and land
+    /// every `break` in it just past that.
+    fn exit_loop(&mut self, loop_info: Loop) -> Lowered {
+        self.emit(Op::Unit);
+        self.patch_here(loop_info.push_site);
+        for site in loop_info.breaks {
             self.patch_here(site);
         }
-        if has_break_value {
-            Lowered::Value
-        } else {
-            Lowered::Empty
-        }
+        self.iters -= 1;
+        Lowered::Value
     }
 
     fn residual_expr(&mut self, expr: &Expr) {
@@ -2571,26 +2542,6 @@ fn declaration_order(def: &ScriptFuncDef) -> (&str, usize, Option<&str>) {
     let this_type = None;
 
     (&def.name, def.params.len(), this_type)
-}
-
-/// Check whether a statement block or statement contains a `break` with an
-/// expression value targeting this loop level (stopping at nested loops).
-fn has_break_value(stmt: &Stmt) -> bool {
-    let mut has_value = false;
-    let mut path = Vec::new();
-
-    stmt.walk(&mut path, &mut |path| match path.last() {
-        Some(ASTNode::Stmt(Stmt::BreakLoop(Some(..), flags, ..)))
-            if flags.contains(ASTFlags::BREAK) =>
-        {
-            has_value = true;
-            false
-        }
-        Some(ASTNode::Stmt(Stmt::For(..) | Stmt::While(..) | Stmt::Do(..))) => false,
-        _ => true,
-    });
-
-    has_value
 }
 
 #[cfg(test)]

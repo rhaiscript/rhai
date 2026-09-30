@@ -477,6 +477,7 @@ pub enum Op {
     /// ## Deprecated
     ///
     /// This Op is deprecated and no longer used.
+    #[deprecated(note = "This Op is deprecated and no longer used.", since = "1.26.0")]
     MakeClosure(u32),
 
     /// Pop a name and push a [function pointer][crate::FnPtr] to it.
@@ -670,6 +671,12 @@ pub enum Op {
     ///
     /// Its table entry is read on every iteration rather than only on failure,
     /// which is why the in-memory position table is dense.
+    ///
+    /// ### Deprecated
+    ///
+    /// This Op is deprecated and no longer used because [`Op::EnterLoop`] does
+    /// the equivalent.
+    #[deprecated(note = "This Op is deprecated and no longer used.", since = "1.27.0")]
     Tick,
 
     /// Record the current [`Scope`][crate::Scope] length as the depth an error
@@ -780,6 +787,35 @@ pub enum Op {
     /// bare `throw;` means "re-raise the original".
     PopHandler,
 
+    /// Register a loop on the VM's iteration stack.
+    ///
+    /// ### Stack Behavior
+    ///
+    /// The current scope is the break depth.
+    ///
+    /// The VM records the operand and scope depths at this instruction so a
+    /// `break` or `continue` returned by a function or raised by a residual AST
+    /// can unwind the same loop.
+    ///
+    /// ### `for` Loop Configuration
+    ///
+    /// On an iterator-backed loop (i.e. a `for` loop), the following
+    /// [`Op::IterInit`] adds iterator state to this entry and sets its
+    /// `continue` destination to the following [`Op::IterNext`].
+    ///
+    /// `while`, `loop` and `do` use the entry without iterator state; their
+    /// `continue` destination is the instruction after this one.
+    EnterLoop {
+        /// Where `break` resumes, after the loop's normal result is emitted.
+        exit: u32,
+    },
+
+    /// Pop the active loop registered by [`Op::EnterLoop`].
+    ///
+    /// `for` loops leave through [`Op::IterNext`] instead, which drops their
+    /// iterator when exhausted.
+    ExitLoop,
+
     /// Pop an iterable and start iterating it.
     ///
     /// The iterator goes on a stack of the VM's own rather than the operand
@@ -804,6 +840,11 @@ pub enum Op {
     /// The only instruction whose two edges leave different amounts on the
     /// operand stack, which is why the verifier gives it explicit successors.
     ///
+    /// ### Configuration
+    ///
+    /// It records the scope depth to account for additional loop-local variables
+    /// pushed into the scope by `for`.
+    ///
     /// ## Position
     ///
     /// Its table entry is the iterable's position — `position`, not
@@ -816,14 +857,6 @@ pub enum Op {
         /// `StoreShared`s that follow pop them in declaration order.
         counter_slot: Option<u16>,
     },
-
-    /// Discard the current iterator.
-    ///
-    /// Emitted where a `break` leaves a loop, since the jump skips the
-    /// [`Op::IterNext`] that would have dropped it on exhaustion.
-    ///
-    /// Leaving a frame drops whatever it left behind without this.
-    IterDrop,
 
     /// Pop a value and write it into local slot `.0`, through a shared cell
     /// rather than over it.
@@ -914,6 +947,7 @@ impl Op {
                     program.assign_op(op.unwrap()).unwrap().disassemble(program)
                 )
             }
+            #[allow(deprecated)]
             Op::MakeClosure(name) => format!("{self:?} : {}", program.name(*name).unwrap(),),
             Op::Chain(idx) => {
                 let chain = program.chain(*idx).unwrap();

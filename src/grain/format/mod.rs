@@ -498,6 +498,19 @@ mod tests {
         );
     }
 
+    #[test]
+    fn loop_instructions_survive_an_artifact_round_trip() {
+        let engine = crate::Engine::new();
+        let ast = engine
+            .compile("let i = 0; while i < 2 { i += 1; } i")
+            .unwrap();
+        let program = crate::grain::Compiler::new().compile(&ast);
+        let artifact = program.write().expect("loop program must be writable");
+        let loaded = Program::read(&artifact).expect("loop program must be readable");
+
+        assert_eq!(program.code(), loaded.code());
+    }
+
     /// The case a check on the code alone cannot catch.
     ///
     /// Two scripts differing only in whitespace compile to the same instructions,

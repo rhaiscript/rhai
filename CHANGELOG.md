@@ -36,6 +36,7 @@ Enhancements
 * `rhai-run` now supports loading and executing Rhai Grain bytecode files if the `grain` feature is enabled ([`#1160`](https://github.com/rhaiscript/rhai/pull/1160)).
 * The example `grain_dump` is now split into two CLI tools in `bin`: `grain-compile`, which compiles a Rhai script into Rhai Grain bytecodes, and `grain-dump` which dissembles a Rhai Grain bytecodes files ([`#1160`](https://github.com/rhaiscript/rhai/pull/1160)).
 * `grain-dump` now disassembles Rhai Grain bytecodes files with more complete information ([`#1168`](https://github.com/rhaiscript/rhai/pull/1168)).
+* Rhai Grain now properly handles the case where a function returns a pseudo-error (e.g. `EvalAltResult::LoopBreak`) instead of treating it like a normal error ([`#1176`](https://github.com/rhaiscript/rhai/pull/1176)).
 
 
 Version 1.26.1

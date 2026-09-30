@@ -227,14 +227,39 @@ fn chain_op<'p>(program: &'p Program, chain: &Chain) -> RhaiResultOf<Option<&'p 
         .ok_or_else(|| malformed(format!("no op-assignment {op}")))
 }
 
-/// One `for` loop in progress.
+/// Runtime state for one active iterator or non-iterator loop.
 ///
-/// The count is here rather than in a local because Rhai keeps it outside the
-/// scope too, and checks it for overflow before writing it — a loop long
-/// enough to wrap the counter is an error rather than a wrap.s
-struct Iteration {
-    items: Box<dyn Iterator<Item = RhaiResult>>,
+/// [`Op::EnterLoop`] creates the record; [`Op::IterInit`] adds iterator state
+/// for a `for` loop. A complete record is created for `while`, `loop` or `do`.
+struct Loop {
+    /// Continue destination captured from the instruction after [`Op::EnterLoop`]
+    /// and consumed by [`Vm::loop_break`]. [`Op::IterInit`] replaces it with the
+    /// following instruction for a `for` loop.
+    start: usize,
+    /// Break destination set by [`Op::EnterLoop`], then consumed by [`Vm::loop_break`].
+    ///
+    /// # Special case
+    ///
+    /// Zero is reserved for a missing break destination. A valid loop target
+    /// cannot be zero because the chunk begins with its [`Op::EnterLoop`].
+    exit: usize,
+    /// Operand depth captured by [`Op::EnterLoop`]; [`Vm::loop_break`] truncates to it
+    /// before resuming either break or continue.
+    operands: usize,
+    /// Scope depth captured by [`Op::EnterLoop`] before loop locals; [`Vm::loop_break`]
+    /// restores it on break.
+    scope_depth: usize,
+    /// Scope depth initialized by [`Op::EnterLoop`], refreshed by [`Op::IterNext`] after
+    /// `for` locals are in scope, and restored by [`Vm::loop_break`] on continue.
+    start_scope_depth: usize,
+    /// Handler depth captured by [`Op::EnterLoop`]; [`Vm::loop_break`] removes handlers
+    /// armed inside the loop before resuming.
+    handlers: usize,
+    /// Iterator created by [`Op::IterInit`] and advanced by [`Op::IterNext`].
+    /// `None` for `while`, `loop` and `do`.
+    items: Option<Box<dyn Iterator<Item = RhaiResult>>>,
     /// The index of the item last handed out, starting one below the first.
+    /// Only used in `for` loops.
     count: INT,
 }
 
@@ -311,13 +336,13 @@ pub struct Vm<'e> {
     global: GlobalRuntimeState,
     caches: Caches,
     stack: Vec<Dynamic>,
-    /// One entry per `for` loop currently running.
+    /// One entry per active loop, iterator-backed or otherwise.
     ///
     /// Not on the operand stack, because an iterator is not a `Dynamic`. A
     /// frame truncates this to what it found on entry, so a `return` or an
     /// escaping error drops whatever its loops were holding without the
     /// compiler emitting anything.
-    iterators: FnArgsVec<Iteration>,
+    loops: FnArgsVec<Loop>,
     /// One entry per `try` region currently armed or catching. Frame-floored
     /// the same way the iterators are, so an error in a called function can
     /// never find its caller's handler and jump into another chunk.
@@ -444,7 +469,7 @@ impl<'e> Vm<'e> {
             global,
             caches: Caches::new(),
             stack: Vec::new(),
-            iterators: FnArgsVec::new_const(),
+            loops: FnArgsVec::new_const(),
             handlers: StaticVec::new_const(),
             #[cfg(not(feature = "unchecked"))]
             #[cfg(not(all(feature = "no_index", feature = "no_object")))]
@@ -492,7 +517,7 @@ impl<'e> Vm<'e> {
             global,
             caches: Caches::new(),
             stack: Vec::new(),
-            iterators: FnArgsVec::new_const(),
+            loops: FnArgsVec::new_const(),
             handlers: StaticVec::new_const(),
             #[cfg(not(feature = "unchecked"))]
             #[cfg(not(all(feature = "no_index", feature = "no_object")))]
@@ -2405,7 +2430,7 @@ impl<'e> Vm<'e> {
     /// The iterable is flattened first — so iterating a captured array walks a
     /// snapshot rather than the shared cell — and is consumed by value, which
     /// is why the iterator is built once and held for the life of the loop.
-    fn iter_init(&mut self, iterable: Dynamic, pos: Position) -> RhaiResultOf<()> {
+    fn iter_init(&mut self, iterable: Dynamic, start: usize, pos: Position) -> RhaiResultOf<()> {
         let iterable = iterable.flatten();
         let type_id = iterable.type_id();
 
@@ -2427,10 +2452,22 @@ impl<'e> Vm<'e> {
 
         let func = func.ok_or_else(|| Box::new(EvalAltResult::ErrorFor(pos)))?;
 
-        self.iterators.push(Iteration {
-            items: func(iterable),
-            count: -1,
-        });
+        let Some(iter) = self.loops.last_mut() else {
+            return Err(malformed("IterInit without an active loop".to_string()));
+        };
+        if iter.items.is_some() {
+            return Err(malformed(
+                "IterInit on a loop that already has an iterator".to_string(),
+            ));
+        }
+        // [`Op::EnterLoop`] has already captured the stack and scope boundary.
+        // The iterable itself has now been popped, so update the operand depth
+        // before a pseudo-error can unwind the loop.
+        iter.operands = self.stack.len();
+        iter.start = start;
+        iter.start_scope_depth = iter.scope_depth;
+        iter.items = Some(func(iterable));
+        iter.count = -1;
         Ok(())
     }
 
@@ -3142,7 +3179,7 @@ impl<'e> Vm<'e> {
         base: usize,
         reached: &mut usize,
     ) -> RhaiResult {
-        let iter_base = self.iterators.len();
+        let loop_base = self.loops.len();
         let handler_base = self.handlers.len();
 
         #[cfg(not(feature = "unchecked"))]
@@ -3156,34 +3193,39 @@ impl<'e> Vm<'e> {
         // The dispatch loop uses `?` throughout, so an error leaves it rather
         // than being examined inside it. Catching therefore happens out here:
         // the loop stops, a handler this frame armed gets the error, and the
-        // loop restarts at the catch block. `run_frame` keeps `pc` in a
-        // register and the fault address arrives through `reached`, which is
-        // written every instruction anyway, so none of this costs the common
-        // path anything.
+        // loop restarts at the catch block.
+
+        // `run_frame` keeps `pc` in a register and the fault address arrives
+        // through `reached`, which is written every instruction anyway,
+        // so none of this costs the common path anything.
         let mut start = chunk.entry() as usize;
         let result = loop {
-            match self.run_frame(program, scope, base, reached, start) {
+            let resumed = match self.run_frame(program, scope, base, reached, start) {
                 Ok(value) => break Ok(value),
-                Err(err) => match self.catch(program, err, handler_base, scope) {
-                    // Metered like a backward jump, and for the same reason:
-                    // a catch block that sits before the throw is a cycle the
-                    // dispatch loop never sees as one, because control got
-                    // there through the error path rather than through a jump.
-                    Ok(resume) => {
-                        // Handled, so the frames it unwound past are not where
-                        // this run failed. Left behind, they would head the
-                        // next error's trace.
-                        self.clear_faults();
-                        self.engine
-                            .track_operation(&mut self.global, program.position(resume))?;
-                        start = resume;
-                    }
-                    Err(err) => break Err(err),
-                },
-            }
+                // Catch pseudo-errors.
+                Err(err) if matches!(*err, EvalAltResult::LoopBreak(..)) => {
+                    self.loop_break(err, loop_base, scope)
+                }
+                // Run catch handlers.
+                Err(err) => self.catch(program, err, handler_base, scope),
+            };
+            let Ok(resume) = resumed else {
+                break resumed.map(|_| Dynamic::UNIT);
+            };
+            // Metered like a backward jump, and for the same reason:
+            // a catch block that sits before the throw is a cycle the
+            // dispatch loop never sees as one, because control got
+            // there through the error path rather than through a jump.
+            // Handled, so the frames it unwound past are not where
+            // this run failed. Left behind, they would head the
+            // next error's trace.
+            self.clear_faults();
+            self.engine
+                .track_operation(&mut self.global, program.position(resume))?;
+            start = resume;
         };
 
-        self.iterators.truncate(iter_base);
+        self.loops.truncate(loop_base);
         self.handlers.truncate(handler_base);
 
         #[cfg(not(feature = "unchecked"))]
@@ -3300,6 +3342,54 @@ impl<'e> Vm<'e> {
         }
     }
 
+    /// Break the active loop when the action is not compiled in:
+    /// custom syntax blocks, functions that return pseudo-errors etc.
+    #[cold]
+    fn loop_break(
+        &mut self,
+        err: Box<EvalAltResult>,
+        iteration_base: usize,
+        scope: &mut Scope,
+    ) -> RhaiResultOf<usize> {
+        if self.loops.len() <= iteration_base {
+            return Err(err);
+        }
+        let Some(iter) = self.loops.last() else {
+            return Err(err);
+        };
+        if iter.exit == 0 {
+            return Err(err);
+        }
+        let EvalAltResult::LoopBreak(is_break, value, _) = *err else {
+            return Err(err);
+        };
+
+        let (target, scope_depth) = if is_break {
+            (iter.exit, iter.scope_depth)
+        } else {
+            (iter.start, iter.start_scope_depth)
+        };
+
+        if scope_depth > scope.len() {
+            return Err(malformed(format!(
+                "loop unwind to {scope_depth} past a scope of {}",
+                scope.len()
+            )));
+        }
+
+        self.stack.truncate(iter.operands);
+        if is_break {
+            self.stack.push(value);
+        }
+        scope.rewind(scope_depth);
+        self.handlers.truncate(iter.handlers);
+        if is_break {
+            self.loops.pop();
+        }
+
+        Ok(target)
+    }
+
     /// Hand an error to the inner-most handler this frame armed, if any.
     ///
     /// `Ok` is the address the catch block starts at. `Err` means nothing here
@@ -3362,7 +3452,7 @@ impl<'e> Vm<'e> {
 
         // Back to where the `try` began, at all three depths.
         self.stack.truncate(operands);
-        self.iterators.truncate(iters);
+        self.loops.truncate(iters);
         scope.rewind(scope_len);
 
         if let Some(index) = catch_var {
@@ -3517,12 +3607,9 @@ impl<'e> Vm<'e> {
             //
             // A cycle in a chunk always contains a backward edge, so this is
             // what makes `max_operations` and the `on_progress` interrupt cover
-            // a chunk *this compiler did not write*. `Op::Tick` covers the
-            // loops it does write, positioned where Rhai would report them; a
-            // corrupt artifact has no ticks at all and would otherwise spin
-            // forever inside a loader that had already accepted it. Found by
-            // `mutated_artifacts_load_or_fail_but_never_misbehave`, whose whole
-            // claim is that this cannot happen.
+            // a chunk *this compiler did not write*. `Op::EnterLoop` covers the
+            // entry part; a corrupt artifact has no ticks at all and would
+            // otherwise spin forever inside a loader that had already accepted it.
             //
             // A macro rather than four open-coded checks because the failure
             // mode of missing one is silent, and because it costs nothing on
@@ -4372,7 +4459,7 @@ impl<'e> Vm<'e> {
                         catch_var,
                         operands: self.stack.len(),
                         scope_len: scope.len(),
-                        iters: self.iterators.len(),
+                        iters: self.loops.len(),
                         caught: None,
                     });
                 }
@@ -4381,13 +4468,35 @@ impl<'e> Vm<'e> {
                     self.handlers.pop();
                 }
 
-                code::tag::ITER_INIT => {
-                    let iterable = self.pop()?;
-                    self.iter_init(iterable, pos())?;
+                code::tag::ENTER_LOOP => {
+                    // Replacing [`Op::Tick`] functionality.
+                    self.engine.track_operation(&mut self.global, pos())?;
+
+                    let exit = wide(1)? as usize;
+                    let start = pc + width;
+                    let operands = self.stack.len();
+                    let scope_depth = scope.len();
+                    let handlers = self.handlers.len();
+
+                    self.loops.push(Loop {
+                        exit,
+                        start,
+                        operands,
+                        scope_depth,
+                        start_scope_depth: scope_depth,
+                        handlers,
+                        items: None,
+                        count: -1,
+                    });
                 }
 
-                code::tag::ITER_DROP => {
-                    self.iterators.pop();
+                code::tag::EXIT_LOOP => {
+                    self.loops.pop();
+                }
+
+                code::tag::ITER_INIT => {
+                    let iterable = self.pop()?;
+                    self.iter_init(iterable, pc + width, pos())?;
                 }
 
                 code::tag::ITER_NEXT | code::tag::ITER_NEXT_INDEXED => {
@@ -4397,13 +4506,15 @@ impl<'e> Vm<'e> {
                     } else {
                         None
                     };
-                    let iteration = self
-                        .iterators
-                        .last_mut()
-                        .ok_or_else(|| malformed("no iterator to advance".to_string()))?;
-
-                    let Some(item) = iteration.items.next() else {
-                        self.iterators.pop();
+                    let Some(iteration) = self.loops.last_mut() else {
+                        return Err(malformed("no iterator to advance".to_string()));
+                    };
+                    let Some(items) = iteration.items.as_mut() else {
+                        return Err(malformed("loop has no iterator to advance".to_string()));
+                    };
+                    iteration.start_scope_depth = scope.len();
+                    let Some(item) = items.next() else {
+                        self.loops.pop();
                         transfer!(exit);
                         continue;
                     };

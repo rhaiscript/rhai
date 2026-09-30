@@ -115,7 +115,7 @@ fn the_round_trip_covers_something_worth_covering() {
         #[cfg(not(feature = "no_float"))]
         "float_arithmetic",
         "shadowing_nested", // DeclareLocal and UnwindTo
-        "while_loop",       // jumps, Tick, AssignLocal with an op
+        "while_loop",       // EnterLoop, jumps, Tick, AssignLocal with an op
         "loop_break_value", // backpatched jumps
         // A position that has to survive. `unchecked` turns the failure it
         // rests on into a panic in Rhai, so the case is not run at all there.
@@ -163,29 +163,20 @@ fn golden_scope() -> Scope<'static> {
     scope
 }
 
-/// The one claim every other test in this file is blind to: that an artifact
-/// written *earlier* still means the same thing.
+/// A checked-in artifact catches code/format changes that a writer and reader
+/// compiled together could otherwise agree on incorrectly.
 ///
 /// Named for `golden` so the regeneration command below selects it and nothing
 /// else.
 ///
-/// Every other artifact here is produced by the current writer in the same
-/// process, so a writer and reader that drift together agree with each other
-/// perfectly and nothing notices. The device is the case that matters — bytes
-/// built by one version of this crate and run by another — and a checked-in
-/// artifact is the only way to have one side of that be genuinely old.
-///
-/// Failing this is not automatically a bug. It means the encoding moved, and
-/// the question it asks is whether that was deliberate. If it was, regenerate:
+/// Regenerate it after an intentional encoding or compiler change:
 ///
 /// ```text
 /// REGENERATE_GOLDEN=1 cargo test --features grain --test grain golden
 /// ```
 ///
-/// and bump `VERSION` if an older reader would *misread* the new bytes rather
-/// than reject them — the rule is at `src/format/mod.rs:56`.
 #[test]
-fn a_golden_artifact_written_by_an_older_build_still_runs() {
+fn a_golden_artifact_still_runs() {
     // Reached before the ABI guard below, and for the same reason: on a build
     // the fixture was not written for, this would test the guard rather than
     // the encoding.

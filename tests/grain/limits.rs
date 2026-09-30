@@ -7,9 +7,10 @@
 //! performance one, which is why `track_operation` is in the patch.
 //!
 //! These live outside the differential corpus on purpose. The walker ticks per
-//! node and the VM ticks per loop back-edge, so the operation *counts* differ
-//! and always will. What must hold is that the limit fires and the interrupt is
-//! honoured, so that is what is asserted — not parity of counts or positions.
+//! node and the VM ticks on loop entry and per loop back-edge, so the operation
+//! *counts* differ and always will. What must hold is that the limit fires and
+//! the interrupt is honoured, so that is what is asserted — not parity of counts
+//! or positions.
 
 #![cfg(feature = "internals")]
 
@@ -30,9 +31,9 @@ fn run_vm(engine: &Engine, source: &str) -> Result<Dynamic, Box<EvalAltResult>> 
 
     assert_eq!(program.residual_count(), 0, "{source:?} must be fully lowered, or this tests Rhai rather than the VM",);
 
-    // Without a tick on the back-edge nothing in a compiled loop ever reaches
-    // `track_operation`, and the tests below would hang rather than fail.
-    assert!(program.main().ops(program.code()).any(|(_, op)| op == Op::Tick), "{source:?} lowered to a loop with no operation tick",);
+    // Without an `Op::EnterLoop`, a compiled loop ever reaches `track_operation`,
+    // and the tests below would hang rather than fail.
+    assert!(program.main().ops(program.code()).any(|(_, op)| matches!(op, Op::EnterLoop { .. })), "{source:?} lowered to a loop with no `EnterLoop`",);
 
     Vm::new(engine).eval_with_scope(&mut Scope::new(), &program)
 }

@@ -99,8 +99,8 @@ pub mod tag {
     pub const ITER_INIT: u8 = 0x1d;
     /// [`Op::IterNext`](super::Op::IterNext).
     pub const ITER_NEXT: u8 = 0x1e;
-    /// [`Op::IterDrop`](super::Op::IterDrop).
-    pub const ITER_DROP: u8 = 0x1f;
+    /// [`Op::ExitLoop`](super::Op::ExitLoop); retains the legacy `ITER_DROP` wire value.
+    pub const EXIT_LOOP: u8 = 0x1f;
     /// [`Op::StoreShared`](super::Op::StoreShared).
     pub const STORE_SHARED: u8 = 0x20;
     /// [`Op::IterNext`](super::Op::IterNext) that also pushes the count.
@@ -189,6 +189,8 @@ pub mod tag {
     pub const STORE_CONST: u8 = 0x48;
     /// [`Op::CallFnPtr`](super::Op::CallFnPtr) capturing the parent's scope.
     pub const CALL_FN_PTR_CAPTURE: u8 = 0x49;
+    /// [`Op::EnterLoop`](super::Op::EnterLoop).
+    pub const ENTER_LOOP: u8 = 0x4a;
 }
 
 /// How wide each tag's instruction is, with 0 for the tags that are not one.
@@ -212,7 +214,8 @@ static WIDTHS: [u8; 256] = {
     widths[tag::RETURN as usize] = 1;
     widths[tag::THROW as usize] = 1;
     widths[tag::ITER_INIT as usize] = 1;
-    widths[tag::ITER_DROP as usize] = 1;
+    widths[tag::ENTER_LOOP as usize] = 5;
+    widths[tag::EXIT_LOOP as usize] = 1;
 
     widths[tag::STORE_SHARED as usize] = 3;
 
@@ -618,6 +621,7 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
             }
 
+            #[allow(deprecated)]
             Op::MakeClosure(name) => {
                 code.push(tag::MAKE_CLOSURE);
                 code.extend_from_slice(&small(*name as usize, "names")?.to_le_bytes());
@@ -671,6 +675,7 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 code.extend_from_slice(&depth.to_le_bytes());
             }
 
+            #[allow(deprecated)]
             Op::Tick => code.push(tag::TICK),
             Op::Checkpoint => code.push(tag::CHECKPOINT),
             Op::Statement { depth } => {
@@ -679,9 +684,13 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
             }
             Op::Throw => code.push(tag::THROW),
             Op::IterInit => code.push(tag::ITER_INIT),
-            Op::IterDrop => code.push(tag::ITER_DROP),
             Op::PopHandler => code.push(tag::POP_HANDLER),
 
+            Op::EnterLoop { exit } => {
+                code.push(tag::ENTER_LOOP);
+                code.extend_from_slice(&target(*exit)?.to_le_bytes());
+            }
+            Op::ExitLoop => code.push(tag::EXIT_LOOP),
             Op::PushHandler {
                 target: to,
                 catch_var,
@@ -777,11 +786,10 @@ fn encoded_width(op: &Op) -> usize {
         Op::Unit
         | Op::Bool(..)
         | Op::Pop
-        | Op::Tick
         | Op::Checkpoint
         | Op::Throw
         | Op::IterInit
-        | Op::IterDrop
+        | Op::ExitLoop
         | Op::PopHandler
         | Op::InterpolateStart
         | Op::InterpolateAppend
@@ -813,7 +821,6 @@ fn encoded_width(op: &Op) -> usize {
         | Op::ShareNamed(..)
         | Op::LoadShared(..)
         | Op::LoadSharedNamed(..)
-        | Op::MakeClosure(..)
         | Op::MakeArray(..)
         | Op::MakeMap(..)
         | Op::AssignThis { op: Some(..) }
@@ -853,6 +860,12 @@ fn encoded_width(op: &Op) -> usize {
             ..
         } => 6,
         Op::AssignLocal { op: Some(..), .. } => 7,
+        Op::EnterLoop { .. } => 5,
+
+        #[allow(deprecated)]
+        Op::Tick => 1,
+        #[allow(deprecated)]
+        Op::MakeClosure(..) => 3,
     }
 }
 
@@ -981,6 +994,7 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         tag::SHARE_NAMED => Op::ShareNamed(u32::from(small(1)?)),
         tag::LOAD_SHARED => Op::LoadShared(small(1)?),
         tag::LOAD_SHARED_NAMED => Op::LoadSharedNamed(u32::from(small(1)?)),
+        #[allow(deprecated)]
         tag::MAKE_CLOSURE => Op::MakeClosure(u32::from(small(1)?)),
         tag::MAKE_FN_PTR => Op::MakeFnPtr,
         tag::IS_SHARED => Op::IsShared,
@@ -1025,12 +1039,16 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         tag::INTERPOLATE_APPEND => Op::InterpolateAppend,
         tag::INTERPOLATE_END => Op::InterpolateEnd,
         tag::UNWIND_TO => Op::UnwindTo(small(1)?),
+        #[allow(deprecated)]
         tag::TICK => Op::Tick,
         tag::CHECKPOINT => Op::Checkpoint,
         tag::STATEMENT => Op::Statement { depth: small(1)? },
         tag::THROW => Op::Throw,
         tag::ITER_INIT => Op::IterInit,
-        tag::ITER_DROP => Op::IterDrop,
+        tag::ENTER_LOOP => Op::EnterLoop {
+            exit: u32_at(code, at + 1)?,
+        },
+        tag::EXIT_LOOP => Op::ExitLoop,
         tag::ITER_NEXT => Op::IterNext {
             exit: u32_at(code, at + 1)?,
             counter_slot: None,
@@ -1230,6 +1248,7 @@ mod tests {
             Op::AssignThis { op: Some(6) },
             Op::Rotate(3),
             Op::UnwindTo(6),
+            #[allow(deprecated)]
             Op::Tick,
             Op::Statement { depth: 2 },
             Op::EvalAst {
@@ -1263,6 +1282,15 @@ mod tests {
 
         assert_eq!(offsets[3], 3 + 1 + 1);
         assert_eq!(decode(&code, offsets[4] as usize), Some(Op::Jump(5)));
+    }
+
+    #[test]
+    fn enter_loop_encodes_only_its_exit_target() {
+        let ops = [Op::EnterLoop { exit: 2 }, Op::ExitLoop, Op::Return];
+        let (code, offsets) = assemble(&ops).expect("must assemble");
+
+        assert_eq!(width(&code, 0), Some(5));
+        assert_eq!(decode(&code, 0), Some(Op::EnterLoop { exit: offsets[2] }),);
     }
 
     /// The compiler emits a jump to "one past the last instruction" when a
@@ -1322,65 +1350,5 @@ mod tests {
 
         let partly_good = [tag::UNIT, tag::POP, 0xff, tag::UNIT];
         assert_eq!(disassemble(&partly_good).count(), 2);
-    }
-
-    /// A chunk that loops with no tick in it must still be stopped.
-    ///
-    /// Every loop this compiler emits carries an `Op::Tick` on its back-edge, so
-    /// nothing it produces can spin. An artifact is not required to have come from
-    /// it. Turning this program's tick into a no-op leaves a chunk that still
-    /// verifies — the jump is in range, the stack balances, every path reaches a
-    /// `Return` — and runs forever, which makes the engine's budget the only thing
-    /// between a host and a hostile file.
-    ///
-    /// So the budget cannot depend on the compiler having been generous: the VM
-    /// charges an operation for every *backward* transfer, and a cycle always has
-    /// one. Found by `mutated_artifacts_load_or_fail_but_never_misbehave`, which
-    /// hung on a mutation rather than failing.
-    #[test]
-    #[cfg(not(feature = "unchecked"))]
-    fn a_loop_with_its_tick_removed_still_hits_the_limit() {
-        let mut engine = crate::Engine::new();
-        engine.set_max_operations(10_000);
-
-        let ast = engine.compile("loop { }").expect("must compile");
-        let program = crate::grain::Compiler::new().compile(&ast);
-
-        // Where the tick sits inside the code, and what the code looks like, so the
-        // same bytes can be found again inside the finished artifact.
-        let code = program.code().to_vec();
-        let (tick_at, _) = program
-            .main()
-            .ops(program.code())
-            .find(|(_, op)| *op == Op::Tick)
-            .expect("the compiler ticks a loop");
-
-        let mut bytes = program.write().expect("a lowered program must write");
-        let start = bytes
-            .windows(code.len())
-            .position(|window| window == code)
-            .expect("the artifact embeds the code verbatim");
-
-        // `Checkpoint` is the other one-byte instruction that does nothing to the
-        // stack, so this swap leaves every offset, jump target and position entry
-        // exactly where it was. Only the metering goes.
-        bytes[start + tick_at] = crate::grain::bytecode::code::tag::CHECKPOINT;
-
-        let tick_less = crate::grain::Program::read(&bytes).expect("still a valid artifact");
-        assert!(
-            !tick_less
-                .main()
-                .ops(tick_less.code())
-                .any(|(_, op)| op == Op::Tick),
-            "the tick should be gone, or this tests nothing",
-        );
-
-        let err = crate::grain::Vm::new(&engine)
-            .eval_with_scope(&mut crate::Scope::new(), &tick_less)
-            .expect_err("a tick_less loop must still be stopped");
-        assert!(
-            matches!(*err, crate::EvalAltResult::ErrorTooManyOperations(..)),
-            "expected ErrorTooManyOperations, got {err:?}",
-        );
     }
 }

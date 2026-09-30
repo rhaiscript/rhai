@@ -232,17 +232,50 @@ pub fn verify(
 
 /// What every path into an instruction has to agree on.
 ///
-/// The operand stack is the obvious one. The iterator stack is here for the
-/// same reason: a `for` loop's iterator lives on a stack of the VM's own, and
-/// a chunk that leaves one behind — or drops one it never made — is a chunk
-/// whose loops are not the shape the compiler thought. "The compiler balances
-/// them" is exactly the sort of claim a verifier for untrusted bytecode exists
-/// to check rather than take on trust.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// The operand stack is the obvious one.
+///
+/// The loops stack is here for the same reason: a `for` loop's iterator lives
+/// on a stack of the VM's own, and a chunk that leaves one behind — or drops
+/// one it never made — is a chunk whose loops are not the shape the compiler
+/// thought. "The compiler balances them" is exactly the sort of claim a verifier
+/// for untrusted bytecode exists to check rather than take on trust.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct State {
     operands: usize,
-    iters: usize,
     handlers: usize,
+    loops: Vec<LoopState>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct LoopState {
+    iter: bool,
+    start: u32,
+    exit: u32,
+    operands: usize,
+    handlers: usize,
+}
+
+fn check_jump_target(
+    target: u32,
+    at: usize,
+    entry: usize,
+    end: usize,
+    starts: &[bool],
+) -> Result<usize, VerifyError> {
+    let target = target as usize;
+    if target < entry || target >= end {
+        return Err(VerifyError::JumpOutOfRange {
+            at,
+            target: target as u32,
+        });
+    }
+    if !starts[target] {
+        return Err(VerifyError::JumpIntoAnInstruction {
+            at,
+            target: target as u32,
+        });
+    }
+    Ok(target)
 }
 
 /// Walk one chunk's reachable instructions, checking that every path into an
@@ -274,8 +307,8 @@ fn verify_chunk(
 
         // Merge point: either this is the first visit, or every earlier path
         // has to have arrived in the same state.
-        match depth_at[at] {
-            Some(seen) if seen == state => continue,
+        match &depth_at[at] {
+            Some(seen) if *seen == state => continue,
             Some(seen) => {
                 return Err(VerifyError::DepthConflict {
                     at,
@@ -283,7 +316,7 @@ fn verify_chunk(
                     found: state.operands,
                 })
             }
-            None => depth_at[at] = Some(state),
+            None => depth_at[at] = Some(state.clone()),
         }
 
         let depth = state.operands;
@@ -318,25 +351,49 @@ fn verify_chunk(
             });
         }
 
-        let next_state = State {
-            operands: depth - pops + pushes,
-            iters: match op {
-                Op::IterInit => state.iters + 1,
-                Op::IterDrop => state
-                    .iters
-                    .checked_sub(1)
-                    .ok_or(VerifyError::IteratorUnderflow { at })?,
-                _ => state.iters,
-            },
-            handlers: match op {
-                Op::PushHandler { .. } => state.handlers + 1,
-                Op::PopHandler => state
+        let mut next_state = state.clone();
+        next_state.operands = depth - pops + pushes;
+        match &op {
+            Op::IterInit => {
+                let Some(iteration) = next_state.loops.last_mut() else {
+                    return Err(VerifyError::IteratorUnderflow { at });
+                };
+                if iteration.iter {
+                    return Err(VerifyError::IteratorUnderflow { at });
+                }
+                iteration.iter = true;
+                iteration.operands = next_state.operands;
+                iteration.start = (at + code::width(code, at).expect("decoded instruction")) as u32;
+            }
+            Op::ExitLoop => {
+                next_state
+                    .loops
+                    .pop()
+                    .ok_or(VerifyError::IteratorUnderflow { at })?;
+            }
+            Op::EnterLoop { exit } => {
+                if *exit == 0 {
+                    return Err(VerifyError::JumpOutOfRange { at, target: *exit });
+                }
+                check_jump_target(*exit, at, entry, end, starts)?;
+
+                next_state.loops.push(LoopState {
+                    iter: false,
+                    exit: *exit,
+                    start: (at + code::width(code, at).expect("decoded instruction")) as u32,
+                    operands: depth,
+                    handlers: state.handlers,
+                });
+            }
+            Op::PushHandler { .. } => next_state.handlers += 1,
+            Op::PopHandler => {
+                next_state.handlers = next_state
                     .handlers
                     .checked_sub(1)
-                    .ok_or(VerifyError::HandlerUnderflow { at })?,
-                _ => state.handlers,
-            },
-        };
+                    .ok_or(VerifyError::HandlerUnderflow { at })?;
+            }
+            _ => {}
+        }
         let next_depth = next_state.operands;
         high_water = high_water.max(next_depth);
 
@@ -344,21 +401,7 @@ fn verify_chunk(
         let next = at + width;
 
         let mut go = |target: u32, state: State| -> Result<(), VerifyError> {
-            let target = target as usize;
-            // Within this chunk: a jump into another function's body would run
-            // its instructions against this frame's locals.
-            if target < entry || target >= end {
-                return Err(VerifyError::JumpOutOfRange {
-                    at,
-                    target: target as u32,
-                });
-            }
-            if !starts[target] {
-                return Err(VerifyError::JumpIntoAnInstruction {
-                    at,
-                    target: target as u32,
-                });
-            }
+            let target = check_jump_target(target, at, entry, end, starts)?;
             work_list.push((target, state));
             Ok(())
         };
@@ -381,8 +424,8 @@ fn verify_chunk(
                     target,
                     State {
                         operands: depth,
-                        iters: state.iters,
                         handlers: next_state.handlers,
+                        loops: state.loops.clone(),
                     },
                 )?;
                 work_list.push((next, next_state));
@@ -391,23 +434,25 @@ fn verify_chunk(
             Op::JumpIfFalse { target }
             | Op::JumpIfTrue { target }
             | Op::SkipIfNotUnit { target } => {
-                go(target, next_state)?;
+                go(target, next_state.clone())?;
                 work_list.push((next, next_state));
             }
 
-            // The one instruction whose edges differ in more than where they
-            // go: falling through carries the item it pushed and still holds
-            // the iterator, while the exit edge has neither.
+            // Falling through carries the item it pushed; exhaustion drops
+            // the iterator before taking the exit edge.
             Op::IterNext { exit, .. } => {
                 go(
                     exit,
                     State {
                         operands: depth,
-                        iters: state
-                            .iters
-                            .checked_sub(1)
-                            .ok_or(VerifyError::IteratorUnderflow { at })?,
                         handlers: state.handlers,
+                        loops: {
+                            let mut loops = state.loops.clone();
+                            if !matches!(loops.pop(), Some(LoopState { iter: true, .. })) {
+                                return Err(VerifyError::IteratorUnderflow { at });
+                            }
+                            loops
+                        },
                     },
                 )?;
                 work_list.push((
@@ -415,8 +460,8 @@ fn verify_chunk(
                     State {
                         // The item
                         operands: depth + 1,
-                        iters: state.iters,
                         handlers: state.handlers,
+                        loops: state.loops.clone(),
                     },
                 ));
             }
@@ -433,7 +478,7 @@ fn verify_chunk(
                             .chain(table.ranges.iter().map(|range| range.target))
                             .chain(core::iter::once(table.default))
                         {
-                            go(target, next_state)?;
+                            go(target, next_state.clone())?;
                         }
                     }
                 }
@@ -501,10 +546,10 @@ fn required_caps(op: &Op, pools: &Pools) -> Caps {
         | Op::Switch(..)
         | Op::Jump(..)
         | Op::UnwindTo(..)
-        | Op::Tick
         | Op::Checkpoint
         | Op::PushHandler { .. }
         | Op::PopHandler
+        | Op::EnterLoop { .. }
         | Op::SkipIfNotUnit { .. }
         | Op::Call { .. }
         | Op::Rotate(..)
@@ -515,15 +560,14 @@ fn required_caps(op: &Op, pools: &Pools) -> Caps {
         | Op::Throw
         | Op::IterInit
         | Op::IterNext { .. }
-        | Op::IterDrop
+        | Op::ExitLoop
         | Op::Return
         | Op::LoadShared(..)
         | Op::LoadSharedNamed(..)
         | Op::StoreShared(..)
         | Op::Statement { .. } => Caps::empty(),
 
-        Op::MakeFnPtr | Op::MakeClosure(..) | Op::CallFnPtr { .. } => Caps::FN_PTR,
-
+        Op::MakeFnPtr | Op::CallFnPtr { .. } => Caps::FN_PTR,
         Op::Curry(..) => Caps::FN_PTR | Caps::CURRYING,
 
         // `EvalAst` is a host-only instruction, so it is never in an artifact.
@@ -542,6 +586,11 @@ fn required_caps(op: &Op, pools: &Pools) -> Caps {
         Op::MakeArray(..) => Caps::ARRAY,
         Op::MakeMap(..) => Caps::MAP,
         Op::IsShared => Caps::SHARING,
+
+        #[allow(deprecated)]
+        Op::Tick => Caps::empty(),
+        #[allow(deprecated)]
+        Op::MakeClosure(..) => Caps::FN_PTR,
     }
 }
 
@@ -567,7 +616,6 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
         | Op::LoadNamed(..)
         | Op::LoadShared(..)
         | Op::LoadSharedNamed(..)
-        | Op::MakeClosure(..)
         | Op::LoadThis
         | Op::LoadThisShared => (0, 0, 1),
 
@@ -592,10 +640,11 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
 
         Op::Jump(..)
         | Op::UnwindTo(..)
-        | Op::Tick
         | Op::Checkpoint
         | Op::Statement { .. }
         | Op::PushHandler { .. }
+        | Op::EnterLoop { .. }
+        | Op::ExitLoop
         | Op::PopHandler => (0, 0, 0),
 
         Op::SkipIfNotUnit { .. } => (1, 0, 0),
@@ -655,10 +704,15 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
         // The iterable goes onto the iterator stack, not back onto this one.
         Op::IterInit => (1, 1, 0),
         // Its two edges disagree, so the successor match does the work.
-        Op::IterNext { .. } | Op::IterDrop => (0, 0, 0),
+        Op::IterNext { .. } => (0, 0, 0),
 
         // Consumes whatever is left, so depth afterwards is not meaningful.
         Op::Return => (0, 0, 0),
+
+        #[allow(deprecated)]
+        Op::Tick => (0, 0, 0),
+        #[allow(deprecated)]
+        Op::MakeClosure(..) => (0, 0, 1),
     }
 }
 

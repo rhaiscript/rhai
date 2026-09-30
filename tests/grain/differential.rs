@@ -15,7 +15,7 @@
 use super::corpus;
 
 use rhai::grain::{Compiler, Vm};
-use rhai::{Dynamic, Engine, Scope};
+use rhai::{Dynamic, Engine, Scope, INT};
 
 /// What a run produced, in a form two runs can be compared on.
 ///
@@ -88,6 +88,28 @@ fn vm_agrees_with_rhai() {
 
     let applicable = corpus::CASES.iter().filter(|c| applies_to_this_build(c.name)).count();
     assert!(failures.is_empty(), "{} of {applicable} corpus scripts diverged:{}", failures.len(), failures.join(""),);
+}
+
+#[test]
+fn pseudo_loop_breaks_unwind_to_the_active_loop() {
+    let mut engine = Engine::new();
+    engine
+        .register_fn("pseudo_break", || -> Result<Dynamic, Box<rhai::EvalAltResult>> { Err(Box::new(rhai::EvalAltResult::LoopBreak(true, Dynamic::from(42 as INT), rhai::Position::NONE))) })
+        .register_fn("pseudo_continue", || -> Result<(), Box<rhai::EvalAltResult>> { Err(Box::new(rhai::EvalAltResult::LoopBreak(false, Dynamic::UNIT, rhai::Position::NONE))) });
+
+    for (source, expected) in [
+        ("while true { pseudo_break(); }", "42"),
+        ("let i = 0; while i < 3 { i += 1; pseudo_continue(); i += 100; } i", "3"),
+        ("let s = 0; for i in 0..3 { if i == 1 { pseudo_continue(); } s += i; } s", "2"),
+        ("let i = 0; while i < 2 { for n in 0..2 { i += 1; pseudo_break(); } } i", "2"),
+        ("while true { try { pseudo_break(); } catch { 0; } }", "42"),
+    ] {
+        let stock = run_stock(&engine, source);
+        let vm = run_vm(&engine, source);
+
+        assert_eq!(stock, vm, "Rhai and Grain disagree for {source:?}");
+        assert_eq!(vm.result, Ok(expected.to_string()), "unexpected result for {source:?}");
+    }
 }
 
 /// The corpus is only worth anything if the comparison can actually fail.
