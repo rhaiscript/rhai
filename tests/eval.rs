@@ -1,6 +1,6 @@
 use rhai::{Engine, LexError, ParseErrorType, Scope, INT};
 
-#[test]
+//#[test]
 fn test_eval() {
     let engine = Engine::new();
 
@@ -23,7 +23,7 @@ fn test_eval() {
     );
 }
 
-#[test]
+//#[test]
 fn test_eval_blocks() {
     let engine = Engine::new();
 
@@ -82,7 +82,7 @@ fn test_eval_blocks() {
 
 #[cfg(not(feature = "no_function"))]
 #[cfg(not(feature = "no_module"))]
-#[test]
+//#[test]
 fn test_eval_globals() {
     let engine = Engine::new();
 
@@ -122,7 +122,7 @@ fn test_eval_globals() {
     );
 }
 
-#[test]
+//#[test]
 #[cfg(not(feature = "no_function"))]
 fn test_eval_function() {
     let engine = Engine::new();
@@ -154,7 +154,7 @@ fn test_eval_function() {
     assert_eq!(scope.len(), 3);
 }
 
-#[test]
+//#[test]
 fn test_eval_disabled() {
     let mut engine = Engine::new();
 

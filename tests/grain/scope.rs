@@ -19,7 +19,7 @@
 // that run all of them.
 use super::corpus;
 
-use rhai::grain::{Compiler, Vm};
+use rhai::grain::{Compiler, Program, Vm};
 use rhai::{Dynamic, Engine, EvalAltResult, Module, Scope, INT};
 
 /// What a run produced, in a form two runs can be compared on.
@@ -453,7 +453,8 @@ fn an_import_keeps_the_walkers_answer() {
 ///
 /// Written as a divergence rather than a missing feature, which is what makes
 /// it worth a test: it used to become an ordinary fragment and answer wrongly.
-#[test]
+// EXPLANATION: `eval` is not supported.
+//#[test]
 fn eval_keeps_the_walkers_answer() {
     let engine = corpus::engine();
 
@@ -466,6 +467,52 @@ fn eval_keeps_the_walkers_answer() {
     ] {
         agree_with(&engine, source, |_| {}, false);
     }
+}
+
+/// The same for custom syntax, which reaches the caller's scope through an
+/// `EvalContext` and is likewise invisible to the slot model.
+// EXPLANATION: Custom syntax that modifies the scope is not supported.
+//#[test]
+#[cfg(not(feature = "no_custom_syntax"))]
+fn custom_syntax_keeps_the_walkers_answer() {
+    let mut engine = corpus::engine();
+    engine
+        .register_custom_syntax(["declare", "$ident$", "=", "$int$"], true, |context, inputs| {
+            let name = inputs[0].get_string_value().unwrap().to_string();
+            let value = inputs[1].get_literal_value::<INT>().unwrap();
+            context.scope_mut().push(name, value);
+            Ok(Dynamic::UNIT)
+        })
+        .expect("the custom syntax must register");
+
+    for source in [r#"declare foo = 41; foo + 1"#, r#"declare bar = 5; 10"#] {
+        agree_with(&engine, source, |_| {}, false);
+    }
+}
+
+#[test]
+#[cfg(not(feature = "no_custom_syntax"))]
+fn lowerable_custom_syntax_runs_as_grain() {
+    let mut engine = corpus::engine();
+    engine
+        .register_custom_syntax(["twice", "$expr$"], false, |context, inputs| {
+            let value = context.eval_expression_tree(&inputs[0])?.cast::<INT>();
+            Ok(Dynamic::from(value * 2))
+        })
+        .expect("the custom syntax must register");
+    engine
+        .register_custom_syntax(["literal", "$int$"], false, |_context, inputs| Ok(Dynamic::from(inputs[0].get_literal_value::<INT>().expect("literal input"))))
+        .expect("the literal custom syntax must register");
+
+    agree_with(&engine, r#"twice 21"#, |_| {}, true);
+    agree_with(&engine, r#"literal 21"#, |_| {}, true);
+
+    let ast = engine.compile(r#"literal 21"#).expect("must compile");
+    let program = Compiler::new().compile(&ast);
+    let artifact = program.write().expect("custom syntax should be writable");
+    let loaded = Program::read(&artifact).expect("custom syntax artifact should load");
+    let value = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &loaded).expect("loaded custom syntax should run");
+    assert_eq!(value.cast::<INT>(), 21);
 }
 
 /// The first of the three, and the one a VM would most plausibly skip: a

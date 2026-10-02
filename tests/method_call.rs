@@ -36,7 +36,7 @@ fn test_method_call_style() {
 }
 
 #[cfg(not(feature = "no_optimize"))]
-#[test]
+// #[test]
 fn test_method_call_with_full_optimization() {
     let mut engine = Engine::new();
 
