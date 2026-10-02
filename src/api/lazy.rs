@@ -99,7 +99,7 @@ impl Engine {
     /// let mut engine = Engine::new_raw();
     /// engine.register_lazy_package::<StandardPackage>();
     ///
-    /// assert_eq!(engine.eval::<String>(r#""hello".to_upper()"#).unwrap(), "HELLO");
+    /// assert_eq!(engine.eval::<String>(r#"to_upper("hello")"#).unwrap(), "HELLO");
     /// ```
     pub fn register_lazy_package<P: crate::packages::Package>(&mut self) -> &mut Self {
         let mut module = crate::Module::new();

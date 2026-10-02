@@ -62,7 +62,7 @@ pub trait PluginFunc {
 ///
 /// It lists every exported function without registering any of them, so that functions can be
 /// loaded on demand -- one at a time -- when a script calls them.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct ModuleManifest {
     /// Exported functions, sorted by name.
     pub functions: &'static [FnManifestEntry],
@@ -73,7 +73,7 @@ pub struct ModuleManifest {
 }
 
 /// A function entry in a [`ModuleManifest`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct FnManifestEntry {
     /// Name of the function, as registered.
     pub name: &'static str,
@@ -87,6 +87,30 @@ pub struct FnManifestEntry {
     pub matches: fn(&[TypeId]) -> Option<usize>,
     /// Register this function (and only this function) into a [`Module`].
     pub register: fn(&mut Module),
+}
+
+// `Debug` cannot be derived for higher-ranked function pointers under the MSRV.
+impl std::fmt::Debug for ModuleManifest {
+    #[cold]
+    #[inline(never)]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModuleManifest")
+            .field("functions", &self.functions)
+            .field("sub_modules", &self.sub_modules)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for FnManifestEntry {
+    #[cold]
+    #[inline(never)]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FnManifestEntry")
+            .field("name", &self.name)
+            .field("num_params", &self.num_params)
+            .field("namespace", &self.namespace)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ModuleManifest {
