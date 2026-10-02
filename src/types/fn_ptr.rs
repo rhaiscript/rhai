@@ -520,6 +520,9 @@ impl FnPtr {
                     global,
                     &mut crate::eval::Caches::new(),
                     crate::calc_fn_hash(None, self.fn_name(), arg_values.len()),
+                    self.fn_name(),
+                    arg_values.len(),
+                    None,
                 );
                 // No script-defined functions under `no_function`.
                 #[cfg(feature = "no_function")]

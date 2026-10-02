@@ -15,16 +15,16 @@ def_package! {
     pub LanguageCorePackage(lib) {
         lib.set_standard_lib(true);
 
-        combine_with_exported_module!(lib, "core", core_functions);
+        combine_with_exported_manifest!(lib, "core", core_functions);
 
         #[cfg(not(feature = "no_function"))]
         #[cfg(not(feature = "no_index"))]
         #[cfg(not(feature = "no_object"))]
-        combine_with_exported_module!(lib, "reflection", reflection_functions);
+        combine_with_exported_manifest!(lib, "reflection", reflection_functions);
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod core_functions {
     /// Exit the script evaluation immediately with a value.
     ///
@@ -191,7 +191,7 @@ mod core_functions {
 #[cfg(not(feature = "no_function"))]
 #[cfg(not(feature = "no_index"))]
 #[cfg(not(feature = "no_object"))]
-#[export_module]
+#[export_module(manifest)]
 mod reflection_functions {
     use crate::module::FuncInfo;
     use crate::{Array, FnAccess, FnNamespace, Map, NativeCallContext, ScriptFnMetadata};

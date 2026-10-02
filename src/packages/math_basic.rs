@@ -32,7 +32,7 @@ def_package! {
         lib.set_standard_lib(true);
 
         // Integer functions
-        combine_with_exported_module!(lib, "int", int_functions);
+        combine_with_exported_manifest!(lib, "int", int_functions);
 
         // Conversion functions
         gen_conv_functions!(lib => to_int(INT, char) -> INT);
@@ -49,10 +49,10 @@ def_package! {
         #[cfg(not(feature = "no_float"))]
         {
             // Floating point functions
-            combine_with_exported_module!(lib, "float", float_functions);
+            combine_with_exported_manifest!(lib, "float", float_functions);
 
             // Trig functions
-            combine_with_exported_module!(lib, "trig", trig_functions);
+            combine_with_exported_manifest!(lib, "trig", trig_functions);
 
             gen_conv_functions!(lib => to_float(FLOAT, INT) -> FLOAT);
 
@@ -71,7 +71,7 @@ def_package! {
         {
             use rust_decimal::Decimal;
 
-            combine_with_exported_module!(lib, "decimal", decimal_functions);
+            combine_with_exported_manifest!(lib, "decimal", decimal_functions);
 
             gen_conv_functions!(lib => to_decimal(Decimal) -> Decimal);
             gen_conv_functions!(lib => to_decimal(INT).into() -> Decimal);
@@ -83,7 +83,7 @@ def_package! {
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod int_functions {
     /// Parse a string into an integer number.
     ///
@@ -132,7 +132,7 @@ mod int_functions {
 }
 
 #[cfg(not(feature = "no_float"))]
-#[export_module]
+#[export_module(manifest)]
 mod trig_functions {
     /// Return the sine of the floating-point number in radians.
     pub fn sin(x: FLOAT) -> FLOAT {
@@ -194,7 +194,7 @@ mod trig_functions {
 }
 
 #[cfg(not(feature = "no_float"))]
-#[export_module]
+#[export_module(manifest)]
 mod float_functions {
     /// Return the natural number _e_.
     #[rhai_fn(name = "E")]
@@ -338,7 +338,7 @@ mod float_functions {
 }
 
 #[cfg(feature = "decimal")]
-#[export_module]
+#[export_module(manifest)]
 mod decimal_functions {
     use super::super::arithmetic::make_err;
     use num_traits::ToPrimitive;

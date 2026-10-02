@@ -90,6 +90,33 @@ fn vm_agrees_with_rhai() {
     assert!(failures.is_empty(), "{} of {applicable} corpus scripts diverged:{}", failures.len(), failures.join(""),);
 }
 
+/// Loading the standard library on demand must not change what any script means,
+/// whether it is walked or run as bytecode.
+#[test]
+fn lazy_standard_library_agrees() {
+    let eager = corpus::engine();
+    let lazy = corpus::configure({
+        let mut engine = Engine::new_raw();
+        engine.set_max_strings_interned(rhai::default_limits::MAX_STRINGS_INTERNED);
+        engine.register_lazy_package::<rhai::packages::StandardPackage>();
+        engine
+    });
+
+    let mut failures = Vec::new();
+
+    for case in corpus::CASES.iter().filter(|c| applies_to_this_build(c.name)) {
+        let expected = run_stock(&eager, case.source);
+        let walked = run_stock(&lazy, case.source);
+        let vm = run_vm(&lazy, case.source);
+
+        if walked != expected || vm != expected {
+            failures.push(format!("\n=== {} ===\n  source: {}\n  eager:  {:?}\n  walked: {:?}\n  vm:     {:?}", case.name, case.source, expected.result, walked.result, vm.result,));
+        }
+    }
+
+    assert!(failures.is_empty(), "{} corpus scripts diverged:{}", failures.len(), failures.join(""));
+}
+
 /// The corpus is only worth anything if the comparison can actually fail.
 ///
 /// Guards against the harness silently degrading into a tautology — comparing

@@ -845,7 +845,7 @@ impl Module {
 use crate::plugin::*;
 
 #[cfg(not(feature = "no_index"))]
-#[export_module]
+#[export_module(manifest)]
 pub mod deprecated_array_functions {
     use crate::packages::array_basic::array_functions::*;
     use crate::packages::array_basic::index_of_start_inner;

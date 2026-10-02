@@ -19,9 +19,9 @@ def_package! {
     pub BasicArrayPackage(lib) {
         lib.set_standard_lib(true);
 
-        combine_with_exported_module!(lib, "array", array_functions);
+        combine_with_exported_manifest!(lib, "array", array_functions);
         #[cfg(not(feature = "no_ast"))]
-        combine_with_exported_module!(lib, "deprecated_array", deprecated_array_functions);
+        combine_with_exported_manifest!(lib, "deprecated_array", deprecated_array_functions);
 
         // Register array iterator
         lib.set_iterable::<Array>();
@@ -55,7 +55,7 @@ pub(crate) fn index_of_start_inner(
     Ok(-1 as INT)
 }
 
-#[export_module]
+#[export_module(manifest)]
 pub mod array_functions {
     /// Number of elements in the array.
     #[rhai_fn(name = "len", get = "len", pure)]

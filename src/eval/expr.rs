@@ -152,23 +152,39 @@ impl Engine {
                 #[cfg(not(feature = "no_module"))]
                 (_, var_name, ns, hash_var) if !ns.is_empty() => {
                     // foo:bar::baz::VARIABLE
-                    if let Some(module) = self.search_imports(global, ns) {
-                        return module.get_qualified_var(*hash_var).map_or_else(
-                            || {
-                                let sep = crate::engine::NAMESPACE_SEPARATOR;
+                    let module = self.search_imports(global, ns);
 
-                                Err(ERR::ErrorVariableNotFound(
-                                    format!("{ns}{sep}{var_name}"),
-                                    ns.position(),
-                                )
-                                .into())
-                            },
-                            |mut target| {
-                                // Module variables are constant
-                                target.set_access_mode(AccessMode::ReadOnly);
-                                Ok(target.into())
-                            },
-                        );
+                    let value = match module
+                        .as_deref()
+                        .and_then(|m| m.get_qualified_var(*hash_var))
+                    {
+                        Some(value) => Some(value),
+                        // Variables in namespaces loaded on demand
+                        None if self.has_lazy_namespace(ns.root()) => {
+                            let path = ns
+                                .path
+                                .iter()
+                                .map(crate::types::Ident::as_str)
+                                .collect::<crate::StaticVec<_>>();
+                            self.load_missing_var(&path, var_name)?
+                        }
+                        None => None,
+                    };
+
+                    if let Some(mut value) = value {
+                        // Module variables are constant
+                        value.set_access_mode(AccessMode::ReadOnly);
+                        return Ok(value.into());
+                    }
+
+                    if module.is_some() || self.has_lazy_namespace(ns.root()) {
+                        let sep = crate::engine::NAMESPACE_SEPARATOR;
+
+                        return Err(ERR::ErrorVariableNotFound(
+                            format!("{ns}{sep}{var_name}"),
+                            ns.position(),
+                        )
+                        .into());
                     }
 
                     // global::VARIABLE

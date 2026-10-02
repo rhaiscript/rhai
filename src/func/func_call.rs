@@ -301,7 +301,15 @@ impl Engine {
                     usize::try_from(num_params)
                         .map(|num_params| {
                             let hash_script = crate::calc_fn_hash(None, &fn_name, num_params);
-                            self.has_script_fn(_global, _caches, hash_script).into()
+                            self.has_script_fn(
+                                _global,
+                                _caches,
+                                hash_script,
+                                &fn_name,
+                                num_params,
+                                None,
+                            )
+                            .into()
                         })
                         .unwrap_or(Dynamic::FALSE),
                 ));
@@ -326,7 +334,15 @@ impl Engine {
                                 crate::calc_fn_hash(None, &fn_name, num_params),
                                 &this_type,
                             );
-                            self.has_script_fn(_global, _caches, hash_script).into()
+                            self.has_script_fn(
+                                _global,
+                                _caches,
+                                hash_script,
+                                &fn_name,
+                                num_params,
+                                Some(&this_type),
+                            )
+                            .into()
                         })
                         .unwrap_or(Dynamic::FALSE),
                 ));
@@ -423,6 +439,19 @@ impl Engine {
                         };
                     }
 
+                    // Then check functions loaded on demand
+                    if let Some(func) = self.get_loaded_fn(None, hash) {
+                        let new_entry = FnResolutionCacheEntry { func, source: None };
+                        return if cache.bloom_filter.is_absent_and_set(hash) {
+                            // Do not cache "one-hit wonders"
+                            *local_entry = Some(new_entry);
+                            local_entry.as_ref()
+                        } else {
+                            // Cache entry
+                            entry.insert(Some(new_entry)).as_ref()
+                        };
+                    }
+
                     // Check `Dynamic` parameters for functions with parameters
                     let max_dynamic_count = usize::min(num_args, MAX_DYNAMIC_PARAMETERS);
 
@@ -430,7 +459,8 @@ impl Engine {
                         let has_dynamic = self
                             .global_modules
                             .iter()
-                            .any(|m| m.may_contain_dynamic_fn(hash_base));
+                            .any(|m| m.may_contain_dynamic_fn(hash_base))
+                            || self.may_contain_loaded_dynamic_fn(hash_base);
 
                         #[cfg(not(feature = "no_function"))]
                         let has_dynamic = has_dynamic
@@ -551,6 +581,18 @@ impl Engine {
 
         if let Some(result) = self.exec_syntactic_fn_call(global, caches, name, args, pos)? {
             return Ok((result, false));
+        }
+
+        // Load the function on demand if it is not found
+        if self.lazy_functions.is_some() {
+            let local_entry = &mut None;
+            let a = Some(&mut *args);
+            if self
+                .resolve_fn(global, caches, local_entry, op_token, hash, a, true)
+                .is_none()
+            {
+                self.load_missing_fn(caches, None, name, args, false, true)?;
+            }
         }
 
         // Check if function access already in the cache
@@ -778,6 +820,57 @@ impl Engine {
         }
     }
 
+    /// Load a function on demand if neither a script-defined nor a native version is found.
+    fn load_fn_if_missing(
+        &self,
+        global: &GlobalRuntimeState,
+        caches: &mut Caches,
+        fn_name: &str,
+        op_token: Option<&Token>,
+        hashes: &FnCallHashes,
+        args: &mut FnCallArgs,
+        _is_method_call: bool,
+    ) -> RhaiResultOf<()> {
+        let local_entry = &mut None;
+
+        #[cfg(not(feature = "no_function"))]
+        if !hashes.is_native_only() {
+            let hash = hashes.script();
+
+            #[cfg(not(feature = "no_object"))]
+            if _is_method_call && !args.is_empty() {
+                let typed_hash =
+                    crate::calc_typed_method_hash(hash, self.map_type_name(args[0].type_name()));
+                if self
+                    .resolve_fn(global, caches, local_entry, None, typed_hash, None, false)
+                    .is_some()
+                {
+                    return Ok(());
+                }
+            }
+
+            if self
+                .resolve_fn(global, caches, local_entry, None, hash, None, false)
+                .is_some()
+            {
+                return Ok(());
+            }
+        }
+
+        let hash = hashes.native();
+        let a = Some(&mut *args);
+
+        if self
+            .resolve_fn(global, caches, local_entry, op_token, hash, a, true)
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        self.load_missing_fn(caches, None, fn_name, args, _is_method_call, false)
+            .map(|_| ())
+    }
+
     /// # Main Entry-Point (By Name)
     ///
     /// Perform an actual function call, native Rust or scripted, by name, taking care of special functions.
@@ -809,6 +902,19 @@ impl Engine {
         // These may be redirected from method style calls.
         if let Some(result) = self.exec_syntactic_fn_call(global, caches, fn_name, args, pos)? {
             return Ok((result, false));
+        }
+
+        // Load the function on demand if it is not found
+        if self.lazy_functions.is_some() {
+            self.load_fn_if_missing(
+                global,
+                caches,
+                fn_name,
+                op_token,
+                &hashes,
+                args,
+                _is_method_call,
+            )?;
         }
 
         defer! { let orig_level = global.level; global.level += 1 }

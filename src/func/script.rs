@@ -548,6 +548,9 @@ impl Engine {
 
     // Does a script-defined function exist?
     ///
+    /// `hash_script` is the hash of `name` with `num_params` parameters (and `this_type`, if any).
+    /// Script-defined functions that can be loaded on demand count, but are not loaded.
+    ///
     /// # Note
     ///
     /// If the scripted function is not found, this information is cached for future look-ups.
@@ -557,6 +560,9 @@ impl Engine {
         global: &GlobalRuntimeState,
         caches: &mut Caches,
         hash_script: u64,
+        name: &str,
+        num_params: usize,
+        this_type: Option<&str>,
     ) -> bool {
         let cache = caches.fn_resolution_cache_mut();
 
@@ -575,6 +581,9 @@ impl Engine {
             global.contains_qualified_fn(hash_script)
             // Then check sub-modules
             || self.global_sub_modules.values().any(|m| m.contains_qualified_fn(hash_script));
+
+        // Then check functions that can be loaded on demand
+        let result = result || self.has_lazy_script_fn(name, num_params, this_type);
 
         if !result && !cache.bloom_filter.is_absent_and_set(hash_script) {
             // Do not cache "one-hit wonders"

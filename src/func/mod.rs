@@ -10,6 +10,7 @@ pub mod func_call;
 pub mod func_trait;
 pub mod function;
 pub mod hashing;
+pub mod lazy;
 pub mod native;
 pub mod plugin;
 pub mod register;

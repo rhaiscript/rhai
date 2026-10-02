@@ -248,6 +248,13 @@ use func::calc_typed_method_hash;
 use func::{calc_fn_hash, calc_fn_hash_full, calc_var_hash};
 pub use func::{plugin, FnAccess, FuncArgs, NativeCallContext, RhaiNativeFunc};
 pub use module::{FnNamespace, FuncRegistration, Module};
+
+pub use func::lazy::{FnLoadRequest, LazyFunctionSource};
+
+#[cfg(not(feature = "no_function"))]
+#[cfg(not(feature = "no_module"))]
+#[cfg(not(feature = "no_ast"))]
+pub use func::lazy::ScriptLibrary;
 pub use packages::string_basic::{FUNC_TO_DEBUG, FUNC_TO_STRING};
 pub use rhai_codegen::*;
 #[cfg(not(feature = "no_time"))]

@@ -136,6 +136,9 @@ pub struct Engine {
     #[cfg(feature = "internals")]
     pub(crate) missing_function: Option<Box<crate::func::native::OnMissingFunctionCallback>>,
 
+    /// Functions loaded on demand.
+    pub(crate) lazy_functions: Option<Box<crate::func::lazy::LazyFunctions>>,
+
     /// Callback closure for implementing the `print` command.
     pub(crate) print: Option<Box<OnPrintCallback>>,
     /// Callback closure for implementing the `debug` command.
@@ -189,6 +192,8 @@ impl fmt::Debug for Engine {
                 .map(crate::SmartString::as_str)
                 .collect::<String>(),
         );
+
+        f.field("lazy_functions", &self.lazy_functions);
 
         f.field("resolve_var", &self.resolve_var.is_some())
             .field("def_var_filter", &self.def_var_filter.is_some());
@@ -275,6 +280,8 @@ impl Engine {
         missing_map_property: None,
         #[cfg(feature = "internals")]
         missing_function: None,
+
+        lazy_functions: None,
 
         print: None,
         debug: None,

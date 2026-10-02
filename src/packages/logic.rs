@@ -10,7 +10,7 @@ use std::prelude::v1::*;
 macro_rules! gen_cmp_functions {
     ($mod_name:ident => $($arg_type:ident),+) => {
         $({
-            #[export_module]
+            #[export_module(manifest)]
             #[allow(clippy::missing_const_for_fn)]
             pub mod cmp_functions {
                 #[rhai_fn(name = "<")] pub fn lt(x: $arg_type, y: $arg_type) -> bool { x < y }
@@ -23,7 +23,7 @@ macro_rules! gen_cmp_functions {
                 pub fn min(x: $arg_type, y: $arg_type) -> $arg_type { if x <= y { x } else { y } }
             }
 
-            combine_with_exported_module!($mod_name, concat!("logic_", stringify($arg_type)), cmp_functions);
+            combine_with_exported_manifest!($mod_name, concat!("logic_", stringify($arg_type)), cmp_functions);
         })*
     };
 }
@@ -44,30 +44,30 @@ def_package! {
 
         #[cfg(not(feature = "no_float"))]
         {
-            combine_with_exported_module!(lib, "float", float_functions);
+            combine_with_exported_manifest!(lib, "float", float_functions);
 
             #[cfg(not(feature = "f32_float"))]
             {
                 gen_cmp_functions!(lib => f32);
-                combine_with_exported_module!(lib, "f32", f32_functions);
+                combine_with_exported_manifest!(lib, "f32", f32_functions);
             }
             #[cfg(feature = "f32_float")]
             {
                 gen_cmp_functions!(lib => f64);
-                combine_with_exported_module!(lib, "f64", f64_functions);
+                combine_with_exported_manifest!(lib, "f64", f64_functions);
             }
         }
 
         #[cfg(feature = "decimal")]
-        combine_with_exported_module!(lib, "decimal", decimal_functions);
+        combine_with_exported_manifest!(lib, "decimal", decimal_functions);
 
-        combine_with_exported_module!(lib, "logic", logic_functions);
+        combine_with_exported_manifest!(lib, "logic", logic_functions);
 
-        combine_with_exported_module!(lib, "min_max", min_max_functions);
+        combine_with_exported_manifest!(lib, "min_max", min_max_functions);
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod logic_functions {
     #[rhai_fn(name = "!")]
     pub const fn not(x: bool) -> bool {
@@ -75,7 +75,7 @@ mod logic_functions {
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod min_max_functions {
     use crate::INT;
 
@@ -111,7 +111,7 @@ mod min_max_functions {
 
 #[cfg(not(feature = "no_float"))]
 #[allow(clippy::cast_precision_loss)]
-#[export_module]
+#[export_module(manifest)]
 mod float_functions {
     use crate::INT;
 
@@ -224,7 +224,7 @@ mod float_functions {
 #[cfg(not(feature = "no_float"))]
 #[cfg(not(feature = "f32_float"))]
 #[allow(clippy::cast_precision_loss)]
-#[export_module]
+#[export_module(manifest)]
 mod f32_functions {
     use crate::{FLOAT, INT};
     #[cfg(feature = "no_std")]
@@ -500,7 +500,7 @@ mod f32_functions {
 #[cfg(not(feature = "no_float"))]
 #[cfg(feature = "f32_float")]
 #[allow(clippy::cast_precision_loss)]
-#[export_module]
+#[export_module(manifest)]
 mod f64_functions {
     use crate::{FLOAT, INT};
     #[cfg(feature = "no_std")]
@@ -774,7 +774,7 @@ mod f64_functions {
 }
 
 #[cfg(feature = "decimal")]
-#[export_module]
+#[export_module(manifest)]
 mod decimal_functions {
     use crate::INT;
     use rust_decimal::Decimal;

@@ -23,6 +23,7 @@ mod grain {
     mod debugger;
     mod differential;
     mod format;
+    mod lazy;
     // Both are about execution staying inside a bound, which `unchecked`
     // removes outright — and the artifact fuzzer needs `max_operations` to stop
     // a corrupted chunk looping forever rather than failing.

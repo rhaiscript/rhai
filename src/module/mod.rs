@@ -614,6 +614,17 @@ impl FuncRegistration {
     }
 }
 
+/// Encapsulated environment of an [`AST`][crate::AST]'s functions.
+#[cfg(not(feature = "no_module"))]
+#[cfg(not(feature = "no_ast"))]
+#[cfg(not(feature = "no_function"))]
+type AstEnviron = Shared<crate::func::EncapsulatedEnviron>;
+/// Encapsulated environment of an [`AST`][crate::AST]'s functions.
+#[cfg(not(feature = "no_module"))]
+#[cfg(not(feature = "no_ast"))]
+#[cfg(feature = "no_function")]
+type AstEnviron = ();
+
 bitflags! {
     /// Bit-flags containing all status for [`Module`].
     #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
@@ -661,6 +672,8 @@ pub struct Module {
     all_type_iterators: BTreeMap<TypeId, Shared<FnIterator>>,
     /// Flags.
     flags: ModuleFlags,
+    /// Plugin module manifests collected for on-demand loading (when building a lazy package).
+    lazy_manifests: Option<Box<Vec<&'static crate::plugin::ModuleManifest>>>,
 }
 
 impl Default for Module {
@@ -792,6 +805,7 @@ impl Module {
             type_iterators: BTreeMap::new(),
             all_type_iterators: BTreeMap::new(),
             flags: ModuleFlags::INDEXED,
+            lazy_manifests: None,
         }
     }
 
@@ -2342,6 +2356,106 @@ impl Module {
         global: &mut crate::eval::GlobalRuntimeState,
         ast: &crate::AST,
     ) -> RhaiResultOf<Self> {
+        #[allow(unused_variables)]
+        let (mut module, env) = Self::eval_ast_environ(engine, scope, global, ast)?;
+
+        // Non-private functions defined become module functions
+        #[cfg(not(feature = "no_function"))]
+        ast.iter_fn_def()
+            .filter(|&f| match f.access {
+                FnAccess::Public => true,
+                FnAccess::Private => false,
+            })
+            .for_each(|f| {
+                module.set_script_fn_with_env(f.clone(), env.clone());
+            });
+
+        module.id = ast.source_raw().cloned();
+
+        #[cfg(feature = "metadata")]
+        module.set_doc(ast.doc());
+
+        module.build_index();
+
+        Ok(module)
+    }
+    /// Combine a plugin module's [manifest][crate::plugin::ModuleManifest] into this [`Module`],
+    /// flattening all sub-modules.
+    ///
+    /// This normally registers all functions, constants and custom types in the plugin module,
+    /// the same as [`combine_with_exported_module!`][crate::plugin::combine_with_exported_module].
+    ///
+    /// When this [`Module`] is being built for a package registered via
+    /// [`Engine::register_lazy_package`][crate::Engine::register_lazy_package], only constants and
+    /// custom types are registered; functions are loaded on demand when they are called.
+    pub fn combine_manifest(
+        &mut self,
+        manifest: &'static crate::plugin::ModuleManifest,
+    ) -> &mut Self {
+        fn init_eager(module: &mut Module, manifest: &crate::plugin::ModuleManifest) {
+            (manifest.init_eager)(module);
+            for (.., sub_module) in manifest.sub_modules {
+                init_eager(module, sub_module);
+            }
+        }
+        fn register_all(module: &mut Module, manifest: &crate::plugin::ModuleManifest) {
+            for f in manifest.functions {
+                (f.register)(module);
+            }
+            (manifest.init_eager)(module);
+            for (.., sub_module) in manifest.sub_modules {
+                register_all(module, sub_module);
+            }
+        }
+
+        if let Some(ref mut manifests) = self.lazy_manifests {
+            manifests.push(manifest);
+            init_eager(self, manifest);
+        } else {
+            register_all(self, manifest);
+        }
+        self
+    }
+    /// Start collecting plugin module manifests instead of registering their functions.
+    #[inline(always)]
+    pub(crate) fn collect_manifests(&mut self) {
+        self.lazy_manifests = Some(Box::default());
+    }
+    /// Stop collecting plugin module manifests, returning those collected.
+    #[inline(always)]
+    #[must_use]
+    pub(crate) fn take_manifests(&mut self) -> Vec<&'static crate::plugin::ModuleManifest> {
+        self.lazy_manifests.take().map_or_else(Vec::new, |m| *m)
+    }
+    /// Add a script-defined function with an encapsulated environment.
+    #[cfg(not(feature = "no_function"))]
+    #[cfg(not(feature = "no_module"))]
+    #[cfg(not(feature = "no_ast"))]
+    pub(crate) fn set_script_fn_with_env(
+        &mut self,
+        fn_def: Shared<crate::func::ScriptFuncDef>,
+        env: Shared<crate::func::EncapsulatedEnviron>,
+    ) -> u64 {
+        let hash = self.set_script_fn(fn_def);
+        if let (RhaiFunc::Script { env: ref mut e, .. }, _) =
+            self.functions.as_mut().unwrap().get_mut(&hash).unwrap()
+        {
+            *e = Some(env);
+        }
+        hash
+    }
+    /// Run the body of an [`AST`][crate::AST] and capture its environment.
+    ///
+    /// Returns a [`Module`] containing exported variables and imported sub-modules (but no
+    /// functions), plus the encapsulated environment for the [`AST`][crate::AST]'s functions.
+    #[cfg(not(feature = "no_module"))]
+    #[cfg(not(feature = "no_ast"))]
+    pub(crate) fn eval_ast_environ(
+        engine: &crate::Engine,
+        scope: &mut crate::Scope,
+        global: &mut crate::eval::GlobalRuntimeState,
+        ast: &crate::AST,
+    ) -> RhaiResultOf<(Self, AstEnviron)> {
         // Save global state
         let orig_scope_len = scope.len();
         let orig_imports_len = global.num_imports();
@@ -2442,31 +2556,10 @@ impl Module {
             }
         }
 
-        // Non-private functions defined become module functions
         #[cfg(not(feature = "no_function"))]
-        ast.iter_fn_def()
-            .filter(|&f| match f.access {
-                FnAccess::Public => true,
-                FnAccess::Private => false,
-            })
-            .for_each(|f| {
-                let hash = module.set_script_fn(f.clone());
-                if let (RhaiFunc::Script { env: ref mut e, .. }, _) =
-                    module.functions.as_mut().unwrap().get_mut(&hash).unwrap()
-                {
-                    // Encapsulate AST environment
-                    *e = Some(env.clone());
-                }
-            });
-
-        module.id = ast.source_raw().cloned();
-
-        #[cfg(feature = "metadata")]
-        module.set_doc(ast.doc());
-
-        module.build_index();
-
-        Ok(module)
+        return Ok((module, env));
+        #[cfg(feature = "no_function")]
+        return Ok((module, ()));
     }
 
     /// Does the [`Module`] contain indexed functions that have been exposed to the global namespace?

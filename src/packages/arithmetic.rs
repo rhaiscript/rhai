@@ -20,7 +20,7 @@ macro_rules! gen_arithmetic_functions {
         pub mod $root { $(pub mod $arg_type {
             use super::super::*;
 
-            #[export_module]
+            #[export_module(manifest)]
             pub mod functions {
                 use std::convert::TryFrom;
 
@@ -154,7 +154,7 @@ macro_rules! gen_signed_functions {
         pub mod $root { $(pub mod $arg_type {
             use super::super::*;
 
-            #[export_module]
+            #[export_module(manifest)]
             pub mod functions {
                 #[rhai_fn(name = "-", return_raw)]
                 pub fn neg(x: $arg_type) -> RhaiResultOf<$arg_type> {
@@ -192,7 +192,7 @@ macro_rules! gen_signed_functions {
 
 macro_rules! reg_functions {
     ($mod_name:ident += $root:ident ; $($arg_type:ident),+ ) => { $(
-        combine_with_exported_module!($mod_name, "arithmetic", $root::$arg_type::functions);
+        combine_with_exported_manifest!($mod_name, "arithmetic", $root::$arg_type::functions);
     )* }
 }
 
@@ -202,7 +202,7 @@ def_package! {
         lib.set_standard_lib(true);
 
         // Only register integer functions that are not built-in
-        combine_with_exported_module!(lib, "int", non_builtin_int_functions);
+        combine_with_exported_manifest!(lib, "int", non_builtin_int_functions);
 
         // Avoid dead code warnings
         #[cfg(not(feature = "unchecked"))]
@@ -236,13 +236,13 @@ def_package! {
         // Basic arithmetic for floating-point
         #[cfg(not(feature = "no_float"))]
         {
-            combine_with_exported_module!(lib, "f32", f32_functions);
-            combine_with_exported_module!(lib, "f64", f64_functions);
+            combine_with_exported_manifest!(lib, "f32", f32_functions);
+            combine_with_exported_manifest!(lib, "f64", f64_functions);
         }
 
         // Decimal functions
         #[cfg(feature = "decimal")]
-        combine_with_exported_module!(lib, "decimal", decimal_functions);
+        combine_with_exported_manifest!(lib, "decimal", decimal_functions);
     }
 }
 
@@ -252,7 +252,7 @@ gen_arithmetic_functions!(arith_basic => INT);
 gen_signed_functions!(signed_basic => INT);
 
 /// These integer functions are not part of the built-in set so they must be registered.
-#[export_module]
+#[export_module(manifest)]
 mod non_builtin_int_functions {
     /// Return true if the number is zero.
     #[rhai_fn(get = "is_zero", name = "is_zero")]
@@ -272,7 +272,7 @@ mod non_builtin_int_functions {
 }
 
 #[cfg(not(feature = "no_float"))]
-#[export_module]
+#[export_module(manifest)]
 mod f32_functions {
     #[cfg(not(feature = "f32_float"))]
     #[allow(clippy::cast_precision_loss)]
@@ -388,7 +388,7 @@ mod f32_functions {
 }
 
 #[cfg(not(feature = "no_float"))]
-#[export_module]
+#[export_module(manifest)]
 mod f64_functions {
     #[cfg(feature = "f32_float")]
     pub mod basic_arithmetic {
@@ -492,7 +492,7 @@ mod f64_functions {
 }
 
 #[cfg(feature = "decimal")]
-#[export_module]
+#[export_module(manifest)]
 pub mod decimal_functions {
     use rust_decimal::{prelude::Zero, Decimal};
 

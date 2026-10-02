@@ -19,11 +19,11 @@ def_package! {
     pub DebuggingPackage(lib) {
         lib.set_standard_lib(true);
 
-        combine_with_exported_module!(lib, "debugging", debugging_functions);
+        combine_with_exported_manifest!(lib, "debugging", debugging_functions);
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod debugging_functions {
     /// Get an array of object maps containing the function calls stack.
     ///

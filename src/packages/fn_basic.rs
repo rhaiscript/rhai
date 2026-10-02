@@ -8,11 +8,11 @@ def_package! {
     pub BasicFnPackage(lib) {
         lib.set_standard_lib(true);
 
-        combine_with_exported_module!(lib, "FnPtr", fn_ptr_functions);
+        combine_with_exported_manifest!(lib, "FnPtr", fn_ptr_functions);
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod fn_ptr_functions {
     /// Return the name of the function.
     ///

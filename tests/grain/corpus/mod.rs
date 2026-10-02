@@ -54,8 +54,11 @@ fn out_of_range(index: INT, len: usize) -> Box<rhai::EvalAltResult> {
 
 /// The engine both sides of the differential run against.
 pub fn engine() -> rhai::Engine {
-    let mut engine = rhai::Engine::new();
+    configure(rhai::Engine::new())
+}
 
+/// Register the corpus's host types and functions into an engine.
+pub fn configure(mut engine: rhai::Engine) -> rhai::Engine {
     engine
         .register_type_with_name::<Widget>("Widget")
         .register_fn("widget", |level: INT| Widget { level, cells: vec![10, 20, 30] })

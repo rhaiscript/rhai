@@ -119,6 +119,41 @@ pub fn exported_module(module_path: TokenStream) -> TokenStream {
     })
 }
 
+/// Macro to get the static function manifest of a _plugin module_ defined via
+/// `#[export_module(manifest)]`.
+///
+/// The manifest lists every exported function without registering any of them, so that an
+/// `Engine` can load only the functions that scripts actually call.
+///
+/// # Usage
+///
+/// ```
+/// # use rhai::{Engine, EvalAltResult};
+/// use rhai::plugin::*;
+///
+/// #[export_module(manifest)]
+/// mod my_plugin_module {
+///     pub fn foo(x: i64) -> i64 { x * 2 }
+///     pub fn bar() -> i64 { 21 }
+/// }
+///
+/// # fn main() -> Result<(), Box<EvalAltResult>> {
+/// let mut engine = Engine::new();
+///
+/// engine.register_lazy_global_module(exported_manifest!(my_plugin_module));
+///
+/// assert_eq!(engine.eval::<i64>("foo(bar())")?, 42);
+/// # Ok(())
+/// # }
+/// ```
+#[proc_macro]
+pub fn exported_manifest(module_path: TokenStream) -> TokenStream {
+    let module_path = parse_macro_input!(module_path as syn::Path);
+    TokenStream::from(quote::quote! {
+        &#module_path::RHAI_MANIFEST
+    })
+}
+
 /// Macro to combine a _plugin module_ into an existing module.
 ///
 /// Functions and variables in the plugin module overrides any existing similarly-named

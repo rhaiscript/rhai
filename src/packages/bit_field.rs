@@ -13,11 +13,11 @@ def_package! {
     pub BitFieldPackage(lib) {
         lib.set_standard_lib(true);
 
-        combine_with_exported_module!(lib, "bit_field", bit_field_functions);
+        combine_with_exported_manifest!(lib, "bit_field", bit_field_functions);
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod bit_field_functions {
     /// Return `true` if the specified `bit` in the number is set.
     ///

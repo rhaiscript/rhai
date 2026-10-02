@@ -2,6 +2,14 @@
 
 use crate::{Engine, Module, SharedModule};
 
+/// Combine a plugin module defined via `#[export_module(manifest)]` into a package, flattening
+/// all sub-modules, so that its functions can be loaded on demand.
+macro_rules! combine_with_exported_manifest {
+    ($lib:expr, $id:expr, $($path:tt)+) => {
+        $lib.combine_manifest(&$($path)+::RHAI_MANIFEST)
+    };
+}
+
 pub(crate) mod arithmetic;
 pub(crate) mod array_basic;
 pub(crate) mod bit_field;
