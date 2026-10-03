@@ -267,38 +267,49 @@ impl Engine {
     ) -> serde_json::Result<String> {
         #[cfg(not(feature = "no_ast"))]
         let _ast = ast;
+        // Functions that are resolved lazily must be registered to be enumerated
+        #[cfg(not(feature = "no_module"))]
+        let sub_modules = self
+            .global_sub_modules
+            .iter()
+            .map(|(name, m)| (name, m.materialized()))
+            .collect::<Vec<_>>();
+        let global_modules = self
+            .global_modules
+            .iter()
+            .filter(|&m| include_standard_packages || !m.is_standard_lib())
+            .map(|m| m.materialized())
+            .collect::<Vec<_>>();
+
         let mut global_doc = String::new();
         let mut global = ModuleMetadata::new();
 
         #[cfg(not(feature = "no_module"))]
-        for (name, m) in &self.global_sub_modules {
+        for (name, m) in &sub_modules {
             global.modules.insert(name, m.as_ref().into());
         }
 
-        self.global_modules
-            .iter()
-            .filter(|&m| include_standard_packages || !m.is_standard_lib())
-            .for_each(|m| {
-                if !m.doc().is_empty() {
-                    if !global_doc.is_empty() {
-                        global_doc += "\n";
-                    }
-                    global_doc += m.doc();
+        global_modules.iter().for_each(|m| {
+            if !m.doc().is_empty() {
+                if !global_doc.is_empty() {
+                    global_doc += "\n";
                 }
+                global_doc += m.doc();
+            }
 
-                m.iter_custom_types()
-                    .for_each(|c| global.custom_types.push(c.into()));
+            m.iter_custom_types()
+                .for_each(|c| global.custom_types.push(c.into()));
 
-                m.iter_fn().for_each(|f| {
-                    #[allow(unused_mut)]
-                    let mut meta: FnMetadata = f.into();
-                    #[cfg(not(feature = "no_module"))]
-                    {
-                        meta.namespace = crate::FnNamespace::Global;
-                    }
-                    global.functions.push(meta);
-                })
-            });
+            m.iter_fn().for_each(|f| {
+                #[allow(unused_mut)]
+                let mut meta: FnMetadata = f.into();
+                #[cfg(not(feature = "no_module"))]
+                {
+                    meta.namespace = crate::FnNamespace::Global;
+                }
+                global.functions.push(meta);
+            })
+        });
 
         #[cfg(not(feature = "no_function"))]
         #[cfg(not(feature = "no_ast"))]

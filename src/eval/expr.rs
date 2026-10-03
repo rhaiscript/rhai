@@ -2,7 +2,7 @@
 
 use super::{Caches, EvalContext, GlobalRuntimeState, Target};
 use crate::ast::Expr;
-use crate::packages::string_basic::{print_with_func, FUNC_TO_STRING};
+use crate::packages::string_basic::{print_with_func_raw, FUNC_TO_STRING};
 use crate::types::dynamic::AccessMode;
 use crate::{Dynamic, Engine, RhaiResult, RhaiResultOf, Scope, ERR};
 #[cfg(feature = "no_std")]
@@ -264,9 +264,8 @@ impl Engine {
                     if item.is_string() {
                         write!(concat, "{item}").unwrap();
                     } else {
-                        let source = global.source();
-                        let context = &(self, FUNC_TO_STRING, source, &*global, pos).into();
-                        let display = print_with_func(FUNC_TO_STRING, context, item);
+                        let display =
+                            print_with_func_raw(self, global, caches, FUNC_TO_STRING, item, pos);
                         write!(concat, "{display}").unwrap();
                     }
 

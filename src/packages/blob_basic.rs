@@ -18,15 +18,15 @@ def_package! {
     pub BasicBlobPackage(lib) {
         lib.set_standard_lib(true);
 
-        combine_with_exported_module!(lib, "blob", blob_functions);
-        combine_with_exported_module!(lib, "parse_int", parse_int_functions);
-        combine_with_exported_module!(lib, "write_int", write_int_functions);
-        combine_with_exported_module!(lib, "write_string", write_string_functions);
+        combine_with_exported_manifest!(lib, "blob", blob_functions);
+        combine_with_exported_manifest!(lib, "parse_int", parse_int_functions);
+        combine_with_exported_manifest!(lib, "write_int", write_int_functions);
+        combine_with_exported_manifest!(lib, "write_string", write_string_functions);
 
         #[cfg(not(feature = "no_float"))]
         {
-            combine_with_exported_module!(lib, "parse_float", parse_float_functions);
-            combine_with_exported_module!(lib, "write_float", write_float_functions);
+            combine_with_exported_manifest!(lib, "parse_float", parse_float_functions);
+            combine_with_exported_manifest!(lib, "write_float", write_float_functions);
         }
 
         // Register blob iterator
@@ -34,7 +34,7 @@ def_package! {
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 pub mod blob_functions {
     /// Return a new, empty BLOB.
     pub const fn blob() -> Blob {
@@ -963,7 +963,7 @@ pub mod blob_functions {
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod parse_int_functions {
     #[inline]
     fn parse_int(blob: &mut Blob, start: INT, len: INT, is_le: bool) -> INT {
@@ -1126,7 +1126,7 @@ mod parse_int_functions {
 }
 
 #[cfg(not(feature = "no_float"))]
-#[export_module]
+#[export_module(manifest)]
 mod parse_float_functions {
     #[inline]
     fn parse_float(blob: &mut Blob, start: INT, len: INT, is_le: bool) -> FLOAT {
@@ -1229,7 +1229,7 @@ mod parse_float_functions {
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod write_int_functions {
     #[inline]
     fn write_int(blob: &mut Blob, start: INT, len: INT, value: INT, is_le: bool) {
@@ -1378,7 +1378,7 @@ mod write_int_functions {
 }
 
 #[cfg(not(feature = "no_float"))]
-#[export_module]
+#[export_module(manifest)]
 mod write_float_functions {
     #[inline]
     fn write_float(blob: &mut Blob, start: INT, len: INT, value: FLOAT, is_le: bool) {
@@ -1477,7 +1477,7 @@ mod write_float_functions {
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod write_string_functions {
     #[inline]
     fn write_string(blob: &mut Blob, start: INT, len: INT, string: &str, ascii_only: bool) {

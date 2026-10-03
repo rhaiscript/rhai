@@ -15,6 +15,8 @@ pub struct ExportedModParams {
     skip: bool,
     pub scope: ExportScope,
     root: Path,
+    /// Generate a static manifest of exported functions for on-demand loading.
+    pub manifest: bool,
 }
 
 impl Default for ExportedModParams {
@@ -24,6 +26,7 @@ impl Default for ExportedModParams {
             skip: Default::default(),
             scope: Default::default(),
             root: syn::parse_quote!(::rhai),
+            manifest: false,
         }
     }
 }
@@ -53,6 +56,7 @@ impl ExportedParams for ExportedModParams {
         let mut skip = false;
         let mut scope = None;
         let mut root: Path = syn::parse_quote!(::rhai);
+        let mut manifest = false;
         for attr in attrs {
             let AttrItem { key, value, .. } = attr;
             match (key.to_string().as_ref(), value) {
@@ -89,6 +93,8 @@ impl ExportedParams for ExportedModParams {
                     root = new_root;
                 }
                 ("root", None) => return Err(syn::Error::new(key.span(), "requires value")),
+                ("manifest", None) => manifest = true,
+                ("manifest", Some(s)) => return Err(syn::Error::new(s.span(), "extraneous value")),
                 (attr, ..) => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -105,6 +111,7 @@ impl ExportedParams for ExportedModParams {
             skip,
             scope,
             root,
+            manifest,
         })
     }
 }
@@ -297,6 +304,13 @@ impl Module {
         let mod_doc = String::new();
 
         if !params.skip {
+            // Sub-modules of a module with a manifest also need manifests.
+            if params.manifest {
+                for m in &mut sub_modules {
+                    m.params.manifest = true;
+                }
+            }
+
             // Generate new module items.
             //
             // This is done before inner module recursive generation, because that is destructive.
@@ -308,6 +322,7 @@ impl Module {
                 &mut sub_modules,
                 &params.scope,
                 &params.root,
+                params.manifest,
             );
 
             // NB: sub-modules must have their new items for exporting generated in depth-first order

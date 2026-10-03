@@ -398,9 +398,13 @@ impl Module {
 
     /// Output definitions for all items inside the [`Module`].
     fn write_definition(&self, writer: &mut dyn fmt::Write, def: &Definitions) -> fmt::Result {
+        // Functions that are resolved lazily must be registered to be enumerated
+        let this = self.materialized();
+        let this = &*this;
+
         let mut first = true;
 
-        let mut submodules = self.iter_sub_modules().collect::<Vec<_>>();
+        let mut submodules = this.iter_sub_modules().collect::<Vec<_>>();
         submodules.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         for (submodule_name, submodule) in submodules {
@@ -414,7 +418,7 @@ impl Module {
             writer.write_str("}")?;
         }
 
-        let mut vars = self.iter_var().collect::<Vec<_>>();
+        let mut vars = this.iter_var().collect::<Vec<_>>();
         vars.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         for (name, value) in vars {
@@ -428,7 +432,7 @@ impl Module {
             write!(writer, "const {name}: {ty};")?;
         }
 
-        let mut func_infos = self.iter_fn().collect::<Vec<_>>();
+        let mut func_infos = this.iter_fn().collect::<Vec<_>>();
         func_infos.sort_by(|(_, a), (_, b)| match a.name.cmp(&b.name) {
             Ordering::Equal => match a.num_params.cmp(&b.num_params) {
                 Ordering::Equal => (a.params_info.join("") + a.return_type.as_str())

@@ -57,6 +57,13 @@ impl Engine {
             g.always_search_scope = orig_always_search_scope;
         }}
 
+        // Make sure there is a function resolution cache that outlives this block.
+        // Otherwise, the first one is created on demand inside the block and popped at its end,
+        // so a loop body would resolve every function call again on each iteration.
+        if caches.fn_resolution_caches_len() == 0 {
+            caches.push_fn_resolution_cache();
+        }
+
         // Pop new function resolution caches at end of block
         defer! {
             caches => rewind_fn_resolution_caches;

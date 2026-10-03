@@ -253,7 +253,7 @@ macro_rules! reg_range {
         $({
             $lib.set_iterator::<Range<$arg_type>>();
 
-            #[export_module]
+            #[export_module(manifest)]
             mod range_function {
                 /// Return an iterator over the exclusive range of `from..to`.
                 /// The value `to` is never included.
@@ -271,7 +271,7 @@ macro_rules! reg_range {
                 }
             }
 
-            combine_with_exported_module!($lib, stringify!($arg_type), range_function);
+            combine_with_exported_manifest!($lib, stringify!($arg_type), range_function);
 
             $lib.set_iterator::<RangeInclusive<$arg_type>>();
 
@@ -287,7 +287,7 @@ macro_rules! reg_range {
         $({
             $lib.set_iterator::<StepRange<$arg_type>>();
 
-            #[export_module]
+            #[export_module(manifest)]
             mod range_functions {
                 /// Return an iterator over the exclusive range of `from..to`, each iteration increasing by `step`.
                 /// The value `to` is never included.
@@ -338,7 +338,7 @@ macro_rules! reg_range {
                 }
             }
 
-            combine_with_exported_module!($lib, stringify!($arg_type), range_functions);
+            combine_with_exported_manifest!($lib, stringify!($arg_type), range_functions);
         })*
     };
 }
@@ -392,12 +392,12 @@ def_package! {
         reg_range!(lib |> Decimal);
 
         // Register iterator functions
-        combine_with_exported_module!(lib, "iterator", iterator_functions);
-        combine_with_exported_module!(lib, "range", range_functions);
+        combine_with_exported_manifest!(lib, "iterator", iterator_functions);
+        combine_with_exported_manifest!(lib, "range", range_functions);
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod iterator_functions {
     /// Return an iterator over an exclusive range of characters in the string.
     ///
@@ -596,7 +596,7 @@ mod iterator_functions {
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod range_functions {
     /// Return the start of the exclusive range.
     #[rhai_fn(get = "start", name = "start", pure)]

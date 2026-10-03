@@ -20,11 +20,11 @@ def_package! {
         lib.set_standard_lib(true);
 
         // Register date/time functions
-        combine_with_exported_module!(lib, "time", time_functions);
+        combine_with_exported_manifest!(lib, "time", time_functions);
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod time_functions {
     /// Create a timestamp containing the current system time.
     ///

@@ -15,11 +15,11 @@ def_package! {
     pub BasicMapPackage(lib) {
         lib.set_standard_lib(true);
 
-        combine_with_exported_module!(lib, "map", map_functions);
+        combine_with_exported_manifest!(lib, "map", map_functions);
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod map_functions {
     /// Return the number of properties in the object map.
     #[rhai_fn(pure)]

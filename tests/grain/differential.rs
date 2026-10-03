@@ -90,6 +90,40 @@ fn vm_agrees_with_rhai() {
     assert!(failures.is_empty(), "{} of {applicable} corpus scripts diverged:{}", failures.len(), failures.join(""),);
 }
 
+/// Resolving the standard library lazily (the default) must not change what any script means,
+/// whether it is walked or run as bytecode.
+#[test]
+fn lazy_standard_library_agrees_with_eager() {
+    let lazy = corpus::engine();
+    let eager = corpus::configure({
+        use rhai::packages::Package;
+
+        // An eager standard library registered ahead of the lazy one resolves everything first
+        let mut std = (*rhai::packages::StandardPackage::new().as_shared_module()).clone();
+        std.register_lazy_functions();
+        std.build_index();
+        assert!(!std.has_lazy_functions());
+
+        let mut engine = Engine::new();
+        engine.register_global_module(std.into());
+        engine
+    });
+
+    let mut failures = Vec::new();
+
+    for case in corpus::CASES.iter().filter(|c| applies_to_this_build(c.name)) {
+        let expected = run_stock(&eager, case.source);
+        let walked = run_stock(&lazy, case.source);
+        let vm = run_vm(&lazy, case.source);
+
+        if walked != expected || vm != expected {
+            failures.push(format!("\n=== {} ===\n  source: {}\n  eager:  {:?}\n  walked: {:?}\n  vm:     {:?}", case.name, case.source, expected.result, walked.result, vm.result,));
+        }
+    }
+
+    assert!(failures.is_empty(), "{} corpus scripts diverged:{}", failures.len(), failures.join(""));
+}
+
 /// The corpus is only worth anything if the comparison can actually fail.
 ///
 /// Guards against the harness silently degrading into a tautology — comparing

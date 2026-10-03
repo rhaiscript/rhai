@@ -14,11 +14,11 @@ def_package! {
     pub MoreStringPackage(lib) {
         lib.set_standard_lib(true);
 
-        combine_with_exported_module!(lib, "string", string_functions);
+        combine_with_exported_manifest!(lib, "string", string_functions);
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod string_functions {
     #[rhai_fn(name = "+", pure)]
     pub fn add_append(

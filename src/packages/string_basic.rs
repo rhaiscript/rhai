@@ -27,9 +27,9 @@ def_package! {
     pub BasicStringPackage(lib) {
         lib.set_standard_lib(true);
 
-        combine_with_exported_module!(lib, "print_debug", print_debug_functions);
-        combine_with_exported_module!(lib, "number_formatting", number_formatting);
-        combine_with_exported_module!(lib, "char", char_functions);
+        combine_with_exported_manifest!(lib, "print_debug", print_debug_functions);
+        combine_with_exported_manifest!(lib, "number_formatting", number_formatting);
+        combine_with_exported_manifest!(lib, "char", char_functions);
 
         // Register characters iterator
         lib.set_iterator::<CharsStream>();
@@ -47,21 +47,66 @@ pub fn print_with_func(
     ctx: &NativeCallContext,
     value: &mut Dynamic,
 ) -> ImmutableString {
-    match ctx.call_native_fn_raw(fn_name, true, &mut [value]) {
+    let result = ctx.call_native_fn_raw(fn_name, true, &mut [value]);
+    printed_value(ctx.engine(), fn_name, value, result)
+}
+
+/// Print a value using a named function, resolving the function with the caller's caches.
+///
+/// This is the same as [`print_with_func`], but avoids creating a new [`NativeCallContext`]
+/// (which clones the global runtime state and starts with empty function resolution caches).
+pub(crate) fn print_with_func_raw(
+    engine: &crate::Engine,
+    global: &mut crate::eval::GlobalRuntimeState,
+    caches: &mut crate::eval::Caches,
+    fn_name: &str,
+    value: &mut Dynamic,
+    pos: Position,
+) -> ImmutableString {
+    let hash = crate::calc_fn_hash(None, fn_name, 1);
+
+    let orig_level = global.level;
+    global.level += 1;
+    let result = engine
+        .exec_native_fn_call(
+            global,
+            caches,
+            fn_name,
+            None,
+            hash,
+            &mut [value],
+            true,
+            false,
+            pos,
+        )
+        .map(|(r, ..)| r);
+    global.level = orig_level;
+
+    printed_value(engine, fn_name, value, result)
+}
+
+/// Turn the result of a print function into the printed text.
+fn printed_value(
+    engine: &crate::Engine,
+    fn_name: &str,
+    value: &Dynamic,
+    result: crate::RhaiResult,
+) -> ImmutableString {
+    match result {
         Ok(result) if result.is_string() => result.into_immutable_string().unwrap(),
-        Ok(result) => ctx.engine().map_type_name(result.type_name()).into(),
+        Ok(result) => engine.map_type_name(result.type_name()).into(),
         Err(_) => {
             let mut buf = crate::new_smart_string();
             match fn_name {
                 FUNC_TO_DEBUG => write!(&mut buf, "{value:?}").unwrap(),
                 _ => write!(&mut buf, "{value}").unwrap(),
             }
-            ctx.engine().map_type_name(&buf).into()
+            engine.map_type_name(&buf).into()
         }
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod print_debug_functions {
     /// Convert the value of the `item` into a string.
     #[rhai_fn(name = "print", pure)]
@@ -246,7 +291,7 @@ mod print_debug_functions {
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod number_formatting {
     fn to_hex<T: LowerHex>(value: T) -> ImmutableString {
         let mut buf = crate::new_smart_string();
@@ -440,7 +485,7 @@ mod number_formatting {
     }
 }
 
-#[export_module]
+#[export_module(manifest)]
 mod char_functions {
     /// Convert the Unicode character into a 32-bit integer value.
     pub const fn to_int(ch: char) -> INT {
