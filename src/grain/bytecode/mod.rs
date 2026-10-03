@@ -5,6 +5,7 @@
 mod chain;
 mod chunk;
 pub(crate) mod code;
+mod custom_syntax;
 mod op;
 mod positions;
 pub(crate) mod sites;
@@ -14,6 +15,7 @@ mod verify;
 
 pub(crate) use chain::{Chain, Root, Step, StepFlags, Tail};
 pub(crate) use code::Code;
+pub(crate) use custom_syntax::CustomSyntaxSite;
 pub(crate) use op::AssignOp;
 pub(crate) use positions::site_to_position;
 pub(crate) use positions::{Positions, TableError};

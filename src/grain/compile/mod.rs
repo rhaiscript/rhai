@@ -4,8 +4,6 @@ mod cases;
 mod poolable;
 mod slots;
 
-#[cfg(not(feature = "no_function"))]
-use std::mem;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -22,6 +20,8 @@ use crate::types::{Span, Token};
 use crate::{Dynamic, ImmutableString, Position, AST};
 
 use crate::grain::bytecode::code::{assemble, resolve_switch_targets};
+#[cfg(not(feature = "no_custom_syntax"))]
+use crate::grain::bytecode::CustomSyntaxSite;
 use crate::grain::bytecode::{
     AssignOp, Chain, Chunk, Op, Positions, Receiver, Root, Step, StepFlags, Switch, SwitchRange,
     Tail,
@@ -158,6 +158,32 @@ impl Compiler {
             })
             .collect();
 
+        #[cfg(not(feature = "no_custom_syntax"))]
+        let custom_syntax: Vec<_> = lowering
+            .custom_syntax
+            .into_iter()
+            .map(|site| CustomSyntaxSite {
+                key: site.key,
+                state: site.state,
+                inputs: site
+                    .inputs
+                    .into_iter()
+                    .map(|(chunk, literal)| {
+                        (
+                            Chunk::new(
+                                offsets[chunk.entry() as usize],
+                                offsets[chunk.end() as usize],
+                                lowering.max_stack,
+                            ),
+                            literal,
+                        )
+                    })
+                    .collect(),
+            })
+            .collect();
+        #[cfg(feature = "no_custom_syntax")]
+        let custom_syntax = Vec::new();
+
         let caps = lowering.caps;
 
         // Rhai's own functions are carried whenever anything might still reach
@@ -193,6 +219,7 @@ impl Compiler {
                 assign_ops: lowering.assign_ops,
                 chains: lowering.chains,
                 switches: lowering.switches,
+                custom_syntax,
                 lib,
                 #[cfg(not(feature = "no_module"))]
                 resolver: ast.resolver.clone(),
@@ -301,6 +328,8 @@ struct Lowering {
     assign_ops: Vec<AssignOp>,
     chains: Vec<Chain>,
     switches: Vec<Switch>,
+    #[cfg(not(feature = "no_custom_syntax"))]
+    custom_syntax: Vec<CustomSyntaxSite>,
     slots: Slots,
     max_stack: u16,
     loops: Vec<Loop>,
@@ -870,11 +899,11 @@ impl Lowering {
     fn function(&mut self, def: &ScriptFuncDef) -> Option<LoweredFn> {
         let first_op = self.code.len();
         let first_residual = self.residuals.len();
-        let saved_slots = mem::take(&mut self.slots);
-        let saved_loops = mem::take(&mut self.loops);
+        let saved_slots = std::mem::take(&mut self.slots);
+        let saved_loops = std::mem::take(&mut self.loops);
         // Per-function, like the slots: one body the model cannot handle must
         // not cost the rest of the program its lowering.
-        let saved_defeated = mem::replace(&mut self.defeated, false);
+        let saved_defeated = std::mem::replace(&mut self.defeated, false);
 
         for param in def.params.iter() {
             self.slots.declare(param.clone());
@@ -1759,9 +1788,11 @@ impl Lowering {
             // that is not the one at runtime. Refusing the lowering keeps the
             // walker's answer, as it does for `eval` above.
             #[cfg(not(feature = "no_custom_syntax"))]
-            Expr::Custom(..) => {
-                self.residual_expr(expr);
-                self.defeated = true;
+            Expr::Custom(custom, pos) => {
+                if custom.scope_may_be_changed || !self.custom_syntax(custom, *pos) {
+                    self.residual_expr(expr);
+                    self.defeated = true;
+                }
             }
 
             // Listed rather than matched with `_`, for the reason
@@ -2401,6 +2432,83 @@ impl Lowering {
         (self.residuals.len() - 1) as u32
     }
 
+    #[cfg(not(feature = "no_custom_syntax"))]
+    fn custom_syntax(&mut self, custom: &crate::ast::CustomExpr, pos: Position) -> bool {
+        let Some(key) = custom.tokens.first().cloned() else {
+            return false;
+        };
+
+        // A `$block$` input is lowered as its own chunk, called and returned
+        // from independently of the code around the custom syntax expression.
+        //
+        // `return` always unwinds past this chunk (and whatever loop and function
+        // it runs in), so it never has a valid target here.
+        //
+        // `break`/`continue` are only a problem when nothing inside the input
+        // catches them: one nested inside a `for`/`while`/`do` loop that catches
+        // it lowers fine.
+        if custom.inputs.iter().any(contains_escaping_jump) {
+            return false;
+        }
+
+        let jump = self.emit_jump();
+        let mut inputs = Vec::with_capacity(custom.inputs.len());
+
+        for input in &custom.inputs {
+            let saved_loops = std::mem::take(&mut self.loops);
+            let first = self.code.len();
+            self.emit(Op::Checkpoint);
+            self.expression(input);
+            self.loops = saved_loops;
+
+            if self.defeated {
+                return false;
+            }
+            self.emit(Op::Return);
+
+            let chunk = Chunk::new(first as u32, self.code.len() as u32, self.max_stack);
+            let literal = self
+                .custom_syntax_literal(input)
+                .map(|value| self.push_const(value));
+            inputs.push((chunk, literal));
+        }
+
+        self.patch_here(jump);
+        let site = self.custom_syntax.len();
+        let key = self.push_name(key);
+        let state = self.push_const(custom.state.clone());
+        self.custom_syntax
+            .push(CustomSyntaxSite { key, state, inputs });
+        self.emit_at(Op::CustomSyntax(site as u32), pos);
+        self.caps.insert(Caps::CUSTOM_SYNTAX);
+        true
+    }
+
+    /// The literal to hand back for a custom-syntax input, matching
+    /// [`Expression::get_string_value`][crate::api::custom_syntax::Expression::get_string_value]
+    /// and [`Expression::get_literal_value`][crate::api::custom_syntax::Expression::get_literal_value].
+    #[cfg(not(feature = "no_custom_syntax"))]
+    fn custom_syntax_literal(&self, expr: &Expr) -> Option<Dynamic> {
+        match expr {
+            Expr::DynamicConstant(value, ..) => Some(*value.clone()),
+            Expr::IntegerConstant(value, ..) => Some((*value).into()),
+            #[cfg(not(feature = "no_float"))]
+            Expr::FloatConstant(value, ..) => Some((*value).into()),
+            Expr::CharConstant(value, ..) => Some((*value).into()),
+            Expr::StringConstant(value, ..) => Some(value.clone().into()),
+            Expr::BoolConstant(value, ..) => Some((*value).into()),
+            Expr::Unit(..) => Some(Dynamic::UNIT),
+            // A namespaced variable (`m::x`) is not a simple name to the walker's
+            // `get_string_value`, which returns `None` for it -- unlike an
+            // unqualified variable, whose name it hands back.
+            Expr::Variable(value, ..) if has_namespace!(value) => None,
+            Expr::Variable(value, ..) => Some(value.1.clone().into()),
+            #[cfg(not(feature = "no_function"))]
+            Expr::ThisPtr(..) => Some(crate::engine::KEYWORD_THIS.into()),
+            _ => None,
+        }
+    }
+
     fn emit(&mut self, op: Op) {
         // An upper bound, not the answer: no instruction pushes more than one
         // value, so one slot per instruction cannot be too small. The verifier
@@ -2591,6 +2699,54 @@ fn has_break_value(stmt: &Stmt) -> bool {
     });
 
     has_value
+}
+
+/// Check whether a custom-syntax `$block$` / `$expr$` input contains a
+/// `return`, `break` or `continue` that would jump outside the chunk the
+/// input lowers to.
+///
+/// A `return` always escapes: it unwinds past the input's own chunk, and
+/// past whatever loop or function frame runs it, regardless of nesting. A
+/// `break`/`continue` (`Stmt::BreakLoop`) only escapes when nothing inside
+/// the input catches it -- once inside a `for`/`while`/`do` that is itself
+/// part of the input, every `break`/`continue` under it (at any depth)
+/// targets that loop's own exit, a target inside the same chunk, so it is
+/// never a problem for anything nested inside such a loop.
+///
+/// Unlike [`has_break_value`], which only needs *a* match and so is free to
+/// abort the whole walk as soon as it stops at a nested loop, this has to be
+/// exhaustive: an unmasked `break`/`return` can sit anywhere in the tree,
+/// including past a sibling loop `walk` would otherwise never reach if the
+/// callback aborted early. So the callback here always returns `true`, and
+/// whether a loop masks a `BreakLoop` is instead answered by checking the
+/// accumulated `path` for a loop ancestor.
+#[cfg(not(feature = "no_custom_syntax"))]
+fn contains_escaping_jump(expr: &Expr) -> bool {
+    let mut escapes = false;
+    let mut path = Vec::new();
+
+    expr.walk(&mut path, &mut |path| {
+        match path.last() {
+            Some(ASTNode::Stmt(Stmt::Return(..))) => escapes = true,
+            Some(ASTNode::Stmt(Stmt::BreakLoop(..))) => {
+                let masked = path[..path.len() - 1].iter().any(|node| {
+                    matches!(
+                        node,
+                        ASTNode::Stmt(Stmt::For(..) | Stmt::While(..) | Stmt::Do(..))
+                    )
+                });
+                if !masked {
+                    escapes = true;
+                }
+            }
+            _ => (),
+        }
+        // Always keep walking: `escapes` needs every matching node, not just
+        // the first one `walk`'s early-abort signal would find.
+        true
+    });
+
+    escapes
 }
 
 #[cfg(test)]

@@ -21,6 +21,12 @@ mod grain {
     #[cfg(feature = "debugging")]
     #[cfg(not(any(feature = "no_function", feature = "no_index")))]
     mod debugger;
+    // Custom syntax reaches the caller's scope the same way `eval` does, and
+    // a `$block$` input's `return`/`break`/`continue` needs its own coverage
+    // of what escapes a chunk versus what a loop inside it catches; neither
+    // exists without custom syntax at all.
+    #[cfg(not(feature = "no_custom_syntax"))]
+    mod custom_syntax;
     mod differential;
     mod format;
     mod lazy;

@@ -744,6 +744,12 @@ pub enum Op {
         rewind_scope: bool,
     },
 
+    /// Dispatch to a registered custom syntax, indexing the custom-syntax
+    /// site pool.
+    ///
+    /// Pushes the value the registered handler returns.
+    CustomSyntax(u32),
+
     /// Arm a handler covering the instructions up to the matching
     /// [`Op::PopHandler`], catching to `target`.
     ///
@@ -922,6 +928,10 @@ impl Op {
                     chain.operands,
                     chain.disassemble(program),
                 )
+            }
+            Op::CustomSyntax(idx) => {
+                let custom_syntax = program.custom_syntax_site(*idx).unwrap();
+                format!("{self:?} : {}", custom_syntax.disassemble(program))
             }
 
             _ => format!("{self:?}"),

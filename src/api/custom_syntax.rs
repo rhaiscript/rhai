@@ -1,19 +1,29 @@
 //! Module implementing custom syntax for [`Engine`].
 #![cfg(not(feature = "no_custom_syntax"))]
+#![cfg(any(not(feature = "no_ast"), feature = "grain"))]
 
+#[cfg(not(feature = "no_ast"))]
 use crate::ast::Expr;
 use crate::func::SendSync;
+#[cfg(not(feature = "no_ast"))]
 use crate::parser::ParseResult;
 use crate::types::dynamic::Variant;
+#[cfg(not(feature = "no_ast"))]
 use crate::types::token::{is_reserved_keyword_or_symbol, is_valid_identifier, Token};
-use crate::{
-    Dynamic, Engine, EvalContext, Identifier, ImmutableString, LexError, Position, RhaiResult,
-};
+#[cfg(any(not(feature = "no_ast"), feature = "grain"))]
+use crate::ImmutableString;
+#[cfg(not(feature = "no_ast"))]
+use crate::LexError;
+use crate::{Dynamic, Engine, EvalContext, Identifier, Position, RhaiResult};
+#[cfg(not(feature = "no_ast"))]
+use std::borrow::Borrow;
+#[cfg(not(feature = "no_ast"))]
+use std::ops::Deref;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
-use std::{borrow::Borrow, ops::Deref};
 
 /// Collection of special markers for custom syntax definition.
+#[cfg(not(feature = "no_ast"))]
 pub mod markers {
     /// Special marker for matching an expression.
     pub const CUSTOM_SYNTAX_MARKER_EXPR: &str = "$expr$";
@@ -54,23 +64,75 @@ pub type FnCustomSyntaxEval =
     dyn Fn(&mut EvalContext, &[Expression], &Dynamic) -> RhaiResult + Send + Sync;
 
 /// A general expression parsing trait object.
+///
+/// Not available under `no_ast`.
+#[cfg(not(feature = "no_ast"))]
 #[cfg(not(feature = "sync"))]
 pub type FnCustomSyntaxParse =
     dyn Fn(&[ImmutableString], &str, &mut Dynamic) -> ParseResult<Option<ImmutableString>>;
 /// A general expression parsing trait object.
+///
+/// Not available under `no_ast`.
+#[cfg(not(feature = "no_ast"))]
 #[cfg(feature = "sync")]
 pub type FnCustomSyntaxParse = dyn Fn(&[ImmutableString], &str, &mut Dynamic) -> ParseResult<Option<ImmutableString>>
     + Send
     + Sync;
 
-/// An expression sub-tree in an [`AST`][crate::AST].
+/// An expression sub-tree in an [`AST`][crate::AST], or a compiled [Rhai Grain](crate::grain)
+/// chunk (requires `grain`).
 #[derive(Debug, Clone)]
-pub struct Expression<'a>(&'a Expr);
+pub struct Expression<'a>(pub(crate) ExpressionNode<'a>);
 
+#[derive(Debug, Clone)]
+pub(crate) enum ExpressionNode<'a> {
+    /// An [`Expr`].
+    #[cfg(not(feature = "no_ast"))]
+    AST(&'a Expr),
+    /// A Rhai Grain compiled expression.
+    #[cfg(feature = "grain")]
+    Grain {
+        /// The compiled Rhai Grain program.
+        program: &'a crate::grain::Program<'a>,
+        /// Program chunk.
+        chunk: crate::grain::bytecode::Chunk,
+        /// The local-slot base the chunk's slot numbering is relative to.
+        ///
+        /// The chunk was lowered while reusing the *surrounding* code's `slots`
+        /// table rather than starting a fresh one as a normal function body does,
+        /// so its slots only resolve correctly against the same base the enclosing
+        /// frame is running with.
+        base: usize,
+        /// The literal value of the expression, if any.
+        literal: Option<Dynamic>,
+    },
+}
+
+#[cfg(not(feature = "no_ast"))]
 impl<'a> From<&'a Expr> for Expression<'a> {
     #[inline(always)]
     fn from(expr: &'a Expr) -> Self {
-        Self(expr)
+        Self(ExpressionNode::AST(expr))
+    }
+}
+
+#[cfg(feature = "grain")]
+impl<'a> Expression<'a> {
+    /// Create an [`Expression`] backed by a compiled Rhai Grain chunk.
+    #[inline(always)]
+    #[must_use]
+    pub(crate) const fn from_grain(
+        program: &'a crate::grain::Program<'a>,
+        chunk: crate::grain::bytecode::Chunk,
+        base: usize,
+        literal: Option<Dynamic>,
+    ) -> Self {
+        Self(ExpressionNode::Grain {
+            program,
+            chunk,
+            base,
+            literal,
+        })
     }
 }
 
@@ -79,7 +141,8 @@ impl Expression<'_> {
     ///
     /// # WARNING - Low Level API
     ///
-    /// This function is very low level.  It evaluates an expression from an [`AST`][crate::AST].
+    /// This function is very low level.  It evaluates an expression from an [`AST`][crate::AST],
+    /// or runs a compiled Rhai Grain chunk (requires `grain`).
     #[inline(always)]
     pub fn eval_with_context(&self, context: &mut EvalContext) -> RhaiResult {
         context.eval_expression_tree(self)
@@ -110,73 +173,122 @@ impl Expression<'_> {
     /// Get the value of this expression if it is a variable name or a string constant.
     ///
     /// Returns [`None`] also if the constant is not of the specified type.
-    #[inline(always)]
+    ///
+    /// For a compiled Rhai Grain chunk (requires `grain`), returns a value only when
+    /// the compiler identified a string literal or variable name.
+    #[inline]
     #[must_use]
     pub fn get_string_value(&self) -> Option<&str> {
         match self.0 {
-            #[cfg(not(feature = "no_module"))]
-            Expr::Variable(x, ..) if !x.2.is_empty() => None,
-            Expr::Variable(x, ..) => Some(&x.1),
-            #[cfg(not(feature = "no_function"))]
-            Expr::ThisPtr(..) => Some(crate::engine::KEYWORD_THIS),
-            Expr::StringConstant(x, ..) => Some(x),
-            _ => None,
+            #[cfg(not(feature = "no_ast"))]
+            ExpressionNode::AST(expr) => {
+                return match expr {
+                    #[cfg(not(feature = "no_module"))]
+                    Expr::Variable(x, ..) if !x.2.is_empty() => None,
+                    Expr::Variable(x, ..) => Some(&x.1),
+                    #[cfg(not(feature = "no_function"))]
+                    Expr::ThisPtr(..) => Some(crate::engine::KEYWORD_THIS),
+                    Expr::StringConstant(x, ..) => Some(x),
+                    _ => None,
+                };
+            }
+            #[cfg(feature = "grain")]
+            ExpressionNode::Grain { ref literal, .. } => {
+                return literal
+                    .as_ref()
+                    .and_then(|v| v.downcast_ref::<ImmutableString>())
+                    .map(ImmutableString::as_str);
+            }
         }
     }
     /// Get the position of this expression.
-    #[inline(always)]
+    #[inline]
     #[must_use]
-    pub const fn position(&self) -> Position {
-        self.0.position()
+    pub fn position(&self) -> Position {
+        match self.0 {
+            #[cfg(not(feature = "no_ast"))]
+            ExpressionNode::AST(expr) => {
+                return expr.position();
+            }
+            #[cfg(feature = "grain")]
+            ExpressionNode::Grain { program, chunk, .. } => {
+                return program.position(chunk.entry() as usize);
+            }
+        }
     }
     /// Get the value of this expression if it is a literal constant.
     ///
     /// Supports [`INT`][crate::INT], [`FLOAT`][crate::FLOAT], `()`, `char`, `bool` and
     /// [`ImmutableString`][crate::ImmutableString].
     ///
-    /// Returns [`None`] also if the constant is not of the specified type.
+    /// Returns [`None`] if the constant is not of the specified type, or if this
+    /// Grain-compiled expression is not a known literal.
     #[inline]
     #[must_use]
     pub fn get_literal_value<T: Variant + Clone>(&self) -> Option<T> {
-        // Coded this way in order to maximally leverage potentials for dead-code removal.
         match self.0 {
-            Expr::DynamicConstant(x, ..) => x.clone().try_cast::<T>(),
-            Expr::IntegerConstant(x, ..) => reify! { *x => Option<T> },
+            // Coded this way in order to maximally leverage potentials for dead-code removal.
+            #[cfg(not(feature = "no_ast"))]
+            ExpressionNode::AST(expr) => {
+                return match expr {
+                    Expr::DynamicConstant(x, ..) => x.clone().try_cast::<T>(),
+                    Expr::IntegerConstant(x, ..) => reify! { *x => Option<T> },
 
-            #[cfg(not(feature = "no_float"))]
-            Expr::FloatConstant(x, ..) => reify! { *x => Option<T> },
+                    #[cfg(not(feature = "no_float"))]
+                    Expr::FloatConstant(x, ..) => reify! { *x => Option<T> },
 
-            Expr::CharConstant(x, ..) => reify! { *x => Option<T> },
-            Expr::StringConstant(x, ..) => reify! { x.clone() => Option<T> },
-            Expr::Variable(x, ..) => reify! { x.1.clone() => Option<T> },
-            Expr::BoolConstant(x, ..) => reify! { *x => Option<T> },
-            Expr::Unit(..) => reify! { () => Option<T> },
+                    Expr::CharConstant(x, ..) => reify! { *x => Option<T> },
+                    Expr::StringConstant(x, ..) => reify! { x.clone() => Option<T> },
+                    Expr::Variable(x, ..) => reify! { x.1.clone() => Option<T> },
+                    Expr::BoolConstant(x, ..) => reify! { *x => Option<T> },
+                    Expr::Unit(..) => reify! { () => Option<T> },
 
-            _ => None,
+                    _ => None,
+                };
+            }
+            #[cfg(feature = "grain")]
+            ExpressionNode::Grain { ref literal, .. } => {
+                return literal.clone().and_then(|value| value.try_cast::<T>());
+            }
         }
     }
 }
 
+/// Borrowing as an [`Expr`] is only meaningful for an [`Expression`] backed by one.
+///
+/// # Panics
+///
+/// Panics if this [`Expression`] instead holds a compiled Rhai Grain chunk (requires `grain`) --
+/// which can only happen for a custom-syntax input Rhai Grain lowered itself.
+#[cfg(not(feature = "no_ast"))]
 impl Borrow<Expr> for Expression<'_> {
     #[inline(always)]
     fn borrow(&self) -> &Expr {
-        self.0
+        match &self.0 {
+            ExpressionNode::AST(expr) => expr,
+            #[cfg(feature = "grain")]
+            ExpressionNode::Grain { .. } => {
+                panic!("a Grain-backed custom-syntax expression has no AST")
+            }
+        }
     }
 }
 
+#[cfg(not(feature = "no_ast"))]
 impl AsRef<Expr> for Expression<'_> {
     #[inline(always)]
     fn as_ref(&self) -> &Expr {
-        self.0
+        self.borrow()
     }
 }
 
+#[cfg(not(feature = "no_ast"))]
 impl Deref for Expression<'_> {
     type Target = Expr;
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
-        self.0
+        self.borrow()
     }
 }
 
@@ -184,19 +296,82 @@ impl Deref for Expression<'_> {
 pub struct CustomSyntax {
     /// A parsing function to return the next token in a custom syntax based on the
     /// symbols parsed so far.
+    ///
+    /// Not available under `no_ast`.
+    #[cfg(not(feature = "no_ast"))]
     pub parse: Box<FnCustomSyntaxParse>,
     /// Custom syntax implementation function.
     pub func: Box<FnCustomSyntaxEval>,
     /// Any variables added/removed in the scope?
     pub scope_may_be_changed: bool,
     /// Is look-ahead enabled when parsing this custom syntax?
+    ///
+    /// Not available under `no_ast`.
+    #[cfg(not(feature = "no_ast"))]
     pub use_look_ahead: bool,
 }
 
 impl Engine {
-    /// Register a custom syntax with the [`Engine`].
+    /// Register a custom syntax executor with the [`Engine`], without a parsing function.
     ///
     /// Not available under `no_custom_syntax`.
+    ///
+    /// This is the primitive every other `register_custom_syntax*` method is built on top of.
+    /// Under `no_ast`, it is the *only* way to register a custom syntax, because there is no
+    /// parser present to drive a `parse` callback -- the parsing/lowering has already happened
+    /// once, upstream, on a host build that does have a parser. A `no_ast` (+ `grain`) build
+    /// only ever needs the `key` -> `func` mapping, to run a
+    /// [`Program`][crate::grain::Program] that already contains an
+    /// `Op::CustomSyntax`[^op] referencing this `key`.
+    ///
+    /// [^op]: [`Op::CustomSyntax`](crate::grain::bytecode::Op::CustomSyntax), under the
+    /// `internals` feature.
+    ///
+    /// * `key` is the discriminator symbol -- the first token of the custom syntax.
+    /// * `scope_may_be_changed` specifies variables _may_ be added/removed by this custom syntax.
+    /// * `func` is the implementation function.
+    ///
+    /// # Errors
+    ///
+    /// Under `no_ast`, returns an error if `scope_may_be_changed` is `true`. Without an AST
+    /// interpreter present, there is no way to ever run the whole-node residual fallback a
+    /// scope-changing custom syntax would require, so registering one that claims to need it is
+    /// a logic error in the calling code, not a runtime possibility: a
+    /// [`Program`][crate::grain::Program] that reaches a `no_ast` device has necessarily already
+    /// been lowered (or rejected) by a host build that does have a parser.
+    pub fn register_custom_syntax_handler(
+        &mut self,
+        key: impl Into<Identifier>,
+        scope_may_be_changed: bool,
+        func: impl Fn(&mut EvalContext, &[Expression], &Dynamic) -> RhaiResult + SendSync + 'static,
+    ) -> Result<&mut Self, String> {
+        #[cfg(feature = "no_ast")]
+        if scope_may_be_changed {
+            return Err(
+                "cannot register a custom syntax with `scope_may_be_changed == true` under \
+                 `no_ast`: there is no AST interpreter present to ever run its whole-node \
+                 residual fallback"
+                    .to_string(),
+            );
+        }
+
+        self.custom_syntax.insert(
+            key.into(),
+            CustomSyntax {
+                #[cfg(not(feature = "no_ast"))]
+                parse: Box::new(|_, _, _| Ok(None)),
+                func: Box::new(func),
+                scope_may_be_changed,
+                #[cfg(not(feature = "no_ast"))]
+                use_look_ahead: true,
+            }
+            .into(),
+        );
+        Ok(self)
+    }
+    /// Register a custom syntax with the [`Engine`].
+    ///
+    /// Not available under `no_custom_syntax` or `no_ast`.
     ///
     /// * `symbols` holds a slice of strings that define the custom syntax.
     /// * `scope_may_be_changed` specifies variables _may_ be added/removed by this custom syntax.
@@ -222,6 +397,7 @@ impl Engine {
     /// Replacing one variable with another (i.e. adding a new variable and removing one variable at
     /// the same time so that the total _size_ of the [`Scope`][crate::Scope] is unchanged) also
     /// does NOT count, so `false` should be passed.
+    #[cfg(not(feature = "no_ast"))]
     pub fn register_custom_syntax<S: AsRef<str> + Into<Identifier>>(
         &mut self,
         symbols: impl AsRef<[S]>,
@@ -358,7 +534,7 @@ impl Engine {
     }
     /// Register a custom syntax with the [`Engine`] with custom user-defined state.
     ///
-    /// Not available under `no_custom_syntax`.
+    /// Not available under `no_custom_syntax` or `no_ast`.
     ///
     /// # WARNING - Low Level API
     ///
@@ -388,6 +564,7 @@ impl Engine {
     /// * `Ok(None)`: parsing complete and there are no more symbols to match.
     /// * `Ok(Some(symbol))`: the next symbol to match, which can also be `$expr$`, `$ident$` or `$block$` etc.
     /// * `Err(ParseError)`: error that is reflected back to the [`Engine`], normally `ParseError(ParseErrorType::BadInput(LexError::ImproperSymbol(message)), Position::NONE)` to indicate a syntax error, but it can be any [`ParseError`][crate::ParseError].
+    #[cfg(not(feature = "no_ast"))]
     pub fn register_custom_syntax_with_state_raw(
         &mut self,
         key: impl Into<Identifier>,
@@ -397,23 +574,24 @@ impl Engine {
         scope_may_be_changed: bool,
         func: impl Fn(&mut EvalContext, &[Expression], &Dynamic) -> RhaiResult + SendSync + 'static,
     ) -> &mut Self {
-        self.custom_syntax.insert(
-            key.into(),
-            CustomSyntax {
-                parse: Box::new(parse),
-                func: Box::new(func),
-                scope_may_be_changed,
-                use_look_ahead: true,
-            }
-            .into(),
-        );
+        let key = key.into();
+
+        // Not under `no_ast` here (see the `cfg` on this function), so
+        // `scope_may_be_changed` can never trip the `no_ast` restriction.
+        self.register_custom_syntax_handler(key.clone(), scope_may_be_changed, func)
+            .expect("cannot fail: this function is unavailable under `no_ast`");
+
+        let entry = self.custom_syntax.get_mut(&key).unwrap();
+        entry.parse = Box::new(parse);
+        entry.use_look_ahead = true;
+
         self
     }
     /// Register a custom syntax with the [`Engine`] with custom user-defined state,
     /// but with no look-ahead.  This enables the usage of `$raw$` to process raw script
     /// text character-by-character, by-passing the tokenizer.
     ///
-    /// Not available under `no_custom_syntax`.
+    /// Not available under `no_custom_syntax` or `no_ast`.
     ///
     /// # WARNING - Low Level API
     ///
@@ -440,6 +618,7 @@ impl Engine {
     /// * `Ok(Some(symbol))`: the next symbol to match, which can also be `$expr$`, `$ident$` or `$block$` etc.
     ///    `$raw$` can be returned such that the next character in the script text is returned without any processing.
     /// * `Err(ParseError)`: error that is reflected back to the [`Engine`], normally `ParseError(ParseErrorType::BadInput(LexError::ImproperSymbol(message)), Position::NONE)` to indicate a syntax error, but it can be any [`ParseError`][crate::ParseError].
+    #[cfg(not(feature = "no_ast"))]
     pub fn register_custom_syntax_without_look_ahead_raw(
         &mut self,
         key: impl Into<Identifier>,

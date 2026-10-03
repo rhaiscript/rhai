@@ -470,26 +470,6 @@ fn eval_keeps_the_walkers_answer() {
     }
 }
 
-/// The same for custom syntax, which reaches the caller's scope through an
-/// `EvalContext` and is likewise invisible to the slot model.
-#[test]
-#[cfg(not(feature = "no_custom_syntax"))]
-fn custom_syntax_keeps_the_walkers_answer() {
-    let mut engine = corpus::engine();
-    engine
-        .register_custom_syntax(["declare", "$ident$", "=", "$int$"], true, |context, inputs| {
-            let name = inputs[0].get_string_value().unwrap().to_string();
-            let value = inputs[1].get_literal_value::<INT>().unwrap();
-            context.scope_mut().push(name, value);
-            Ok(Dynamic::UNIT)
-        })
-        .expect("the custom syntax must register");
-
-    for source in [r#"declare foo = 41; foo + 1"#, r#"declare bar = 5; 10"#] {
-        agree_with(&engine, source, |_| {}, false);
-    }
-}
-
 /// The first of the three, and the one a VM would most plausibly skip: a
 /// resolver the host registered through `Engine::on_var` sees the name before
 /// the scope does.

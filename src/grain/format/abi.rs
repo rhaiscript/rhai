@@ -95,7 +95,7 @@ const CAP_FLAGS: &[(Caps, &'static str, bool)] = &[
     (Caps::IMPORT,      "imports modules",                  !cfg!(feature = "no_module")),
     (Caps::EXPORT,      "exports data in modules",          !cfg!(feature = "no_module")),
     // Unsupported features below
-    (Caps::CUSTOM_SYNTAX, "uses custom syntax",              false && !cfg!(feature = "no_custom_syntax")),
+    (Caps::CUSTOM_SYNTAX, "uses custom syntax",             !cfg!(feature = "no_custom_syntax")),
 ];
 
 /// The value representation an artifact was written against.
