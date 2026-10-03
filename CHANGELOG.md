@@ -24,6 +24,7 @@ New features
 * New `compact_str` feature that uses [`compact_str`](https://crates.io/crates/compact_str) instead of [`smartstring`](https://crates.io/crates/smartstring) for identifiers and object map keys (thanks [`@hoppworks`](https://github.com/hoppworks) [`#1175`](https://github.com/rhaiscript/rhai/pull/1175)). `smartstring` is archived and unmaintained ([RUSTSEC-2026-0249](https://rustsec.org/advisories/RUSTSEC-2026-0249.html)) and licensed under `MPL-2.0+` ([`#897`](https://github.com/rhaiscript/rhai/issues/897)), while`compact_str` is licensed under `MIT`. Under this feature, the key type of `Map` (and `Identifier` under `internals`) is `CompactString` instead of `SmartString`, and `serde`-serializable types use it directly instead of `String` (the `serde` feature of `compact_str` is `no-std`-safe, unlike that of `smartstring`). `compact_str` is intended to become the default in version 2.0.
 * New `no_ast` feature that excludes the `AST`, its interpreter, the tokenizer, parser and optimizer for a minimized build.  Under this feature flag, the Rhai Grain VM is the only venue to evaluate a script.
 * Custom syntax that does not modify the `scope` is now fully supported in Rhai Grain ([`#1173`](https://github.com/rhaiscript/rhai/pull/1173)). Custom syntax that modifies the `scope` remains non-lowerable fragments.
+* Importing modules, the `global::` namespace, the `export` and `import` statements are all supported by Rhai Grain ([`#1179`](https://github.com/rhaiscript/rhai/pull/1179)).
 
 Enhancements
 ------------

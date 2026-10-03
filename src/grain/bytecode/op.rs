@@ -149,6 +149,15 @@ pub enum Op {
 
     /// Push the value in local slot `.0`.
     LoadLocal(u16),
+
+    /// Export local slot `slot` with alias `alias`.
+    ExportLocal {
+        /// The local slot index.
+        slot: u16,
+        /// The alias name index.
+        alias: u32,
+    },
+
     /// Pop and write into local slot `.0`, which must already exist.
     StoreLocal {
         /// The slot index
@@ -166,6 +175,22 @@ pub enum Op {
     /// A reverse scan of the [`Scope`][crate::Scope] is needed — only emitted
     /// for a name that cannot be resolved.
     LoadNamed(u32),
+
+    /// Push the value of a `namespace`-qualified variable named `name`.
+    LoadNamedWithNs {
+        /// Index into the string table for the namespace name.
+        namespace: u32,
+        /// Index into the string table for the variable name.
+        name: u32,
+    },
+
+    /// Export variable `name` with alias `alias`.
+    ExportNamed {
+        /// The variable name index.
+        name: u32,
+        /// The alias name index.
+        alias: u32,
+    },
 
     /// Pop a value and assign it to the variable named `name`, optionally
     /// through an operator.
@@ -213,6 +238,8 @@ pub enum Op {
         name: u32,
         /// Whether the variable is declared `const`.
         is_const: bool,
+        /// Whether the variable is declared at root (global) level.
+        is_global: bool,
     },
 
     /// Discard the top of the operand stack.
@@ -328,6 +355,32 @@ pub enum Op {
         receiver: Receiver,
         /// This call captures the parent's [`Scope`][crate::Scope].
         capture_parent_scope: bool,
+    },
+
+    /// Pop `argc` arguments and call the `namespace`-qualified function named
+    /// by `name`, pushing the result.
+    ///
+    /// Dispatch goes through Rhai.
+    ///
+    /// ## Rewrite to `&mut`
+    ///
+    /// A namespace-qualified call gets the same rewrite, i.e.
+    /// `f(x, ..)` -> `x.f(..)`, as [`Op::CallRef`], for the same reason:
+    /// a `&mut` first parameter should mutate the caller's variable rather
+    /// than a copy.
+    ///
+    /// `receiver` is `None` when the rewrite does not apply, in which case
+    /// every argument is popped and passed by value.
+    CallWithNs {
+        /// Index into the string table for the namespace name.
+        namespace: u32,
+        /// Index into the string table for the function name.
+        name: u32,
+        /// How many arguments to pop, not counting the receiver.
+        argc: u8,
+        /// Where the first argument is found, or `None` to pop it as a plain
+        /// value along with the rest.
+        receiver: Option<Receiver>,
     },
 
     /// Move the top of the operand stack down past `.0` values.
@@ -856,6 +909,12 @@ pub enum Op {
 
     /// End the chunk, yielding the top of the operand stack, or unit if empty.
     Return,
+
+    /// Pop a module path and import it with alias `export`.
+    Import {
+        /// Index into the name pool for the module alias, or empty string.
+        alias: u32,
+    },
 }
 
 impl Op {
@@ -888,11 +947,16 @@ impl Op {
                     format!("{self:?} : {}", program.name(*var_name).unwrap(),)
                 }
             }
-            Op::DeclareLocal { name, is_const } => {
+            Op::DeclareLocal {
+                name,
+                is_const,
+                is_global,
+            } => {
                 format!(
-                    "{self:?} : {} {}",
+                    "{self:?} : {} {}{}",
                     if *is_const { "const" } else { "let" },
-                    program.name(*name).unwrap()
+                    program.name(*name).unwrap(),
+                    if *is_global { " (global)" } else { "" }
                 )
             }
             Op::Call { name, op, .. } => {
@@ -906,8 +970,17 @@ impl Op {
                     format!("{self:?} : {}", program.name(*name).unwrap(),)
                 }
             }
+            Op::CallRef { name, .. } => format!("{self:?} : {}", program.name(*name).unwrap()),
+            Op::CallWithNs {
+                namespace, name, ..
+            } => {
+                format!(
+                    "{self:?} : {}::{}",
+                    program.name(*namespace).unwrap(),
+                    program.name(*name).unwrap()
+                )
+            }
 
-            Op::CallRef { name, .. } => format!("{self:?} : {}", program.name(*name).unwrap(),),
             Op::Switch(idx) => format!(
                 "Switch({idx}) {}",
                 program.switch(*idx).unwrap().disassemble(program),
@@ -933,6 +1006,18 @@ impl Op {
                 let custom_syntax = program.custom_syntax_site(*idx).unwrap();
                 format!("{self:?} : {}", custom_syntax.disassemble(program))
             }
+
+            Op::ExportLocal { alias, .. } => {
+                format!("{self:?} : as {}", program.name(*alias).unwrap())
+            }
+            Op::ExportNamed { name, alias } => {
+                format!(
+                    "{self:?} : {} as {}",
+                    program.name(*name).unwrap(),
+                    program.name(*alias).unwrap()
+                )
+            }
+            Op::Import { alias } => format!("{self:?} : {}", program.name(*alias).unwrap()),
 
             _ => format!("{self:?}"),
         }

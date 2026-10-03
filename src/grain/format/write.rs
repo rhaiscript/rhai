@@ -3,7 +3,7 @@ use crate::types::{fn_ptr::FnPtrType, Token};
 use crate::Map;
 #[cfg(not(feature = "no_index"))]
 use crate::{Array, Blob};
-use crate::{Dynamic, FnPtr, INT};
+use crate::{Dynamic, FnAccess, FnPtr, INT};
 
 use crate::grain::bytecode::{AssignOp, Chain, CustomSyntaxSite, Root, Step, Tail};
 use crate::grain::format::abi::Abi;
@@ -162,6 +162,13 @@ pub(super) fn write(program: &Program, positions: Positions) -> Result<Vec<u8>, 
     put_uvarint(&mut out, program.functions().len() as u64);
     for function in program.functions() {
         put_uvarint(&mut out, u64::from(function.name));
+        put_uvarint(
+            &mut out,
+            match function.access {
+                FnAccess::Public => 0,
+                FnAccess::Private => 1,
+            },
+        );
         // Zero is "untyped", so an index arrives one higher. The field is why
         // `VERSION` moved to 7: it sits inside a positional record, and a reader
         // that did not expect it would take it for the parameter count and lose

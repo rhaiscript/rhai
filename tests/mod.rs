@@ -36,6 +36,8 @@ mod grain {
     mod fuzz;
     #[cfg(not(feature = "unchecked"))]
     mod limits;
+    #[cfg(not(feature = "no_module"))]
+    mod module;
     // Prices Rhai's own AST nodes, which are exported under `internals` only,
     // against `follow.rhai` — a checked-in fixture, so a build without the
     // syntax it is written in has nothing to price.
