@@ -122,13 +122,14 @@ pub fn exported_module(module_path: TokenStream) -> TokenStream {
 /// Macro to get the static function manifest of a _plugin module_ defined via
 /// `#[export_module(manifest)]`.
 ///
-/// The manifest lists every exported function without registering any of them, so that an
-/// `Engine` can load only the functions that scripts actually call.
+/// The manifest lists every exported function without registering any of them. A lazy `Module`
+/// holding the manifest resolves only the functions that scripts actually call, when they are
+/// called, without allocating.
 ///
 /// # Usage
 ///
 /// ```
-/// # use rhai::{Engine, EvalAltResult};
+/// # use rhai::{Engine, Module, EvalAltResult};
 /// use rhai::plugin::*;
 ///
 /// #[export_module(manifest)]
@@ -140,7 +141,9 @@ pub fn exported_module(module_path: TokenStream) -> TokenStream {
 /// # fn main() -> Result<(), Box<EvalAltResult>> {
 /// let mut engine = Engine::new();
 ///
-/// engine.register_lazy_global_module(exported_manifest!(my_plugin_module));
+/// let module = Module::from_manifest(exported_manifest!(my_plugin_module));
+///
+/// engine.register_global_module(module.into());
 ///
 /// assert_eq!(engine.eval::<i64>("foo(bar())")?, 42);
 /// # Ok(())

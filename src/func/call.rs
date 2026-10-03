@@ -847,25 +847,18 @@ impl Engine {
         }
 
         // Search for the root namespace
-        let module = self.search_imports(global, namespace);
+        let module = self
+            .search_imports(global, namespace)
+            .ok_or_else(|| ERR::ErrorModuleNotFound(namespace.to_string(), namespace.position()))?;
 
-        // The root namespace may only have functions loaded on demand
-        if module.is_none() && !self.has_lazy_namespace(namespace.root()) {
-            return Err(
-                ERR::ErrorModuleNotFound(namespace.to_string(), namespace.position()).into(),
-            );
-        }
-
-        let loaded_func;
+        let lazy_func;
 
         // First search script-defined functions in namespace (can override built-in)
-        let mut func = module.as_deref().and_then(|module| {
-            module.get_qualified_fn(hash).or_else(|| {
-                // Then search native Rust functions
-                let hash_qualified_fn =
-                    super::calc_fn_hash_full(hash, args.iter().map(|a| a.type_id()));
-                module.get_qualified_fn(hash_qualified_fn)
-            })
+        let mut func = module.get_qualified_fn(hash).or_else(|| {
+            // Then search native Rust functions
+            let hash_qualified_fn =
+                super::calc_fn_hash_full(hash, args.iter().map(|a| a.type_id()));
+            module.get_qualified_fn(hash_qualified_fn)
         });
 
         // Check for `Dynamic` parameters.
@@ -873,7 +866,7 @@ impl Engine {
         // Note - This is done during every function call mismatch without cache,
         //        so hopefully the number of arguments should not be too many
         //        (expected because closures cannot be qualified).
-        if let (None, false, Some(module)) = (func, args.is_empty(), module.as_deref()) {
+        if func.is_none() && !args.is_empty() {
             let num_args = args.len();
             let max_dynamic_count =
                 usize::min(num_args, crate::api::default_limits::MAX_DYNAMIC_PARAMETERS);
@@ -905,28 +898,41 @@ impl Engine {
             }
         }
 
-        // Then search functions loaded on demand
-        if func.is_none() && self.lazy_functions.is_some() {
-            let path = namespace
+        // Then search functions that are resolved lazily in the target sub-module
+        if func.is_none() {
+            let target = namespace
                 .path
                 .iter()
-                .map(crate::types::Ident::as_str)
-                .collect::<crate::StaticVec<_>>();
-            let key = path.join(crate::engine::NAMESPACE_SEPARATOR);
+                .skip(1)
+                .try_fold(&*module, |m, ns| m.get_sub_module(ns.as_str()));
 
-            let mut f = self.find_loaded_qualified_fn(&key, fn_name, args);
+            if let Some(target) = target.filter(|m| m.has_lazy_functions()) {
+                let num_args = args.len();
+                let hash_base = super::calc_fn_hash(None, fn_name, num_args);
+                let max_dynamic_count =
+                    usize::min(num_args, crate::api::default_limits::MAX_DYNAMIC_PARAMETERS);
+                let max_bitmask = if target.may_contain_dynamic_fn(hash_base) {
+                    1usize << max_dynamic_count
+                } else {
+                    1
+                };
 
-            if f.is_none()
-                && self.load_missing_fn(caches, Some(&path), fn_name, args, false, false)?
-            {
-                f = self.find_loaded_qualified_fn(&key, fn_name, args);
+                // Exact match first, then all permutations with `Dynamic` wildcards
+                lazy_func = (0..max_bitmask).find_map(|bitmask| {
+                    let param_type = |i: usize| {
+                        if i < max_dynamic_count
+                            && bitmask & (1usize << (max_dynamic_count - i - 1)) != 0
+                        {
+                            std::any::TypeId::of::<Dynamic>()
+                        } else {
+                            args[i].type_id()
+                        }
+                    };
+                    target.get_lazy_fn(fn_name, num_args, &param_type)
+                });
+                func = lazy_func.as_ref();
             }
-
-            loaded_func = f;
-            func = loaded_func.as_ref();
         }
-
-        let module_id = module.as_deref().and_then(crate::Module::id_raw);
 
         // Clone first argument if the function is not a method after-all
         if !func.map_or(true, RhaiFunc::is_method) {
@@ -944,8 +950,7 @@ impl Engine {
                 let env = env.as_deref();
                 let scope = &mut Scope::new();
 
-                let orig_source =
-                    std::mem::replace(&mut global.source, module_id.map(Clone::clone));
+                let orig_source = std::mem::replace(&mut global.source, module.id_raw().cloned());
                 defer! { global => move |g| g.source = orig_source }
                 let global = global.into();
 
@@ -957,10 +962,11 @@ impl Engine {
                 Err(ERR::ErrorNonPureMethodCallOnConstant(fn_name.to_string(), pos).into())
             }
 
-            Some(RhaiFunc::Plugin { func }) => {
+            Some(f @ (RhaiFunc::Plugin { .. } | RhaiFunc::StaticPlugin { .. })) => {
+                let func = f.get_plugin_fn_ref().unwrap();
                 let context = func
                     .has_context()
-                    .then(|| (self, fn_name, module_id.map(|s| s.as_str()), &*global, pos).into());
+                    .then(|| (self, fn_name, module.id(), &*global, pos).into());
                 func.call(context, args)
                     .and_then(|r| self.check_data_size(r, pos))
             }
@@ -973,8 +979,8 @@ impl Engine {
                     func, has_context, ..
                 },
             ) => {
-                let context = has_context
-                    .then(|| (self, fn_name, module_id.map(|s| s.as_str()), &*global, pos).into());
+                let context =
+                    has_context.then(|| (self, fn_name, module.id(), &*global, pos).into());
                 func(context, args).and_then(|r| self.check_data_size(r, pos))
             }
 

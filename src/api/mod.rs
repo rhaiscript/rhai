@@ -16,8 +16,6 @@ pub mod files;
 
 pub mod register;
 
-pub mod lazy;
-
 #[cfg(not(feature = "no_ast"))]
 pub mod call_fn;
 

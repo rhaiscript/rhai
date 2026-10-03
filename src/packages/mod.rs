@@ -181,6 +181,8 @@ macro_rules! def_package {
             #[must_use]
             pub fn new() -> Self {
                 let mut module = $crate::Module::new();
+                // Plugin modules combined via `Module::combine_manifest` are resolved lazily
+                module.set_lazy(true);
                 <Self as $crate::packages::Package>::init(&mut module);
                 module.build_index();
                 Self(module.into())

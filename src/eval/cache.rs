@@ -83,13 +83,6 @@ impl Caches {
     pub fn push_fn_resolution_cache(&mut self) {
         self.fn_resolution.push(<_>::default());
     }
-    /// Clear all function resolution caches in the stack.
-    #[inline]
-    pub fn clear_fn_resolution_caches(&mut self) {
-        self.fn_resolution
-            .iter_mut()
-            .for_each(FnResolutionCache::clear);
-    }
     /// Rewind the function resolution caches stack to a particular size.
     #[inline(always)]
     pub fn rewind_fn_resolution_caches(&mut self, len: usize) {

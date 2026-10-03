@@ -90,15 +90,22 @@ fn vm_agrees_with_rhai() {
     assert!(failures.is_empty(), "{} of {applicable} corpus scripts diverged:{}", failures.len(), failures.join(""),);
 }
 
-/// Loading the standard library on demand must not change what any script means,
+/// Resolving the standard library lazily (the default) must not change what any script means,
 /// whether it is walked or run as bytecode.
 #[test]
-fn lazy_standard_library_agrees() {
-    let eager = corpus::engine();
-    let lazy = corpus::configure({
-        let mut engine = Engine::new_raw();
-        engine.set_max_strings_interned(rhai::default_limits::MAX_STRINGS_INTERNED);
-        engine.register_lazy_package::<rhai::packages::StandardPackage>();
+fn lazy_standard_library_agrees_with_eager() {
+    let lazy = corpus::engine();
+    let eager = corpus::configure({
+        use rhai::packages::Package;
+
+        // An eager standard library registered ahead of the lazy one resolves everything first
+        let mut std = (*rhai::packages::StandardPackage::new().as_shared_module()).clone();
+        std.register_lazy_functions();
+        std.build_index();
+        assert!(!std.has_lazy_functions());
+
+        let mut engine = Engine::new();
+        engine.register_global_module(std.into());
         engine
     });
 

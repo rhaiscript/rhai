@@ -150,16 +150,24 @@ pub fn generate_body(
             .collect();
 
         if manifest {
-            let matches_fn_name = syn::Ident::new(
-                &format!("rhai_matches_{}", function.name()),
+            let has_dynamic_fn_name = syn::Ident::new(
+                &format!("rhai_has_dynamic_{}", function.name()),
+                function.name().span(),
+            );
+            let params_eq_fn_name = syn::Ident::new(
+                &format!("rhai_params_eq_{}", function.name()),
                 function.name().span(),
             );
             manifest_items.push(quote! {
                 #(#cfg_attrs)*
                 #[doc(hidden)]
-                #[inline]
-                pub fn #matches_fn_name(types: &[#root::plugin::TypeId]) -> Option<usize> {
-                    #root::plugin::match_param_types(&#fn_token_name::param_types(), types)
+                pub fn #has_dynamic_fn_name() -> bool {
+                    #root::plugin::manifest_fn_has_dynamic(&#fn_token_name::param_types(), &#fn_token_name())
+                }
+                #(#cfg_attrs)*
+                #[doc(hidden)]
+                pub fn #params_eq_fn_name(param_type: &dyn Fn(usize) -> #root::plugin::TypeId) -> bool {
+                    #root::plugin::manifest_fn_params_eq(&#fn_token_name::param_types(), &#fn_token_name(), param_type)
                 }
             });
         }
@@ -227,8 +235,12 @@ pub fn generate_body(
                     &format!("rhai_register_{}_{fn_index}", function.name()),
                     function.name().span(),
                 );
-                let matches_fn_name = syn::Ident::new(
-                    &format!("rhai_matches_{}", function.name()),
+                let params_eq_fn_name = syn::Ident::new(
+                    &format!("rhai_params_eq_{}", function.name()),
+                    function.name().span(),
+                );
+                let has_dynamic_fn_name = syn::Ident::new(
+                    &format!("rhai_has_dynamic_{}", function.name()),
                     function.name().span(),
                 );
                 let num_params = function.arg_count();
@@ -248,11 +260,17 @@ pub fn generate_body(
                     fn_literal.value(),
                     quote! {
                         #(#cfg_attrs)*
+                        #fn_literal
+                    },
+                    quote! {
+                        #(#cfg_attrs)*
                         #root::plugin::FnManifestEntry {
                             name: #fn_literal,
                             num_params: #num_params,
                             namespace: #fn_namespace,
-                            matches: #matches_fn_name,
+                            func: &#fn_token_name(),
+                            params_eq: #params_eq_fn_name,
+                            has_dynamic: #has_dynamic_fn_name,
                             register: #register_fn_name,
                         }
                     },
@@ -321,6 +339,10 @@ pub fn generate_body(
         // Sort by name so lookups can binary-search
         manifest_fns.sort_by(|(a, ..), (b, ..)| a.cmp(b));
         manifest_sub_modules.sort_by(|(a, ..), (b, ..)| a.cmp(b));
+        let manifest_names = manifest_fns
+            .iter()
+            .map(|(.., n, _)| n.clone())
+            .collect::<Vec<_>>();
         let manifest_fns = manifest_fns.into_iter().map(|(.., t)| t);
         let manifest_sub_modules = manifest_sub_modules.into_iter().map(|(.., t)| t);
 
@@ -333,6 +355,7 @@ pub fn generate_body(
             pub static RHAI_MANIFEST: #root::plugin::ModuleManifest = #root::plugin::ModuleManifest {
                 functions: &[#(#manifest_fns),*],
                 sub_modules: &[#(#manifest_sub_modules),*],
+                name_filter: #root::plugin::manifest_name_filter(&[#(#manifest_names),*]),
                 init_eager: rhai_generate_eager_into_module,
             };
         });

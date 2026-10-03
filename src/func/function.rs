@@ -106,6 +106,11 @@ pub enum RhaiFunc {
         /// Shared function pointer.
         func: Shared<FnPlugin>,
     },
+    /// A plugin function in static storage (e.g. from a [`ModuleManifest`][crate::plugin::ModuleManifest]).
+    StaticPlugin {
+        /// Static function reference.
+        func: &'static FnPlugin,
+    },
     /// A script-defined function.
     #[cfg(not(feature = "no_function"))]
     Script {
@@ -124,7 +129,7 @@ impl fmt::Debug for RhaiFunc {
             Self::Pure { .. } => f.write_str("NativePureFunction"),
             Self::Method { .. } => f.write_str("NativeMethod"),
             Self::Iterator { .. } => f.write_str("NativeIterator"),
-            Self::Plugin { .. } => f.write_str("PluginFunction"),
+            Self::Plugin { .. } | Self::StaticPlugin { .. } => f.write_str("PluginFunction"),
 
             #[cfg(not(feature = "no_function"))]
             Self::Script { fn_def, .. } => fmt::Debug::fmt(fn_def, f),
@@ -138,7 +143,7 @@ impl fmt::Display for RhaiFunc {
             Self::Pure { .. } => f.write_str("NativePureFunction"),
             Self::Method { .. } => f.write_str("NativeMethod"),
             Self::Iterator { .. } => f.write_str("NativeIterator"),
-            Self::Plugin { .. } => f.write_str("PluginFunction"),
+            Self::Plugin { .. } | Self::StaticPlugin { .. } => f.write_str("PluginFunction"),
 
             #[cfg(not(feature = "no_function"))]
             Self::Script { fn_def, .. } => fmt::Display::fmt(fn_def, f),
@@ -157,6 +162,7 @@ impl RhaiFunc {
             Self::Iterator { .. } => true,
 
             Self::Plugin { func, .. } => func.is_pure(),
+            Self::StaticPlugin { func } => func.is_pure(),
 
             #[cfg(not(feature = "no_function"))]
             Self::Script { .. } => false,
@@ -171,6 +177,7 @@ impl RhaiFunc {
             Self::Pure { .. } | Self::Iterator { .. } => false,
 
             Self::Plugin { func, .. } => func.is_method_call(),
+            Self::StaticPlugin { func } => func.is_method_call(),
 
             #[cfg(not(feature = "no_function"))]
             Self::Script { .. } => false,
@@ -182,7 +189,10 @@ impl RhaiFunc {
     pub const fn is_iter(&self) -> bool {
         match self {
             Self::Iterator { .. } => true,
-            Self::Pure { .. } | Self::Method { .. } | Self::Plugin { .. } => false,
+            Self::Pure { .. }
+            | Self::Method { .. }
+            | Self::Plugin { .. }
+            | Self::StaticPlugin { .. } => false,
 
             #[cfg(not(feature = "no_function"))]
             Self::Script { .. } => false,
@@ -201,7 +211,8 @@ impl RhaiFunc {
             Self::Pure { .. }
             | Self::Method { .. }
             | Self::Iterator { .. }
-            | Self::Plugin { .. } => false,
+            | Self::Plugin { .. }
+            | Self::StaticPlugin { .. } => false,
         }
     }
     /// Is this a plugin function?
@@ -209,7 +220,7 @@ impl RhaiFunc {
     #[must_use]
     pub const fn is_plugin_fn(&self) -> bool {
         match self {
-            Self::Plugin { .. } => true,
+            Self::Plugin { .. } | Self::StaticPlugin { .. } => true,
             Self::Pure { .. } | Self::Method { .. } | Self::Iterator { .. } => false,
 
             #[cfg(not(feature = "no_function"))]
@@ -228,6 +239,7 @@ impl RhaiFunc {
             Self::Pure { .. }
             | Self::Method { .. }
             | Self::Plugin { .. }
+            | Self::StaticPlugin { .. }
             | Self::Iterator { .. } => true,
             Self::Script { .. } => false,
         }
@@ -239,6 +251,7 @@ impl RhaiFunc {
         match self {
             Self::Pure { has_context, .. } | Self::Method { has_context, .. } => *has_context,
             Self::Plugin { func, .. } => func.has_context(),
+            Self::StaticPlugin { func } => func.has_context(),
             Self::Iterator { .. } => false,
             #[cfg(not(feature = "no_function"))]
             Self::Script { .. } => false,
@@ -256,6 +269,7 @@ impl RhaiFunc {
             Self::Iterator { .. } => true,
 
             Self::Plugin { func, .. } => func.is_volatile(),
+            Self::StaticPlugin { func } => func.is_volatile(),
 
             // Scripts are assumed to be volatile -- it can be calling volatile native functions.
             #[cfg(not(feature = "no_function"))]
@@ -272,6 +286,7 @@ impl RhaiFunc {
         #[cfg(not(feature = "no_function"))]
         match self {
             Self::Plugin { .. }
+            | Self::StaticPlugin { .. }
             | Self::Pure { .. }
             | Self::Method { .. }
             | Self::Iterator { .. } => FnAccess::Public,
@@ -284,7 +299,7 @@ impl RhaiFunc {
     pub fn get_native_fn(&self) -> Option<&Shared<FnAny>> {
         match self {
             Self::Pure { func, .. } | Self::Method { func, .. } => Some(func),
-            Self::Iterator { .. } | Self::Plugin { .. } => None,
+            Self::Iterator { .. } | Self::Plugin { .. } | Self::StaticPlugin { .. } => None,
 
             #[cfg(not(feature = "no_function"))]
             Self::Script { .. } => None,
@@ -301,7 +316,8 @@ impl RhaiFunc {
             Self::Pure { .. }
             | Self::Method { .. }
             | Self::Iterator { .. }
-            | Self::Plugin { .. } => None,
+            | Self::Plugin { .. }
+            | Self::StaticPlugin { .. } => None,
             Self::Script { fn_def, .. } => Some(fn_def),
         }
     }
@@ -311,19 +327,41 @@ impl RhaiFunc {
     pub fn get_iter_fn(&self) -> Option<&FnIterator> {
         match self {
             Self::Iterator { func, .. } => Some(&**func),
-            Self::Pure { .. } | Self::Method { .. } | Self::Plugin { .. } => None,
+            Self::Pure { .. }
+            | Self::Method { .. }
+            | Self::Plugin { .. }
+            | Self::StaticPlugin { .. } => None,
+
+            #[cfg(not(feature = "no_function"))]
+            Self::Script { .. } => None,
+        }
+    }
+    /// Get a reference to a plugin function, whether shared or static.
+    #[inline]
+    #[must_use]
+    pub fn get_plugin_fn_ref(&self) -> Option<&FnPlugin> {
+        match self {
+            Self::Plugin { func, .. } => Some(&**func),
+            Self::StaticPlugin { func } => Some(*func),
+            Self::Pure { .. } | Self::Method { .. } | Self::Iterator { .. } => None,
 
             #[cfg(not(feature = "no_function"))]
             Self::Script { .. } => None,
         }
     }
     /// Get a shared reference to a plugin function.
+    ///
+    /// Returns [`None`] for a [static][RhaiFunc::StaticPlugin] plugin function;
+    /// use [`get_plugin_fn_ref`][RhaiFunc::get_plugin_fn_ref] instead.
     #[inline]
     #[must_use]
     pub fn get_plugin_fn(&self) -> Option<&Shared<FnPlugin>> {
         match self {
             Self::Plugin { func, .. } => Some(func),
-            Self::Pure { .. } | Self::Method { .. } | Self::Iterator { .. } => None,
+            Self::Pure { .. }
+            | Self::Method { .. }
+            | Self::Iterator { .. }
+            | Self::StaticPlugin { .. } => None,
 
             #[cfg(not(feature = "no_function"))]
             Self::Script { .. } => None,

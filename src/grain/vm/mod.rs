@@ -12,7 +12,7 @@ use crate::engine::{KEYWORD_FN_PTR_CALL, KEYWORD_FN_PTR_CURRY};
 use crate::eval::calc_data_sizes;
 use crate::eval::{Caches, GlobalRuntimeState};
 use crate::func::{get_builtin_binary_op_fn, get_builtin_op_assignment_fn};
-use crate::packages::string_basic::print_with_func;
+use crate::packages::string_basic::print_with_func_raw;
 use crate::types::dynamic::{AccessMode, DynamicWriteLock};
 use crate::types::fn_ptr::FnPtrType;
 use crate::types::Token;
@@ -2353,8 +2353,14 @@ impl<'e> Vm<'e> {
         // host's `to_string` for strings is not consulted here even though `+`
         // would consult it.
         if !item.is_string() {
-            let context = (self.engine, FUNC_TO_STRING, None, &self.global, pos).into();
-            rendered = Some(print_with_func(FUNC_TO_STRING, &context, &mut item));
+            rendered = Some(print_with_func_raw(
+                self.engine,
+                &mut self.global,
+                &mut self.caches,
+                FUNC_TO_STRING,
+                &mut item,
+                pos,
+            ));
         }
 
         let mut buffer = self

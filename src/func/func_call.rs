@@ -301,15 +301,7 @@ impl Engine {
                     usize::try_from(num_params)
                         .map(|num_params| {
                             let hash_script = crate::calc_fn_hash(None, &fn_name, num_params);
-                            self.has_script_fn(
-                                _global,
-                                _caches,
-                                hash_script,
-                                &fn_name,
-                                num_params,
-                                None,
-                            )
-                            .into()
+                            self.has_script_fn(_global, _caches, hash_script).into()
                         })
                         .unwrap_or(Dynamic::FALSE),
                 ));
@@ -334,15 +326,7 @@ impl Engine {
                                 crate::calc_fn_hash(None, &fn_name, num_params),
                                 &this_type,
                             );
-                            self.has_script_fn(
-                                _global,
-                                _caches,
-                                hash_script,
-                                &fn_name,
-                                num_params,
-                                Some(&this_type),
-                            )
-                            .into()
+                            self.has_script_fn(_global, _caches, hash_script).into()
                         })
                         .unwrap_or(Dynamic::FALSE),
                 ));
@@ -375,6 +359,7 @@ impl Engine {
         _global: &GlobalRuntimeState,
         caches: &'s mut Caches,
         local_entry: &'s mut Option<FnResolutionCacheEntry>,
+        fn_name: &str,
         op_token: Option<&Token>,
         hash_base: u64,
         args: Option<&mut FnCallArgs>,
@@ -394,39 +379,80 @@ impl Engine {
                                          // Set later when a specific matching function is not found.
                 let mut bitmask = 1usize; // Bitmask of which parameter to replace with `Dynamic`
 
+                let max_dynamic_count = usize::min(num_args, MAX_DYNAMIC_PARAMETERS);
+                // Bitmask of which parameters are replaced with `Dynamic` in the current `hash`
+                let mut current_bitmask = 0usize;
+
                 loop {
+                    // Functions resolved lazily are native, so they can only match with arguments.
+                    // They are matched by parameter types instead of by hash.
+                    let lazy_types = args.as_deref().map(|args| {
+                        move |i: usize| {
+                            if i < max_dynamic_count
+                                && current_bitmask & (1usize << (max_dynamic_count - i - 1)) != 0
+                            {
+                                TypeId::of::<Dynamic>()
+                            } else {
+                                args[i].type_id()
+                            }
+                        }
+                    });
+                    let lazy_types = lazy_types.as_ref().map(|f| f as &dyn Fn(usize) -> TypeId);
+
                     // First check scripted functions in the AST or embedded environments
                     #[cfg(not(feature = "no_function"))]
                     let func = _global
                         .lib
                         .iter()
                         .rev()
-                        .find_map(|m| m.get_fn(hash).map(|f| (f, m.id_raw())));
+                        .find_map(|m| m.get_fn(hash).map(|f| (f.clone(), m.id_raw())));
                     #[cfg(feature = "no_function")]
                     let func = None;
 
                     // Then check the global namespace
                     let func = func.or_else(|| {
-                        self.global_modules
-                            .iter()
-                            .find_map(|m| m.get_fn(hash).map(|f| (f, m.id_raw())))
+                        self.global_modules.iter().find_map(|m| {
+                            m.get_fn(hash)
+                                .cloned()
+                                .or_else(|| {
+                                    lazy_types.and_then(|t| m.get_lazy_fn(fn_name, num_args, t))
+                                })
+                                .map(|f| (f, m.id_raw()))
+                        })
                     });
 
                     // Then check imported modules for global functions, then global sub-modules for global functions
                     #[cfg(not(feature = "no_module"))]
                     let func = func
-                        .or_else(|| _global.get_qualified_fn(hash, true))
+                        .or_else(|| {
+                            _global
+                                .get_qualified_fn(hash, true)
+                                .map(|(f, s)| (f.clone(), s))
+                        })
+                        .or_else(|| {
+                            lazy_types
+                                .and_then(|t| _global.get_lazy_global_fn(fn_name, num_args, t))
+                        })
                         .or_else(|| {
                             self.global_sub_modules
                                 .values()
                                 .filter(|m| m.contains_indexed_global_functions())
-                                .find_map(|m| m.get_qualified_fn(hash).map(|f| (f, m.id_raw())))
+                                .find_map(|m| {
+                                    m.get_qualified_fn(hash)
+                                        .cloned()
+                                        .or_else(|| {
+                                            lazy_types.and_then(|t| {
+                                                m.get_lazy_global_fn(fn_name, num_args, t)
+                                            })
+                                        })
+                                        .map(|f| (f, m.id_raw()))
+                                })
                         });
 
                     if let Some((f, s)) = func {
                         // Specific version found
                         let new_entry = FnResolutionCacheEntry {
-                            func: f.clone(),
+                            func: f,
                             source: s.cloned(),
                         };
                         return if cache.bloom_filter.is_absent_and_set(hash) {
@@ -439,28 +465,12 @@ impl Engine {
                         };
                     }
 
-                    // Then check functions loaded on demand
-                    if let Some(func) = self.get_loaded_fn(None, hash) {
-                        let new_entry = FnResolutionCacheEntry { func, source: None };
-                        return if cache.bloom_filter.is_absent_and_set(hash) {
-                            // Do not cache "one-hit wonders"
-                            *local_entry = Some(new_entry);
-                            local_entry.as_ref()
-                        } else {
-                            // Cache entry
-                            entry.insert(Some(new_entry)).as_ref()
-                        };
-                    }
-
                     // Check `Dynamic` parameters for functions with parameters
-                    let max_dynamic_count = usize::min(num_args, MAX_DYNAMIC_PARAMETERS);
-
                     if allow_dynamic && max_bitmask == 0 && num_args > 0 {
                         let has_dynamic = self
                             .global_modules
                             .iter()
-                            .any(|m| m.may_contain_dynamic_fn(hash_base))
-                            || self.may_contain_loaded_dynamic_fn(hash_base);
+                            .any(|m| m.may_contain_dynamic_fn(hash_base));
 
                         #[cfg(not(feature = "no_function"))]
                         let has_dynamic = has_dynamic
@@ -543,6 +553,7 @@ impl Engine {
                             }
                         }),
                     );
+                    current_bitmask = bitmask;
 
                     bitmask += 1;
                 }
@@ -583,22 +594,10 @@ impl Engine {
             return Ok((result, false));
         }
 
-        // Load the function on demand if it is not found
-        if self.lazy_functions.is_some() {
-            let local_entry = &mut None;
-            let a = Some(&mut *args);
-            if self
-                .resolve_fn(global, caches, local_entry, op_token, hash, a, true)
-                .is_none()
-            {
-                self.load_missing_fn(caches, None, name, args, false, true)?;
-            }
-        }
-
         // Check if function access already in the cache
         let local_entry = &mut None;
         let a = Some(&mut *args);
-        let func = self.resolve_fn(global, caches, local_entry, op_token, hash, a, true);
+        let func = self.resolve_fn(global, caches, local_entry, name, op_token, hash, a, true);
 
         if let Some(FnResolutionCacheEntry { func, source }) = func {
             debug_assert!(func.is_native());
@@ -649,6 +648,7 @@ impl Engine {
                     Err(ERR::ErrorNonPureMethodCallOnConstant(name.to_string(), pos).into())
                 }
                 RhaiFunc::Plugin { func } => func.call(context, args),
+                RhaiFunc::StaticPlugin { func } => func.call(context, args),
                 RhaiFunc::Pure { func, .. } | RhaiFunc::Method { func, .. } => func(context, args),
                 _ => unreachable!("non-native function"),
             }
@@ -820,57 +820,6 @@ impl Engine {
         }
     }
 
-    /// Load a function on demand if neither a script-defined nor a native version is found.
-    fn load_fn_if_missing(
-        &self,
-        global: &GlobalRuntimeState,
-        caches: &mut Caches,
-        fn_name: &str,
-        op_token: Option<&Token>,
-        hashes: &FnCallHashes,
-        args: &mut FnCallArgs,
-        _is_method_call: bool,
-    ) -> RhaiResultOf<()> {
-        let local_entry = &mut None;
-
-        #[cfg(not(feature = "no_function"))]
-        if !hashes.is_native_only() {
-            let hash = hashes.script();
-
-            #[cfg(not(feature = "no_object"))]
-            if _is_method_call && !args.is_empty() {
-                let typed_hash =
-                    crate::calc_typed_method_hash(hash, self.map_type_name(args[0].type_name()));
-                if self
-                    .resolve_fn(global, caches, local_entry, None, typed_hash, None, false)
-                    .is_some()
-                {
-                    return Ok(());
-                }
-            }
-
-            if self
-                .resolve_fn(global, caches, local_entry, None, hash, None, false)
-                .is_some()
-            {
-                return Ok(());
-            }
-        }
-
-        let hash = hashes.native();
-        let a = Some(&mut *args);
-
-        if self
-            .resolve_fn(global, caches, local_entry, op_token, hash, a, true)
-            .is_some()
-        {
-            return Ok(());
-        }
-
-        self.load_missing_fn(caches, None, fn_name, args, _is_method_call, false)
-            .map(|_| ())
-    }
-
     /// # Main Entry-Point (By Name)
     ///
     /// Perform an actual function call, native Rust or scripted, by name, taking care of special functions.
@@ -904,19 +853,6 @@ impl Engine {
             return Ok((result, false));
         }
 
-        // Load the function on demand if it is not found
-        if self.lazy_functions.is_some() {
-            self.load_fn_if_missing(
-                global,
-                caches,
-                fn_name,
-                op_token,
-                &hashes,
-                args,
-                _is_method_call,
-            )?;
-        }
-
         defer! { let orig_level = global.level; global.level += 1 }
 
         // Script-defined function call?
@@ -930,12 +866,29 @@ impl Engine {
             if _is_method_call && !args.is_empty() {
                 let typed_hash =
                     crate::calc_typed_method_hash(hash, self.map_type_name(args[0].type_name()));
-                resolved =
-                    self.resolve_fn(global, caches, local_entry, None, typed_hash, None, false);
+                resolved = self.resolve_fn(
+                    global,
+                    caches,
+                    local_entry,
+                    fn_name,
+                    None,
+                    typed_hash,
+                    None,
+                    false,
+                );
             }
 
             if resolved.is_none() {
-                resolved = self.resolve_fn(global, caches, local_entry, None, hash, None, false);
+                resolved = self.resolve_fn(
+                    global,
+                    caches,
+                    local_entry,
+                    fn_name,
+                    None,
+                    hash,
+                    None,
+                    false,
+                );
             }
 
             if let Some(FnResolutionCacheEntry { func, source }) = resolved.cloned() {
