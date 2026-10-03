@@ -155,7 +155,11 @@ fn applies_to_this_build(name: &str) -> bool {
         return false;
     }
     #[cfg(feature = "no_module")]
-    if name.starts_with("import_") || name.starts_with("export_") {
+    if name.starts_with("global_") || name.starts_with("import_") || name.starts_with("export_") {
+        return false;
+    }
+    #[cfg(feature = "no_function")]
+    if name.starts_with("global_") {
         return false;
     }
     // `unchecked` removes the arithmetic guards, so `1 / 0` panics inside
@@ -505,6 +509,9 @@ pub const CASES: &[Case] = &[
     case("shadowing_nested", "let x = 1; { let x = 2; { let x = 3; } } x"),
     case("block_scope_discarded", "let x = 1; { let y = 2; x += y; } x"),
     case("const_read", "const K = 10; K * 2"),
+    // A top-level `const` becomes visible through `global::` only to scripted
+    // functions, via the shared global-constants cache.
+    case("global_constant_in_scripted_function", "const K = 10; fn read_global() { global::K } read_global()"),
     // --- functions --------------------------------------------------------
     case("fn_call", "fn add(a, b) { a + b } add(2, 3)"),
     case("fn_call_captures_parent_scope", r#"fn foo(x) { x + y * z }  let x = 42; let y = 1; let z = 9; foo!(x)"#),
