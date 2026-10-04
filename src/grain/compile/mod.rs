@@ -1888,7 +1888,11 @@ impl Lowering {
                 }
             }
 
-            let name = self.push_name(call.name.clone());
+            let name = if capture_parent_scope {
+                self.push_name(format!("{}!", call.name).into())
+            } else {
+                self.push_name(call.name.clone())
+            };
             self.emit_at(
                 Op::CallRef {
                     name,
@@ -1904,11 +1908,16 @@ impl Lowering {
         for arg in call.args.iter() {
             self.expression(arg);
         }
-        let name = self.push_name(call.name.clone());
         let op = (argc == 1 || argc == 2)
             .then(|| call.op_token.clone())
             .flatten()
             .map(|token| self.push_token(token));
+        let capture_parent_scope = capture_parent_scope && op.is_none();
+        let name = if capture_parent_scope {
+            self.push_name(format!("{}!", call.name).into())
+        } else {
+            self.push_name(call.name.clone())
+        };
         self.emit_at(
             Op::Call {
                 name,

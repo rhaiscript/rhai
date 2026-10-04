@@ -297,6 +297,11 @@ pub enum Op {
         /// Index into the operator pool; absent unless the call is an operator.
         op: Option<u32>,
         /// This call captures the parent's [`Scope`][crate::Scope].
+        ///
+        /// Encoded by marking the pooled function name with a trailing `!`,
+        /// which the VM strips.
+        ///
+        /// A decoded instruction cannot see the pool, so it reports `false`.
         capture_parent_scope: bool,
     },
 
@@ -327,6 +332,11 @@ pub enum Op {
         /// Where the first argument is found.
         receiver: Receiver,
         /// This call captures the parent's [`Scope`][crate::Scope].
+        ///
+        /// Encoded by marking the pooled function name with a trailing `!`,
+        /// which the VM strips.
+        ///
+        /// A decoded instruction cannot see the pool, so it reports `false`.
         capture_parent_scope: bool,
     },
 

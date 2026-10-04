@@ -3991,12 +3991,12 @@ impl<'e> Vm<'e> {
                     }
                 }
 
-                code::tag::CALL | code::tag::CALL_CAPTURE => {
-                    let name_index = u32::from(small(1)?);
-                    let name = program
+                code::tag::CALL => {
+                    let mut name_index = u32::from(small(1)?);
+                    let mut name = program
                         .name(name_index)
                         .ok_or_else(|| malformed(format!("no name {name_index}")))?;
-                    let capture = tag == code::tag::CALL_CAPTURE;
+                    let mut capture = false;
                     let argc = code[pc + 3] as usize;
 
                     let first = self
@@ -4004,6 +4004,14 @@ impl<'e> Vm<'e> {
                         .len()
                         .checked_sub(argc)
                         .ok_or_else(|| malformed("call with too few arguments".to_string()))?;
+
+                    // Check if the function name ends with '!' to determine if it should
+                    // capture the parent's scope.
+                    if name.ends_with('!') {
+                        capture = true;
+                        name = &name[..name.len() - 1];
+                        name_index = program.function_name_index(name, argc).unwrap_or(u32::MAX);
+                    }
 
                     let value = self.call_syntactic_or_stacked(
                         program,
@@ -4119,36 +4127,29 @@ impl<'e> Vm<'e> {
                 }
 
                 code::tag::CALL_LOCAL_REF
-                | code::tag::CALL_LOCAL_REF_CAPTURE
                 | code::tag::CALL_NAMED_REF
-                | code::tag::CALL_NAMED_REF_CAPTURE
-                | code::tag::CALL_THIS_REF
-                | code::tag::CALL_THIS_REF_CAPTURE => {
-                    let name_index = u32::from(small(1)?);
-                    let name = program
+                | code::tag::CALL_THIS_REF => {
+                    let mut name_index = u32::from(small(1)?);
+                    let mut name = program
                         .name(name_index)
                         .ok_or_else(|| malformed(format!("no name {name_index}")))?;
+                    let mut capture = false;
                     let argc = code[pc + 3] as usize;
                     // `this` is a register, so this one carries no operand for
                     // the receiver and is two bytes shorter.
                     let receiver = match tag {
-                        code::tag::CALL_LOCAL_REF | code::tag::CALL_LOCAL_REF_CAPTURE => {
-                            Receiver::Local(small(4)?)
-                        }
-                        code::tag::CALL_NAMED_REF | code::tag::CALL_NAMED_REF_CAPTURE => {
-                            Receiver::Named(u32::from(small(4)?))
-                        }
-                        code::tag::CALL_THIS_REF | code::tag::CALL_THIS_REF_CAPTURE => {
-                            Receiver::This
-                        }
+                        code::tag::CALL_LOCAL_REF => Receiver::Local(small(4)?),
+                        code::tag::CALL_NAMED_REF => Receiver::Named(u32::from(small(4)?)),
+                        code::tag::CALL_THIS_REF => Receiver::This,
                         _ => unreachable!(),
                     };
-                    let capture = matches!(
-                        tag,
-                        code::tag::CALL_LOCAL_REF_CAPTURE
-                            | code::tag::CALL_NAMED_REF_CAPTURE
-                            | code::tag::CALL_THIS_REF_CAPTURE
-                    );
+                    // Check if the function name ends with '!' to determine if it should
+                    // capture the parent's scope.
+                    if name.ends_with('!') {
+                        capture = true;
+                        name = &name[..name.len() - 1];
+                        name_index = program.function_name_index(name, argc).unwrap_or(u32::MAX);
+                    }
 
                     let value = self.call_by_reference(
                         program,

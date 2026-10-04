@@ -489,6 +489,19 @@ impl<'a> Program<'a> {
             .find(|f| matching(f) && f.this_type.is_none())
     }
 
+    /// Name index of the compiled function with a particular name and arity.
+    ///
+    /// A linear scan, which at these sizes beats a map and
+    /// keeps the common indexed lookup untouched.
+    pub(crate) fn function_name_index(&self, name: &str, argc: usize) -> Option<u32> {
+        self.functions
+            .iter()
+            .find(|f| {
+                f.params.len() == argc && f.this_type.is_none() && self.name(f.name) == Some(name)
+            })
+            .map(|f| f.name as u32)
+    }
+
     /// The compiled function with a particular name and arity.
     ///
     /// A linear scan, which at these sizes beats a map and
