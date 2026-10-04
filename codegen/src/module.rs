@@ -15,7 +15,7 @@ pub struct ExportedModParams {
     skip: bool,
     pub scope: ExportScope,
     root: Path,
-    /// Generate a static manifest of exported functions for on-demand loading.
+    /// Generate a static manifest of exported functions, which are looked up only when called.
     pub manifest: bool,
 }
 

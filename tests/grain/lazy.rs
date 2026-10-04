@@ -41,7 +41,6 @@ mod kit {
 
 fn engine() -> Engine {
     let mut module = Module::new();
-    module.set_lazy(true);
     module.combine_manifest(exported_manifest!(kit));
 
     let mut engine = Engine::new();

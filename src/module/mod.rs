@@ -626,74 +626,92 @@ bitflags! {
         const INDEXED = 0b0000_0100;
         /// Does the [`Module`] contain indexed functions that have been exposed to the global namespace?
         const INDEXED_GLOBAL_FUNCTIONS = 0b0000_1000;
-        /// Are plugin modules combined into the [`Module`] resolved lazily from their manifests?
-        const LAZY = 0b0001_0000;
     }
 }
 
-/// Plugin module manifests whose functions are resolved lazily.
+/// Index of functions in plugin module manifests.
+#[derive(Default)]
+struct LazyIndex {
+    /// Functions, keyed by hash.
+    functions: StraightHashMap<RhaiFunc>,
+    /// Bloom filter on functions (in scripted hash format) that contain [`Dynamic`] parameters.
+    dynamic_functions_filter: BloomFilterU64<8>,
+}
+
+/// [`LazyIndex`] calculated on first use.
+#[derive(Default)]
+struct LazyIndexCell(crate::OnceCell<LazyIndex>);
+
+impl Clone for LazyIndexCell {
+    /// The clone is calculated again on first use.
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl fmt::Debug for LazyIndexCell {
+    #[cold]
+    #[inline(never)]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("LazyIndexCell")
+    }
+}
+
+impl LazyIndexCell {
+    /// Get the index, calculating it first if necessary.
+    ///
+    /// `calc` adds all functions, with later ones replacing earlier ones with the same hash.
+    #[inline]
+    fn get(&self, size: usize, calc: impl FnOnce(&mut LazyIndex)) -> &LazyIndex {
+        self.0.get_or_init(|| {
+            let mut index = LazyIndex {
+                functions: new_hash_map(size),
+                dynamic_functions_filter: BloomFilterU64::new(),
+            };
+            calc(&mut index);
+            index.into()
+        })
+    }
+}
+
+/// Plugin module manifests whose functions are looked up only when called.
 #[derive(Debug, Clone, Default)]
-struct LazyManifests {
-    /// Name filter of all the manifests.
-    name_filter: [u64; 4],
-    /// Manifests, whether their sub-modules are flattened, and their name filters
-    /// (including flattened sub-modules). Later manifests take precedence.
-    entries: Vec<(&'static crate::plugin::ModuleManifest, bool, [u64; 4])>,
+struct LazyFunctions {
+    /// Manifests, and whether their sub-modules are flattened. Later manifests take precedence.
+    manifests: Vec<(&'static crate::plugin::ModuleManifest, bool)>,
+    /// Functions in the manifests.
+    index: LazyIndexCell,
+    /// Functions in the manifests of this [`Module`] and all sub-modules, with
+    /// namespace-qualified hashes the same as [`build_index`][Module::build_index].
+    qualified_index: LazyIndexCell,
 }
 
-impl LazyManifests {
-    /// Add a manifest, taking precedence over existing ones.
-    fn push(&mut self, manifest: &'static crate::plugin::ModuleManifest, flatten: bool) {
-        let filter = manifest.deep_name_filter(flatten);
-        self.name_filter
-            .iter_mut()
-            .zip(filter)
-            .for_each(|(a, b)| *a |= b);
-        self.entries.push((manifest, flatten, filter));
-    }
-    /// Append manifests, which take precedence over existing ones.
-    fn append(this: &mut Option<Box<Self>>, other: Option<Box<Self>>) {
-        if let Some(other) = other {
-            match this {
-                Some(ref mut this) => other
-                    .entries
-                    .iter()
-                    .for_each(|&(m, flatten, ..)| this.push(m, flatten)),
-                None => *this = Some(other),
-            }
+impl LazyFunctions {
+    /// Call a function on every function in the manifests, in order of precedence.
+    fn for_each_fn(&self, f: &mut dyn FnMut(&'static crate::plugin::FnManifestEntry)) {
+        for &(manifest, flatten) in &self.manifests {
+            manifest.for_each_fn(flatten, f);
         }
     }
-    /// Find a function by name and parameter types (given by a function mapping each parameter
-    /// position to a type). This never allocates.
-    fn find_fn(
-        &self,
-        name: &str,
-        num_params: usize,
-        param_type: &dyn Fn(usize) -> TypeId,
-        global_only: bool,
-    ) -> Option<&'static crate::plugin::FnManifestEntry> {
-        use crate::plugin::{manifest_name_filter_contains, manifest_name_hash};
-
-        let name_hash = manifest_name_hash(name);
-
-        if !manifest_name_filter_contains(&self.name_filter, name_hash) {
-            return None;
-        }
-
-        self.entries
-            .iter()
-            .rev()
-            .filter(|(.., filter)| manifest_name_filter_contains(filter, name_hash))
-            .find_map(|&(m, flatten, ..)| {
-                m.find_fn(
-                    name,
-                    name_hash,
-                    num_params,
-                    param_type,
-                    flatten,
-                    global_only,
-                )
-            })
+    /// Number of functions in the manifests.
+    fn len(&self) -> usize {
+        let mut len = 0;
+        self.for_each_fn(&mut |_| len += 1);
+        len
+    }
+    /// Get the index of functions in the manifests.
+    fn index(&self) -> &LazyIndex {
+        self.index.get(self.len(), |index| {
+            self.for_each_fn(&mut |f| {
+                let (hash, hash_dynamic) = f.calc_hash(&[]);
+                let func = RhaiFunc::StaticPlugin { func: f.func };
+                index.functions.insert(hash, func);
+                if let Some(hash_script) = hash_dynamic {
+                    index.dynamic_functions_filter.mark(hash_script);
+                }
+            });
+        })
     }
 }
 
@@ -729,9 +747,8 @@ pub struct Module {
     all_type_iterators: BTreeMap<TypeId, Shared<FnIterator>>,
     /// Flags.
     flags: ModuleFlags,
-    /// Manifests of plugin modules whose functions are resolved lazily,
-    /// plus whether their sub-modules are flattened.
-    manifests: Option<Box<LazyManifests>>,
+    /// Functions in plugin module manifests, looked up only when called.
+    lazy_functions: Option<Box<LazyFunctions>>,
 }
 
 impl Default for Module {
@@ -863,7 +880,7 @@ impl Module {
             type_iterators: BTreeMap::new(),
             all_type_iterators: BTreeMap::new(),
             flags: ModuleFlags::INDEXED,
-            manifests: None,
+            lazy_functions: None,
         }
     }
 
@@ -998,6 +1015,7 @@ impl Module {
         self.dynamic_functions_filter.clear();
         self.type_iterators.clear();
         self.all_type_iterators.clear();
+        self.lazy_functions = None;
         self.flags
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
     }
@@ -1184,7 +1202,10 @@ impl Module {
                 .as_ref()
                 .map_or(true, StraightHashMap::is_empty)
             && self.all_type_iterators.is_empty()
-            && self.manifests.is_none()
+            && self
+                .lazy_functions
+                .as_ref()
+                .map_or(true, |f| f.manifests.is_empty())
     }
 
     /// Is the [`Module`] indexed?
@@ -1556,6 +1577,10 @@ impl Module {
         self.functions
             .as_ref()
             .map_or(false, |m| m.contains_key(&hash_fn))
+            || self
+                .lazy_functions
+                .as_ref()
+                .map_or(false, |f| f.index().functions.contains_key(&hash_fn))
     }
 
     /// _(metadata)_ Update the metadata (parameter names/types, return type and doc-comments) of a registered function.
@@ -2026,36 +2051,22 @@ impl Module {
             .as_ref()
             .and_then(|m| m.get(&hash_native))
             .map(|(f, _)| f)
+            .or_else(|| {
+                let lazy_functions = self.lazy_functions.as_ref()?;
+                lazy_functions.index().functions.get(&hash_native)
+            })
     }
 
-    /// Make plugin modules combined via [`combine_manifest`][Module::combine_manifest] resolve
-    /// their functions lazily (or not).
+    /// Create a new [`Module`] from a plugin module's [manifest][crate::plugin::ModuleManifest].
     ///
-    /// A lazy [`Module`] does not register the functions of a plugin module up-front. Instead, a
-    /// function is looked up in the plugin module's [manifest][crate::plugin::ModuleManifest]
-    /// (without allocating) when it is called.
-    #[inline(always)]
-    pub fn set_lazy(&mut self, lazy: bool) -> &mut Self {
-        self.flags.set(ModuleFlags::LAZY, lazy);
-        self
-    }
-    /// Are plugin modules combined via [`combine_manifest`][Module::combine_manifest] resolved lazily?
-    #[inline(always)]
-    #[must_use]
-    pub const fn is_lazy(&self) -> bool {
-        self.flags.contains(ModuleFlags::LAZY)
-    }
-    /// Create a new lazy [`Module`] from a plugin module's [manifest][crate::plugin::ModuleManifest].
-    ///
-    /// Functions are resolved lazily when called. Constants, custom types and sub-modules are
-    /// registered immediately.
+    /// Functions are looked up in the manifest only when they are called. Constants, custom types
+    /// and sub-modules are registered immediately.
     ///
     /// This is the lazy equivalent of [`exported_module!`][crate::plugin::exported_module].
     #[must_use]
     pub fn from_manifest(manifest: &'static crate::plugin::ModuleManifest) -> Self {
         let mut module = Self::new();
-        module.set_lazy(true);
-        module.add_manifest(manifest, false);
+        module.push_manifests([(manifest, false)]);
         (manifest.init_eager)(&mut module);
 
         for &(name, sub_module) in manifest.sub_modules {
@@ -2068,11 +2079,14 @@ impl Module {
     /// Combine a plugin module's [manifest][crate::plugin::ModuleManifest] into this [`Module`],
     /// flattening all sub-modules.
     ///
-    /// If this [`Module`] is [lazy][Module::set_lazy], functions are resolved lazily when called.
-    /// Otherwise, all functions are registered, the same as
-    /// [`combine_with_exported_module!`][crate::plugin::combine_with_exported_module].
+    /// Functions are looked up in the manifest only when they are called. Constants and custom
+    /// types are registered immediately.
     ///
-    /// Constants and custom types are always registered.
+    /// Functions registered normally into this [`Module`] take precedence over functions in
+    /// manifests.
+    ///
+    /// This is the lazy equivalent of
+    /// [`combine_with_exported_module!`][crate::plugin::combine_with_exported_module].
     pub fn combine_manifest(
         &mut self,
         manifest: &'static crate::plugin::ModuleManifest,
@@ -2084,46 +2098,34 @@ impl Module {
             }
         }
 
-        if self.is_lazy() {
-            self.add_manifest(manifest, true);
-            init_eager(self, manifest);
-        } else {
-            manifest.register_filtered(self, true, |_, _, _, _, _| true);
-        }
+        self.push_manifests([(manifest, true)]);
+        init_eager(self, manifest);
         self
     }
-    /// Add a manifest whose functions are resolved lazily.
-    fn add_manifest(&mut self, manifest: &'static crate::plugin::ModuleManifest, flatten: bool) {
-        fn mark_dynamic(
-            module: &mut Module,
-            manifest: &crate::plugin::ModuleManifest,
-            flatten: bool,
-        ) {
-            for f in manifest.functions {
-                if (f.has_dynamic)() {
-                    let hash_base = crate::calc_fn_hash(None, f.name, f.num_params);
-                    module.dynamic_functions_filter.mark(hash_base);
-                }
-            }
-            if flatten {
-                for &(.., sub_module) in manifest.sub_modules {
-                    mark_dynamic(module, sub_module, flatten);
-                }
-            }
-        }
+    /// Add manifests whose functions are looked up only when called, taking precedence over
+    /// existing ones.
+    fn push_manifests(
+        &mut self,
+        manifests: impl IntoIterator<Item = (&'static crate::plugin::ModuleManifest, bool)>,
+    ) {
+        let lazy_functions = self.lazy_functions.get_or_insert_with(Default::default);
+        lazy_functions.manifests.extend(manifests);
+        lazy_functions.index = LazyIndexCell::default();
 
-        mark_dynamic(self, manifest, flatten);
-        self.manifests
-            .get_or_insert_with(Default::default)
-            .push(manifest, flatten);
         self.flags
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
     }
-    /// Register all functions that are resolved lazily, making this [`Module`] no longer lazy.
+    /// Register all functions in plugin module manifests (including sub-modules), with full
+    /// metadata, so that they are no longer looked up only when called.
     pub fn register_lazy_functions(&mut self) -> &mut Self {
-        if let Some(manifests) = self.manifests.take() {
-            for &(manifest, flatten, ..) in &manifests.entries {
-                manifest.register_filtered(self, flatten, |_, _, _, _, _| true);
+        if let Some(lazy_functions) = self.lazy_functions.take() {
+            // Functions registered normally take precedence over functions in manifests
+            let functions = self.functions.take();
+            lazy_functions.for_each_fn(&mut |f| (f.register)(self));
+            if let Some(functions) = functions {
+                self.functions
+                    .get_or_insert_with(|| new_hash_map(functions.len()))
+                    .extend(functions);
             }
         }
         for m in self.modules.values_mut() {
@@ -2133,19 +2135,22 @@ impl Module {
                 m.build_index();
             }
         }
-        self.set_lazy(false);
         self.flags
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
         self
     }
-    /// Does this [`Module`] (or any sub-module) have functions that are resolved lazily?
+    /// Does this [`Module`] (or any sub-module) contain functions in plugin module manifests,
+    /// which are looked up only when called?
     #[inline]
     #[must_use]
     pub fn has_lazy_functions(&self) -> bool {
-        self.manifests.is_some() || self.modules.values().any(|m| m.has_lazy_functions())
+        self.lazy_functions
+            .as_ref()
+            .map_or(false, |f| !f.manifests.is_empty())
+            || self.modules.values().any(|m| m.has_lazy_functions())
     }
-    /// Get this [`Module`] with all functions that are resolved lazily registered, cloning it if
-    /// necessary.
+    /// Get this [`Module`] with all functions in plugin module manifests registered, cloning it
+    /// if necessary.
     ///
     /// Used for enumerating functions (e.g. for metadata), which is not a hot path.
     #[inline]
@@ -2160,54 +2165,16 @@ impl Module {
             std::borrow::Cow::Borrowed(self)
         }
     }
-    /// Get a function that is resolved lazily, by name and parameter types (given by a function
-    /// mapping each parameter position to a type).
-    ///
-    /// Only functions directly in this [`Module`] (including flattened sub-modules) are searched.
-    /// This never allocates.
-    #[inline]
-    #[must_use]
-    pub(crate) fn get_lazy_fn(
-        &self,
-        name: &str,
-        num_params: usize,
-        param_type: &dyn Fn(usize) -> TypeId,
-    ) -> Option<RhaiFunc> {
-        self.manifests
-            .as_deref()?
-            .find_fn(name, num_params, param_type, false)
-            .map(|f| RhaiFunc::StaticPlugin { func: f.func as _ })
-    }
-    /// Get a function in the global namespace that is resolved lazily, by name and parameter
-    /// types (given by a function mapping each parameter position to a type), searching all
-    /// sub-modules.
-    ///
-    /// This never allocates.
-    #[cfg(not(feature = "no_module"))]
-    #[must_use]
-    pub(crate) fn get_lazy_global_fn(
-        &self,
-        name: &str,
-        num_params: usize,
-        param_type: &dyn Fn(usize) -> TypeId,
-    ) -> Option<RhaiFunc> {
-        self.manifests
-            .as_deref()
-            .and_then(|m| m.find_fn(name, num_params, param_type, true))
-            .map(|f| RhaiFunc::StaticPlugin { func: f.func as _ })
-            .or_else(|| {
-                self.modules
-                    .values()
-                    .find_map(|m| m.get_lazy_global_fn(name, num_params, param_type))
-            })
-    }
     /// Can the particular function with [`Dynamic`] parameter(s) exist in the [`Module`]?
     ///
     /// A `true` return value does not automatically imply that the function _must_ exist.
     #[inline(always)]
     #[must_use]
-    pub(crate) const fn may_contain_dynamic_fn(&self, hash_script: u64) -> bool {
+    pub(crate) fn may_contain_dynamic_fn(&self, hash_script: u64) -> bool {
         !self.dynamic_functions_filter.is_absent(hash_script)
+            || self.lazy_functions.as_ref().map_or(false, |f| {
+                !f.index().dynamic_functions_filter.is_absent(hash_script)
+            })
     }
 
     /// Does the particular namespace-qualified function exist in the [`Module`]?
@@ -2219,6 +2186,7 @@ impl Module {
         self.all_functions
             .as_ref()
             .map_or(false, |m| m.contains_key(&hash_fn))
+            || self.get_lazy_qualified_fn(hash_fn).is_some()
     }
 
     /// Get a namespace-qualified function.
@@ -2231,13 +2199,48 @@ impl Module {
         self.all_functions
             .as_ref()
             .and_then(|m| m.get(&hash_qualified_fn))
+            .or_else(|| self.get_lazy_qualified_fn(hash_qualified_fn))
+    }
+
+    /// Get a namespace-qualified function in plugin module manifests, in this [`Module`] or any
+    /// sub-module.
+    ///
+    /// The [`u64`] hash is calculated the same as [`build_index`][Module::build_index].
+    #[must_use]
+    fn get_lazy_qualified_fn(&self, hash_qualified_fn: u64) -> Option<&RhaiFunc> {
+        fn index_module<'a>(module: &'a Module, path: &mut Vec<&'a str>, index: &mut LazyIndex) {
+            for (name, m) in &module.modules {
+                path.push(name);
+                index_module(m, path, index);
+                path.pop();
+            }
+
+            if let Some(ref lazy_functions) = module.lazy_functions {
+                lazy_functions.for_each_fn(&mut |f| {
+                    let func = RhaiFunc::StaticPlugin { func: f.func };
+                    if f.namespace == FnNamespace::Global {
+                        index.functions.insert(f.calc_hash(&[]).0, func.clone());
+                    }
+                    index.functions.insert(f.calc_hash(path).0, func);
+                });
+            }
+        }
+
+        self.lazy_functions
+            .as_ref()?
+            .qualified_index
+            .get(0, |index| index_module(self, &mut vec![""], index))
+            .functions
+            .get(&hash_qualified_fn)
     }
 
     /// Combine another [`Module`] into this [`Module`].
     /// The other [`Module`] is _consumed_ to merge into this [`Module`].
     #[inline]
     pub fn combine(&mut self, other: Self) -> &mut Self {
-        LazyManifests::append(&mut self.manifests, other.manifests);
+        if let Some(lazy_functions) = other.lazy_functions {
+            self.push_manifests(lazy_functions.manifests);
+        }
         self.modules.extend(other.modules);
         self.variables.extend(other.variables);
         match self.functions {
@@ -2272,7 +2275,9 @@ impl Module {
         for m in other.modules.into_values() {
             self.combine_flatten(shared_take_or_clone(m));
         }
-        LazyManifests::append(&mut self.manifests, other.manifests);
+        if let Some(lazy_functions) = other.lazy_functions {
+            self.push_manifests(lazy_functions.manifests);
+        }
         self.variables.extend(other.variables);
         match self.functions {
             Some(ref mut m) if other.functions.is_some() => m.extend(other.functions.unwrap()),
@@ -2302,11 +2307,11 @@ impl Module {
     /// Only items not existing in this [`Module`] are added.
     #[inline]
     pub fn fill_with(&mut self, other: &Self) -> &mut Self {
-        // Existing functions take precedence, so search these manifests last
-        if other.manifests.is_some() {
-            let mut manifests = other.manifests.clone();
-            LazyManifests::append(&mut manifests, self.manifests.take());
-            self.manifests = manifests;
+        // Existing manifests take precedence, so these go before them
+        if let Some(ref lazy_functions) = other.lazy_functions {
+            let existing = self.lazy_functions.take().map(|f| f.manifests);
+            self.push_manifests(lazy_functions.manifests.iter().copied());
+            self.push_manifests(existing.into_iter().flatten());
         }
         for (k, v) in &other.modules {
             if !self.modules.contains_key(k) {
@@ -2373,9 +2378,13 @@ impl Module {
 
         self.variables.extend(other.variables.clone());
 
-        // Lazy functions must be registered to be filtered
-        for &(manifest, flatten, ..) in other.manifests.iter().flat_map(|m| &m.entries) {
-            manifest.register_filtered(self, flatten, _filter);
+        // Functions in manifests must be registered to be filtered
+        if let Some(ref lazy_functions) = other.lazy_functions {
+            lazy_functions.for_each_fn(&mut |f| {
+                if _filter(f.namespace, FnAccess::Public, false, f.name, f.num_params()) {
+                    (f.register)(self);
+                }
+            });
         }
 
         if let Some(ref functions) = other.functions {
@@ -2431,6 +2440,7 @@ impl Module {
                 .collect()
         });
 
+        self.lazy_functions = None;
         self.dynamic_functions_filter.clear();
         self.all_functions = None;
         self.all_variables = None;
@@ -2784,14 +2794,13 @@ impl Module {
                 type_iterators.insert(type_id, func.clone());
             }
 
-            // Lazy functions are not indexed, but may be in the global namespace
-            if module
-                .manifests
-                .iter()
-                .flat_map(|m| &m.entries)
-                .any(|&(m, flatten, ..)| m.has_global_fn(flatten))
-            {
-                contains_indexed_global_functions = true;
+            // Functions in manifests are indexed on first lookup, but may be in the global namespace
+            if let Some(ref lazy_functions) = module.lazy_functions {
+                lazy_functions.for_each_fn(&mut |f| {
+                    if f.namespace == FnNamespace::Global {
+                        contains_indexed_global_functions = true;
+                    }
+                });
             }
 
             // Index all functions
@@ -2887,6 +2896,11 @@ impl Module {
             self.all_variables = (!variables.is_empty()).then_some(variables);
             self.all_functions = (!functions.is_empty()).then_some(functions);
             self.all_type_iterators = type_iterators;
+
+            if self.has_lazy_functions() {
+                let lazy_functions = self.lazy_functions.get_or_insert_with(Default::default);
+                lazy_functions.qualified_index = LazyIndexCell::default();
+            }
 
             self.flags |= ModuleFlags::INDEXED;
         }

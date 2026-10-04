@@ -59,10 +59,9 @@ mod kit {
     }
 }
 
-/// A lazy module with the plugin module's sub-modules flattened, as in a package.
+/// A module with the plugin module's manifest combined, flattening sub-modules, as in a package.
 fn lazy_global_module() -> Module {
     let mut module = Module::new();
-    module.set_lazy(true);
     module.combine_manifest(exported_manifest!(kit));
     module.build_index();
     module
@@ -76,12 +75,9 @@ fn engine_with(module: Module) -> Engine {
 }
 
 #[test]
-fn test_lazy_manifest_is_sorted() {
+fn test_lazy_manifest() {
     let manifest = exported_manifest!(kit);
     let names: Vec<_> = manifest.functions.iter().map(|f| f.name).collect();
-    let mut sorted = names.clone();
-    sorted.sort();
-    assert_eq!(names, sorted);
     assert!(names.contains(&"get$size"));
     assert_eq!(names.iter().filter(|&&n| n == "area").count(), 2);
     assert_eq!(manifest.sub_modules.len(), 1);
@@ -91,7 +87,6 @@ fn test_lazy_manifest_is_sorted() {
 #[test]
 fn test_lazy_module_registers_nothing() -> Result<(), Box<EvalAltResult>> {
     let module = lazy_global_module();
-    assert!(module.is_lazy());
     assert!(module.has_lazy_functions());
     assert_eq!(module.count().1, 0);
     assert!(module.get_var_value::<INT>("ANSWER").is_some());
@@ -166,16 +161,6 @@ fn test_lazy_genuine_miss() {
 }
 
 #[test]
-fn test_lazy_registered_functions_take_precedence() -> Result<(), Box<EvalAltResult>> {
-    let mut engine = engine_with(lazy_global_module());
-    engine.register_fn("double", |x: INT| x * 100);
-
-    assert_eq!(engine.eval::<INT>("double(2)")?, 200);
-
-    Ok(())
-}
-
-#[test]
 #[cfg(not(feature = "no_module"))]
 fn test_lazy_static_module() -> Result<(), Box<EvalAltResult>> {
     let mut engine = Engine::new();
@@ -238,4 +223,31 @@ fn test_lazy_functions_have_metadata() {
     let json = engine.gen_fn_metadata_to_json(true).unwrap();
     assert!(json.contains("\"name\": \"double\""));
     assert!(json.contains("\"name\": \"to_upper\""));
+}
+
+#[test]
+fn test_lazy_registered_functions_take_precedence() -> Result<(), Box<EvalAltResult>> {
+    let mut engine = engine_with(lazy_global_module());
+    engine.register_fn("double", |x: INT| x * 100);
+    assert_eq!(engine.eval::<INT>("double(2)")?, 200);
+
+    // Also within the same module, before and after registering the functions in manifests
+    let mut module = Module::new();
+    module.set_native_fn("double", |x: INT| Ok(x * 100));
+    module.combine_manifest(exported_manifest!(kit));
+    module.build_index();
+
+    let engine = engine_with(module.clone());
+    assert_eq!(engine.eval::<INT>("double(2)")?, 200);
+    assert_eq!(engine.eval::<INT>("triple(2)")?, 6);
+
+    module.register_lazy_functions();
+    module.build_index();
+    assert!(!module.has_lazy_functions());
+
+    let engine = engine_with(module);
+    assert_eq!(engine.eval::<INT>("double(2)")?, 200);
+    assert_eq!(engine.eval::<INT>("triple(2)")?, 6);
+
+    Ok(())
 }

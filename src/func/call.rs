@@ -851,8 +851,6 @@ impl Engine {
             .search_imports(global, namespace)
             .ok_or_else(|| ERR::ErrorModuleNotFound(namespace.to_string(), namespace.position()))?;
 
-        let lazy_func;
-
         // First search script-defined functions in namespace (can override built-in)
         let mut func = module.get_qualified_fn(hash).or_else(|| {
             // Then search native Rust functions
@@ -898,42 +896,6 @@ impl Engine {
             }
         }
 
-        // Then search functions that are resolved lazily in the target sub-module
-        if func.is_none() {
-            let target = namespace
-                .path
-                .iter()
-                .skip(1)
-                .try_fold(&*module, |m, ns| m.get_sub_module(ns.as_str()));
-
-            if let Some(target) = target.filter(|m| m.has_lazy_functions()) {
-                let num_args = args.len();
-                let hash_base = super::calc_fn_hash(None, fn_name, num_args);
-                let max_dynamic_count =
-                    usize::min(num_args, crate::api::default_limits::MAX_DYNAMIC_PARAMETERS);
-                let max_bitmask = if target.may_contain_dynamic_fn(hash_base) {
-                    1usize << max_dynamic_count
-                } else {
-                    1
-                };
-
-                // Exact match first, then all permutations with `Dynamic` wildcards
-                lazy_func = (0..max_bitmask).find_map(|bitmask| {
-                    let param_type = |i: usize| {
-                        if i < max_dynamic_count
-                            && bitmask & (1usize << (max_dynamic_count - i - 1)) != 0
-                        {
-                            std::any::TypeId::of::<Dynamic>()
-                        } else {
-                            args[i].type_id()
-                        }
-                    };
-                    target.get_lazy_fn(fn_name, num_args, &param_type)
-                });
-                func = lazy_func.as_ref();
-            }
-        }
-
         // Clone first argument if the function is not a method after-all
         if !func.map_or(true, RhaiFunc::is_method) {
             if let Some(first) = first_arg_value {
@@ -962,8 +924,14 @@ impl Engine {
                 Err(ERR::ErrorNonPureMethodCallOnConstant(fn_name.to_string(), pos).into())
             }
 
-            Some(f @ (RhaiFunc::Plugin { .. } | RhaiFunc::StaticPlugin { .. })) => {
-                let func = f.get_plugin_fn_ref().unwrap();
+            Some(RhaiFunc::Plugin { func }) => {
+                let context = func
+                    .has_context()
+                    .then(|| (self, fn_name, module.id(), &*global, pos).into());
+                func.call(context, args)
+                    .and_then(|r| self.check_data_size(r, pos))
+            }
+            Some(RhaiFunc::StaticPlugin { func }) => {
                 let context = func
                     .has_context()
                     .then(|| (self, fn_name, module.id(), &*global, pos).into());

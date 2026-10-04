@@ -1,7 +1,7 @@
 //! Lazy versus eager standard library: heap, construction time and script timings.
 //!
 //! The eager baseline is the standard library as it was before lazy resolution: the same package
-//! initialized into a non-lazy module, so every function is registered up-front.
+//! with every function in its manifests registered up-front via `Module::register_lazy_functions`.
 //!
 //! Indicative, not criterion: timings are the fastest of several runs. Run with `--release`
 //! (add `--features grain` to include the Grain VM).
@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::{Duration, Instant};
 
 use rhai::packages::{Package, StandardPackage};
-use rhai::{Dynamic, Engine, Module, Scope, AST};
+use rhai::{Dynamic, Engine, Module, AST};
 
 static LIVE: AtomicIsize = AtomicIsize::new(0);
 static COUNT: AtomicIsize = AtomicIsize::new(0);
@@ -85,20 +85,18 @@ fn fastest(mut f: impl FnMut()) -> Duration {
         .unwrap()
 }
 
-fn lazy_std() -> Module {
+fn std_module(eager: bool) -> Module {
     let mut module = Module::new();
-    module.set_lazy(true);
     <StandardPackage as Package>::init(&mut module);
+    if eager {
+        module.register_lazy_functions();
+    }
     module.build_index();
     module
 }
 
-fn eager_std() -> Module {
-    let mut module = Module::new();
-    <StandardPackage as Package>::init(&mut module);
-    module.build_index();
-    module
-}
+/// Standard library builds being compared.
+const BUILDS: [(&str, bool); 2] = [("eager", true), ("lazy", false)];
 
 fn engine_with(std: Module) -> Engine {
     let mut engine = Engine::new_raw();
@@ -112,13 +110,45 @@ fn main() {
         "{:<8} {:>10} {:>12} {:>10} {:>12}",
         "", "functions", "heap bytes", "allocs", "build time"
     );
-    for (name, build) in [("eager", eager_std as fn() -> Module), ("lazy", lazy_std)] {
+    for (name, eager) in BUILDS {
+        let build = || std_module(eager);
         let (module, bytes, allocs) = measure(build);
         let time = fastest(|| drop(build()));
         println!(
             "{name:<8} {:>10} {bytes:>12} {allocs:>10} {:>10.1}µs",
             module.count().1,
             time.as_secs_f64() * 1e6
+        );
+    }
+
+    // The functions in manifests are indexed by hash on the first lookup, so the first call on a
+    // fresh standard library pays for that once.
+    println!();
+    println!("Fresh standard library, first call");
+    println!(
+        "{:<8} {:>12} {:>16} {:>14}",
+        "", "first call", "heap after call", "build + call"
+    );
+    for (name, eager) in BUILDS {
+        let build = || std_module(eager);
+        let engine = engine_with(build());
+        let ast = engine.compile("abs(-1)").unwrap();
+        let ((), bytes, _) = measure(|| {
+            let engine = engine_with(build());
+            let _ = engine.eval_ast::<Dynamic>(&ast).unwrap();
+            std::mem::forget(engine);
+        });
+        let mut call = Duration::MAX;
+        let total = fastest(|| {
+            let engine = engine_with(build());
+            let start = Instant::now();
+            let _ = engine.eval_ast::<Dynamic>(&ast).unwrap();
+            call = call.min(start.elapsed());
+        });
+        println!(
+            "{name:<8} {:>10.1}µs {bytes:>16} {:>12.1}µs",
+            call.as_secs_f64() * 1e6,
+            total.as_secs_f64() * 1e6
         );
     }
 
@@ -129,7 +159,8 @@ fn main() {
         println!();
         println!("{title}");
 
-        for (name, build) in [("eager", eager_std as fn() -> Module), ("lazy", lazy_std)] {
+        for (name, eager) in BUILDS {
+            let build = || std_module(eager);
             let engine = engine_with(build());
             let ast: AST = engine.compile(script).unwrap();
             let expected = engine.eval_ast::<Dynamic>(&ast).unwrap().to_string();
@@ -146,6 +177,7 @@ fn main() {
             #[cfg(feature = "grain")]
             {
                 use rhai::grain::{Compiler, Vm};
+                use rhai::Scope;
 
                 let program = Compiler::new().compile(&ast).into_shared();
                 let run = || {
@@ -161,8 +193,6 @@ fn main() {
                     vm.as_secs_f64() * 1e6
                 );
             }
-            #[cfg(not(feature = "grain"))]
-            let _ = Scope::new();
         }
     }
 }

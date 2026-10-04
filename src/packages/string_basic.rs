@@ -55,6 +55,7 @@ pub fn print_with_func(
 ///
 /// This is the same as [`print_with_func`], but avoids creating a new [`NativeCallContext`]
 /// (which clones the global runtime state and starts with empty function resolution caches).
+#[cfg(any(not(feature = "no_ast"), feature = "grain"))]
 pub(crate) fn print_with_func_raw(
     engine: &crate::Engine,
     global: &mut crate::eval::GlobalRuntimeState,
@@ -65,8 +66,8 @@ pub(crate) fn print_with_func_raw(
 ) -> ImmutableString {
     let hash = crate::calc_fn_hash(None, fn_name, 1);
 
-    let orig_level = global.level;
-    global.level += 1;
+    defer! { let orig_level = global.level; global.level += 1 }
+
     let result = engine
         .exec_native_fn_call(
             global,
@@ -80,7 +81,6 @@ pub(crate) fn print_with_func_raw(
             pos,
         )
         .map(|(r, ..)| r);
-    global.level = orig_level;
 
     printed_value(engine, fn_name, value, result)
 }

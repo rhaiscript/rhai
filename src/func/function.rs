@@ -336,32 +336,14 @@ impl RhaiFunc {
             Self::Script { .. } => None,
         }
     }
-    /// Get a reference to a plugin function, whether shared or static.
+    /// Get a reference to a plugin function.
     #[inline]
     #[must_use]
-    pub fn get_plugin_fn_ref(&self) -> Option<&FnPlugin> {
+    pub fn get_plugin_fn(&self) -> Option<&FnPlugin> {
         match self {
             Self::Plugin { func, .. } => Some(&**func),
             Self::StaticPlugin { func } => Some(*func),
             Self::Pure { .. } | Self::Method { .. } | Self::Iterator { .. } => None,
-
-            #[cfg(not(feature = "no_function"))]
-            Self::Script { .. } => None,
-        }
-    }
-    /// Get a shared reference to a plugin function.
-    ///
-    /// Returns [`None`] for a [static][RhaiFunc::StaticPlugin] plugin function;
-    /// use [`get_plugin_fn_ref`][RhaiFunc::get_plugin_fn_ref] instead.
-    #[inline]
-    #[must_use]
-    pub fn get_plugin_fn(&self) -> Option<&Shared<FnPlugin>> {
-        match self {
-            Self::Plugin { func, .. } => Some(func),
-            Self::Pure { .. }
-            | Self::Method { .. }
-            | Self::Iterator { .. }
-            | Self::StaticPlugin { .. } => None,
 
             #[cfg(not(feature = "no_function"))]
             Self::Script { .. } => None,

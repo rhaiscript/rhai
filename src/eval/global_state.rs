@@ -292,28 +292,6 @@ impl GlobalRuntimeState {
                 .find_map(|m| m.get_qualified_fn(hash).map(|f| (f, m.id_raw())))
         }
     }
-    /// Get a function in the global namespace that is resolved lazily, via its name and hash key,
-    /// from the stack of globally-imported [modules][crate::Module].
-    ///
-    /// Not available under `no_module`.
-    #[cfg(not(feature = "no_module"))]
-    #[inline]
-    #[must_use]
-    pub(crate) fn get_lazy_global_fn(
-        &self,
-        name: &str,
-        num_params: usize,
-        param_type: &dyn Fn(usize) -> std::any::TypeId,
-    ) -> Option<(crate::func::RhaiFunc, Option<&ImmutableString>)> {
-        self.modules
-            .iter()
-            .rev()
-            .filter(|&m| m.contains_indexed_global_functions())
-            .find_map(|m| {
-                m.get_lazy_global_fn(name, num_params, param_type)
-                    .map(|f| (f, m.id_raw()))
-            })
-    }
     /// Does the specified [`TypeId`][std::any::TypeId] iterator exist in the stack of
     /// globally-imported [modules][crate::Module]?
     ///

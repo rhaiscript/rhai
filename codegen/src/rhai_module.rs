@@ -37,10 +37,8 @@ pub fn generate_body(
     manifest: bool,
 ) -> TokenStream {
     let mut set_fn_statements = Vec::new();
-    // (sort key, tokens) for manifest entries
     let mut manifest_fns = Vec::new();
     let mut manifest_sub_modules = Vec::new();
-    let mut manifest_items = Vec::new();
     let mut set_const_statements = Vec::new();
     let mut add_mod_blocks = Vec::new();
     let mut set_flattened_mod_blocks = Vec::new();
@@ -119,13 +117,10 @@ pub fn generate_body(
             self::#module_name::rhai_generate_into_module(_m, _flatten);
         });
         if manifest {
-            manifest_sub_modules.push((
-                exported_name.value(),
-                quote! {
-                    #(#cfg_attrs)*
-                    (#exported_name, &self::#module_name::RHAI_MANIFEST)
-                },
-            ));
+            manifest_sub_modules.push(quote! {
+                #(#cfg_attrs)*
+                (#exported_name, &self::#module_name::RHAI_MANIFEST)
+            });
         }
     }
 
@@ -149,30 +144,7 @@ pub fn generate_body(
             .map(syn::Attribute::to_token_stream)
             .collect();
 
-        if manifest {
-            let has_dynamic_fn_name = syn::Ident::new(
-                &format!("rhai_has_dynamic_{}", function.name()),
-                function.name().span(),
-            );
-            let params_eq_fn_name = syn::Ident::new(
-                &format!("rhai_params_eq_{}", function.name()),
-                function.name().span(),
-            );
-            manifest_items.push(quote! {
-                #(#cfg_attrs)*
-                #[doc(hidden)]
-                pub fn #has_dynamic_fn_name() -> bool {
-                    #root::plugin::manifest_fn_has_dynamic(&#fn_token_name::param_types(), &#fn_token_name())
-                }
-                #(#cfg_attrs)*
-                #[doc(hidden)]
-                pub fn #params_eq_fn_name(param_type: &dyn Fn(usize) -> #root::plugin::TypeId) -> bool {
-                    #root::plugin::manifest_fn_params_eq(&#fn_token_name::param_types(), &#fn_token_name(), param_type)
-                }
-            });
-        }
-
-        for (fn_index, fn_literal) in reg_names.into_iter().enumerate() {
+        for fn_literal in reg_names {
             let mut namespace = FnNamespaceAccess::Internal;
 
             match function.params().special {
@@ -231,50 +203,21 @@ pub fn generate_body(
             });
 
             if manifest {
-                let register_fn_name = syn::Ident::new(
-                    &format!("rhai_register_{}_{fn_index}", function.name()),
-                    function.name().span(),
-                );
-                let params_eq_fn_name = syn::Ident::new(
-                    &format!("rhai_params_eq_{}", function.name()),
-                    function.name().span(),
-                );
-                let has_dynamic_fn_name = syn::Ident::new(
-                    &format!("rhai_has_dynamic_{}", function.name()),
-                    function.name().span(),
-                );
-                let num_params = function.arg_count();
                 let fn_namespace = match namespace {
                     FnNamespaceAccess::Global => quote! { #root::FnNamespace::Global },
                     _ => quote! { #root::FnNamespace::Internal },
                 };
 
-                manifest_items.push(quote! {
+                manifest_fns.push(quote! {
                     #(#cfg_attrs)*
-                    #[doc(hidden)]
-                    pub fn #register_fn_name(_m: &mut #root::Module) {
-                        #tokens
+                    #root::plugin::FnManifestEntry {
+                        name: #fn_literal,
+                        namespace: #fn_namespace,
+                        func: &#fn_token_name(),
+                        param_types: |f| f(&#fn_token_name::param_types()),
+                        register: |_m| { #tokens },
                     }
                 });
-                manifest_fns.push((
-                    fn_literal.value(),
-                    quote! {
-                        #(#cfg_attrs)*
-                        #fn_literal
-                    },
-                    quote! {
-                        #(#cfg_attrs)*
-                        #root::plugin::FnManifestEntry {
-                            name: #fn_literal,
-                            num_params: #num_params,
-                            namespace: #fn_namespace,
-                            func: &#fn_token_name(),
-                            params_eq: #params_eq_fn_name,
-                            has_dynamic: #has_dynamic_fn_name,
-                            register: #register_fn_name,
-                        }
-                    },
-                ));
             }
 
             set_fn_statements.push(syn::parse2::<syn::Stmt>(tokens).unwrap());
@@ -335,36 +278,21 @@ pub fn generate_body(
 
     let (.., generate_call_content) = generate_fn_call.content.take().unwrap();
 
-    if manifest {
-        // Sort by name so lookups can binary-search
-        manifest_fns.sort_by(|(a, ..), (b, ..)| a.cmp(b));
-        manifest_sub_modules.sort_by(|(a, ..), (b, ..)| a.cmp(b));
-        let manifest_names = manifest_fns
-            .iter()
-            .map(|(.., n, _)| n.clone())
-            .collect::<Vec<_>>();
-        let manifest_fns = manifest_fns.into_iter().map(|(.., t)| t);
-        let manifest_sub_modules = manifest_sub_modules.into_iter().map(|(.., t)| t);
-
-        manifest_items.push(quote! {
-            #[doc(hidden)]
-            pub fn rhai_generate_eager_into_module(_m: &mut #root::Module) {
-                #(#set_const_statements)*
-            }
+    let manifest = manifest.then(|| {
+        quote! {
             /// Manifest of all functions exported by this plugin module.
             pub static RHAI_MANIFEST: #root::plugin::ModuleManifest = #root::plugin::ModuleManifest {
                 functions: &[#(#manifest_fns),*],
                 sub_modules: &[#(#manifest_sub_modules),*],
-                name_filter: #root::plugin::manifest_name_filter(&[#(#manifest_names),*]),
-                init_eager: rhai_generate_eager_into_module,
+                init_eager: |_m| { #(#set_const_statements)* },
             };
-        });
-    }
+        }
+    });
 
     quote! {
         #(#generate_call_content)*
         #(#gen_fn_tokens)*
-        #(#manifest_items)*
+        #manifest
     }
 }
 

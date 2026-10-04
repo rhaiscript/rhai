@@ -122,9 +122,8 @@ pub fn exported_module(module_path: TokenStream) -> TokenStream {
 /// Macro to get the static function manifest of a _plugin module_ defined via
 /// `#[export_module(manifest)]`.
 ///
-/// The manifest lists every exported function without registering any of them. A lazy `Module`
-/// holding the manifest resolves only the functions that scripts actually call, when they are
-/// called, without allocating.
+/// The manifest lists every exported function without registering any of them. A `Module`
+/// holding the manifest looks up its functions by hash only when they are called.
 ///
 /// # Usage
 ///
