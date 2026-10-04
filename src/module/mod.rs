@@ -660,18 +660,9 @@ impl fmt::Debug for LazyIndexCell {
 
 impl LazyIndexCell {
     /// Get the index, calculating it first if necessary.
-    ///
-    /// `calc` adds all functions, with later ones replacing earlier ones with the same hash.
     #[inline]
-    fn get(&self, size: usize, calc: impl FnOnce(&mut LazyIndex)) -> &LazyIndex {
-        self.0.get_or_init(|| {
-            let mut index = LazyIndex {
-                functions: new_hash_map(size),
-                dynamic_functions_filter: BloomFilterU64::new(),
-            };
-            calc(&mut index);
-            index.into()
-        })
+    fn get(&self, calc: impl FnOnce() -> LazyIndex) -> &LazyIndex {
+        self.0.get_or_init(|| calc().into())
     }
 }
 
@@ -694,15 +685,16 @@ impl LazyFunctions {
             manifest.for_each_fn(flatten, f);
         }
     }
-    /// Number of functions in the manifests.
-    fn len(&self) -> usize {
-        let mut len = 0;
-        self.for_each_fn(&mut |_| len += 1);
-        len
-    }
     /// Get the index of functions in the manifests.
     fn index(&self) -> &LazyIndex {
-        self.index.get(self.len(), |index| {
+        self.index.get(|| {
+            let mut len = 0;
+            self.for_each_fn(&mut |_| len += 1);
+
+            let mut index = LazyIndex {
+                functions: new_hash_map(len),
+                dynamic_functions_filter: BloomFilterU64::new(),
+            };
             self.for_each_fn(&mut |f| {
                 let (hash, hash_dynamic) = f.calc_hash(&[]);
                 let func = RhaiFunc::StaticPlugin { func: f.func };
@@ -711,6 +703,7 @@ impl LazyFunctions {
                     index.dynamic_functions_filter.mark(hash_script);
                 }
             });
+            index
         })
     }
 }
@@ -2229,7 +2222,11 @@ impl Module {
         self.lazy_functions
             .as_ref()?
             .qualified_index
-            .get(0, |index| index_module(self, &mut vec![""], index))
+            .get(|| {
+                let mut index = LazyIndex::default();
+                index_module(self, &mut vec![""], &mut index);
+                index
+            })
             .functions
             .get(&hash_qualified_fn)
     }
