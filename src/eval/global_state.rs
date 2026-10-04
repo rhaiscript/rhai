@@ -278,7 +278,10 @@ impl GlobalRuntimeState {
         &self,
         hash: u64,
         global_namespace_only: bool,
-    ) -> Option<(&crate::func::RhaiFunc, Option<&ImmutableString>)> {
+    ) -> Option<(
+        std::borrow::Cow<'_, crate::func::RhaiFunc>,
+        Option<&ImmutableString>,
+    )> {
         if global_namespace_only {
             self.modules
                 .iter()

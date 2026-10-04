@@ -410,7 +410,7 @@ impl Engine {
                     if let Some((f, s)) = func {
                         // Specific version found
                         let new_entry = FnResolutionCacheEntry {
-                            func: f.clone(),
+                            func: f.into_owned(),
                             source: s.cloned(),
                         };
                         return if cache.bloom_filter.is_absent_and_set(hash) {
@@ -455,29 +455,28 @@ impl Engine {
 
                     // Stop when all permutations are exhausted
                     if bitmask >= max_bitmask {
-                        if num_args != 2 {
-                            return None;
-                        }
-
                         // Try to find a built-in version
                         let builtin =
-                            args.and_then(|args| match op_token {
-                                None => None,
-                                Some(token) if token.is_op_assignment() => {
-                                    let (first_arg, rest_args) = args.split_first().unwrap();
+                            args.filter(|_| num_args == 2)
+                                .and_then(|args| match op_token {
+                                    None => None,
+                                    Some(token) if token.is_op_assignment() => {
+                                        let (first_arg, rest_args) = args.split_first().unwrap();
 
-                                    get_builtin_op_assignment_fn(token, first_arg, rest_args[0])
-                                        .map(|(f, has_context)| FnResolutionCacheEntry {
-                                            func: RhaiFunc::Method {
-                                                func: Shared::new(f),
-                                                has_context,
-                                                is_pure: false,
-                                                is_volatile: false,
-                                            },
-                                            source: None,
-                                        })
-                                }
-                                Some(token) => get_builtin_binary_op_fn(token, args[0], args[1])
+                                        get_builtin_op_assignment_fn(token, first_arg, rest_args[0])
+                                            .map(|(f, has_context)| FnResolutionCacheEntry {
+                                                func: RhaiFunc::Method {
+                                                    func: Shared::new(f),
+                                                    has_context,
+                                                    is_pure: false,
+                                                    is_volatile: false,
+                                                },
+                                                source: None,
+                                            })
+                                    }
+                                    Some(token) => get_builtin_binary_op_fn(
+                                        token, args[0], args[1],
+                                    )
                                     .map(|(f, has_context)| FnResolutionCacheEntry {
                                         func: RhaiFunc::Method {
                                             func: Shared::new(f),
@@ -487,7 +486,7 @@ impl Engine {
                                         },
                                         source: None,
                                     }),
-                            });
+                                });
 
                         return if cache.bloom_filter.is_absent_and_set(hash) {
                             // Do not cache "one-hit wonders"

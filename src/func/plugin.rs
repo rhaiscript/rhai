@@ -127,6 +127,22 @@ impl ModuleManifest {
             }
         }
     }
+    /// Find the exported function with the highest precedence that matches a predicate,
+    /// optionally including those in sub-modules (flattened, taking precedence).
+    pub(crate) fn find_fn(
+        &'static self,
+        flatten: bool,
+        f: &mut dyn FnMut(&FnManifestEntry) -> bool,
+    ) -> Option<&'static FnManifestEntry> {
+        let found = flatten
+            .then(|| {
+                let mut sub_modules = self.sub_modules.iter().rev();
+                sub_modules.find_map(|(.., m)| m.find_fn(flatten, f))
+            })
+            .flatten();
+
+        found.or_else(|| self.functions.iter().rev().find(|&e| f(e)))
+    }
 }
 
 impl FnManifestEntry {
@@ -139,28 +155,34 @@ impl FnManifestEntry {
     }
     /// Calculate the hash of this function under a namespace path, the same as when it is
     /// registered into (or indexed by) a [`Module`].
-    ///
-    /// If the function has any [`Dynamic`] parameter, its hash in scripted format (i.e. without
-    /// parameter types) is also returned.
     #[must_use]
-    pub(crate) fn calc_hash(&self, path: &[&str]) -> (u64, Option<u64>) {
+    pub(crate) fn calc_hash(&self, path: &[&str]) -> u64 {
         let is_method = self.func.is_method_call();
-        let mut hashes = (0, None);
+        let mut hash = 0;
 
         (self.param_types)(&mut |types| {
             let hash_script = crate::calc_fn_hash(path.iter().copied(), self.name, types.len());
-            let types = types
-                .iter()
-                .enumerate()
-                .map(|(i, &t)| Module::map_type(!is_method || i > 0, t));
-            let mut is_dynamic = false;
-            let hash = crate::calc_fn_hash_full(
+            let types = types.iter().enumerate();
+            hash = crate::calc_fn_hash_full(
                 hash_script,
-                types.inspect(|&t| is_dynamic |= t == TypeId::of::<Dynamic>()),
+                types.map(|(i, &t)| Module::map_type(!is_method || i > 0, t)),
             );
-            hashes = (hash, is_dynamic.then_some(hash_script));
         });
 
-        hashes
+        hash
+    }
+    /// If this function has any [`Dynamic`] parameter, get its hash in scripted format (i.e.
+    /// without parameter types).
+    #[must_use]
+    pub(crate) fn calc_dynamic_hash(&self) -> Option<u64> {
+        let mut hash = None;
+
+        (self.param_types)(&mut |types| {
+            if types.contains(&TypeId::of::<Dynamic>()) {
+                hash = Some(crate::calc_fn_hash(None, self.name, types.len()));
+            }
+        });
+
+        hash
     }
 }

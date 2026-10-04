@@ -30,6 +30,7 @@ use std::collections::hash_map::Entry;
 use std::prelude::v1::*;
 use std::{
     any::{type_name, TypeId},
+    borrow::Cow,
     collections::BTreeMap,
     fmt,
     ops::{Add, AddAssign},
@@ -626,43 +627,8 @@ bitflags! {
         const INDEXED = 0b0000_0100;
         /// Does the [`Module`] contain indexed functions that have been exposed to the global namespace?
         const INDEXED_GLOBAL_FUNCTIONS = 0b0000_1000;
-    }
-}
-
-/// Index of functions in plugin module manifests.
-#[derive(Default)]
-struct LazyIndex {
-    /// Functions, keyed by hash.
-    functions: StraightHashMap<RhaiFunc>,
-    /// Bloom filter on functions (in scripted hash format) that contain [`Dynamic`] parameters.
-    dynamic_functions_filter: BloomFilterU64<8>,
-}
-
-/// [`LazyIndex`] calculated on first use.
-#[derive(Default)]
-struct LazyIndexCell(crate::OnceCell<LazyIndex>);
-
-impl Clone for LazyIndexCell {
-    /// The clone is calculated again on first use.
-    #[inline(always)]
-    fn clone(&self) -> Self {
-        Self::default()
-    }
-}
-
-impl fmt::Debug for LazyIndexCell {
-    #[cold]
-    #[inline(never)]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("LazyIndexCell")
-    }
-}
-
-impl LazyIndexCell {
-    /// Get the index, calculating it first if necessary.
-    #[inline]
-    fn get(&self, calc: impl FnOnce() -> LazyIndex) -> &LazyIndex {
-        self.0.get_or_init(|| calc().into())
+        /// Does the [`Module`] (including sub-modules) contain functions in plugin module manifests?
+        const INDEXED_LAZY_FUNCTIONS = 0b0001_0000;
     }
 }
 
@@ -671,11 +637,6 @@ impl LazyIndexCell {
 struct LazyFunctions {
     /// Manifests, and whether their sub-modules are flattened. Later manifests take precedence.
     manifests: Vec<(&'static crate::plugin::ModuleManifest, bool)>,
-    /// Functions in the manifests.
-    index: LazyIndexCell,
-    /// Functions in the manifests of this [`Module`] and all sub-modules, with
-    /// namespace-qualified hashes the same as [`build_index`][Module::build_index].
-    qualified_index: LazyIndexCell,
 }
 
 impl LazyFunctions {
@@ -685,26 +646,15 @@ impl LazyFunctions {
             manifest.for_each_fn(flatten, f);
         }
     }
-    /// Get the index of functions in the manifests.
-    fn index(&self) -> &LazyIndex {
-        self.index.get(|| {
-            let mut len = 0;
-            self.for_each_fn(&mut |_| len += 1);
-
-            let mut index = LazyIndex {
-                functions: new_hash_map(len),
-                dynamic_functions_filter: BloomFilterU64::new(),
-            };
-            self.for_each_fn(&mut |f| {
-                let (hash, hash_dynamic) = f.calc_hash(&[]);
-                let func = RhaiFunc::StaticPlugin { func: f.func };
-                index.functions.insert(hash, func);
-                if let Some(hash_script) = hash_dynamic {
-                    index.dynamic_functions_filter.mark(hash_script);
-                }
-            });
-            index
-        })
+    /// Find the function in the manifests with the highest precedence that matches a predicate.
+    fn find_fn(
+        &self,
+        f: &mut dyn FnMut(&crate::plugin::FnManifestEntry) -> bool,
+    ) -> Option<&'static crate::plugin::FnManifestEntry> {
+        self.manifests
+            .iter()
+            .rev()
+            .find_map(|&(manifest, flatten)| manifest.find_fn(flatten, f))
     }
 }
 
@@ -1195,10 +1145,7 @@ impl Module {
                 .as_ref()
                 .map_or(true, StraightHashMap::is_empty)
             && self.all_type_iterators.is_empty()
-            && self
-                .lazy_functions
-                .as_ref()
-                .map_or(true, |f| f.manifests.is_empty())
+            && self.lazy_functions.is_none()
     }
 
     /// Is the [`Module`] indexed?
@@ -1412,7 +1359,7 @@ impl Module {
             #[cfg(feature = "metadata")]
             return_type: <_>::default(),
             #[cfg(feature = "metadata")]
-            comments: crate::StaticVec::new_const(),
+            comments: crate::StaticVec::new(),
         };
 
         self.functions
@@ -1570,10 +1517,7 @@ impl Module {
         self.functions
             .as_ref()
             .map_or(false, |m| m.contains_key(&hash_fn))
-            || self
-                .lazy_functions
-                .as_ref()
-                .map_or(false, |f| f.index().functions.contains_key(&hash_fn))
+            || self.get_lazy_fn(hash_fn).is_some()
     }
 
     /// _(metadata)_ Update the metadata (parameter names/types, return type and doc-comments) of a registered function.
@@ -2039,15 +1983,22 @@ impl Module {
     /// Look up a native Rust function by hash.
     #[inline]
     #[must_use]
-    pub(crate) fn get_fn(&self, hash_native: u64) -> Option<&RhaiFunc> {
+    pub(crate) fn get_fn(&self, hash_native: u64) -> Option<Cow<'_, RhaiFunc>> {
         self.functions
             .as_ref()
             .and_then(|m| m.get(&hash_native))
-            .map(|(f, _)| f)
-            .or_else(|| {
-                let lazy_functions = self.lazy_functions.as_ref()?;
-                lazy_functions.index().functions.get(&hash_native)
-            })
+            .map(|(f, _)| Cow::Borrowed(f))
+            .or_else(|| self.get_lazy_fn(hash_native).map(Cow::Owned))
+    }
+
+    /// Look up a function in plugin module manifests by hash, calculating the hash of each
+    /// function in turn.
+    #[must_use]
+    fn get_lazy_fn(&self, hash_native: u64) -> Option<RhaiFunc> {
+        self.lazy_functions
+            .as_ref()?
+            .find_fn(&mut |f| f.calc_hash(&[]) == hash_native)
+            .map(|f| RhaiFunc::StaticPlugin { func: f.func })
     }
 
     /// Create a new [`Module`] from a plugin module's [manifest][crate::plugin::ModuleManifest].
@@ -2059,7 +2010,7 @@ impl Module {
     #[must_use]
     pub fn from_manifest(manifest: &'static crate::plugin::ModuleManifest) -> Self {
         let mut module = Self::new();
-        module.push_manifests([(manifest, false)]);
+        module.add_manifest(manifest, false);
         (manifest.init_eager)(&mut module);
 
         for &(name, sub_module) in manifest.sub_modules {
@@ -2091,19 +2042,28 @@ impl Module {
             }
         }
 
-        self.push_manifests([(manifest, true)]);
+        self.add_manifest(manifest, true);
         init_eager(self, manifest);
         self
     }
-    /// Add manifests whose functions are looked up only when called, taking precedence over
+    /// Add a manifest whose functions are looked up only when called, taking precedence over
     /// existing ones.
+    fn add_manifest(&mut self, manifest: &'static crate::plugin::ModuleManifest, flatten: bool) {
+        manifest.for_each_fn(flatten, &mut |f| {
+            if let Some(hash_script) = f.calc_dynamic_hash() {
+                self.dynamic_functions_filter.mark(hash_script);
+            }
+        });
+        self.push_manifests([(manifest, flatten)]);
+    }
+    /// Add manifests whose functions are looked up only when called, taking precedence over
+    /// existing ones, without updating the filter on functions with [`Dynamic`] parameters.
     fn push_manifests(
         &mut self,
         manifests: impl IntoIterator<Item = (&'static crate::plugin::ModuleManifest, bool)>,
     ) {
         let lazy_functions = self.lazy_functions.get_or_insert_with(Default::default);
         lazy_functions.manifests.extend(manifests);
-        lazy_functions.index = LazyIndexCell::default();
 
         self.flags
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
@@ -2137,10 +2097,7 @@ impl Module {
     #[inline]
     #[must_use]
     pub fn has_lazy_functions(&self) -> bool {
-        self.lazy_functions
-            .as_ref()
-            .map_or(false, |f| !f.manifests.is_empty())
-            || self.modules.values().any(|m| m.has_lazy_functions())
+        self.lazy_functions.is_some() || self.modules.values().any(|m| m.has_lazy_functions())
     }
     /// Get this [`Module`] with all functions in plugin module manifests registered, cloning it
     /// if necessary.
@@ -2148,14 +2105,14 @@ impl Module {
     /// Used for enumerating functions (e.g. for metadata), which is not a hot path.
     #[inline]
     #[must_use]
-    pub(crate) fn materialized(&self) -> std::borrow::Cow<'_, Self> {
+    pub(crate) fn materialized(&self) -> Cow<'_, Self> {
         if self.has_lazy_functions() {
             let mut module = self.clone();
             module.register_lazy_functions();
             module.build_index();
-            std::borrow::Cow::Owned(module)
+            Cow::Owned(module)
         } else {
-            std::borrow::Cow::Borrowed(self)
+            Cow::Borrowed(self)
         }
     }
     /// Can the particular function with [`Dynamic`] parameter(s) exist in the [`Module`]?
@@ -2163,11 +2120,8 @@ impl Module {
     /// A `true` return value does not automatically imply that the function _must_ exist.
     #[inline(always)]
     #[must_use]
-    pub(crate) fn may_contain_dynamic_fn(&self, hash_script: u64) -> bool {
+    pub(crate) const fn may_contain_dynamic_fn(&self, hash_script: u64) -> bool {
         !self.dynamic_functions_filter.is_absent(hash_script)
-            || self.lazy_functions.as_ref().map_or(false, |f| {
-                !f.index().dynamic_functions_filter.is_absent(hash_script)
-            })
     }
 
     /// Does the particular namespace-qualified function exist in the [`Module`]?
@@ -2188,47 +2142,53 @@ impl Module {
     #[cfg(not(feature = "no_module"))]
     #[inline]
     #[must_use]
-    pub(crate) fn get_qualified_fn(&self, hash_qualified_fn: u64) -> Option<&RhaiFunc> {
+    pub(crate) fn get_qualified_fn(&self, hash_qualified_fn: u64) -> Option<Cow<'_, RhaiFunc>> {
         self.all_functions
             .as_ref()
             .and_then(|m| m.get(&hash_qualified_fn))
-            .or_else(|| self.get_lazy_qualified_fn(hash_qualified_fn))
+            .map(Cow::Borrowed)
+            .or_else(|| {
+                self.get_lazy_qualified_fn(hash_qualified_fn)
+                    .map(Cow::Owned)
+            })
     }
 
     /// Get a namespace-qualified function in plugin module manifests, in this [`Module`] or any
-    /// sub-module.
+    /// sub-module, calculating the hash of each function in turn.
     ///
     /// The [`u64`] hash is calculated the same as [`build_index`][Module::build_index].
     #[must_use]
-    fn get_lazy_qualified_fn(&self, hash_qualified_fn: u64) -> Option<&RhaiFunc> {
-        fn index_module<'a>(module: &'a Module, path: &mut Vec<&'a str>, index: &mut LazyIndex) {
-            for (name, m) in &module.modules {
-                path.push(name);
-                index_module(m, path, index);
-                path.pop();
-            }
+    fn get_lazy_qualified_fn(&self, hash_qualified_fn: u64) -> Option<RhaiFunc> {
+        fn find_fn<'a>(
+            module: &'a Module,
+            path: &mut crate::StaticVec<&'a str>,
+            hash: u64,
+        ) -> Option<&'static crate::plugin::FnManifestEntry> {
+            // Functions in the module take precedence over those in sub-modules
+            let found = module.lazy_functions.as_ref().and_then(|f| {
+                f.find_fn(&mut |f| {
+                    f.calc_hash(path) == hash
+                        || (f.namespace == FnNamespace::Global && f.calc_hash(&[]) == hash)
+                })
+            });
 
-            if let Some(ref lazy_functions) = module.lazy_functions {
-                lazy_functions.for_each_fn(&mut |f| {
-                    let func = RhaiFunc::StaticPlugin { func: f.func };
-                    if f.namespace == FnNamespace::Global {
-                        index.functions.insert(f.calc_hash(&[]).0, func.clone());
-                    }
-                    index.functions.insert(f.calc_hash(path).0, func);
-                });
-            }
+            found.or_else(|| {
+                module.modules.iter().rev().find_map(|(name, m)| {
+                    path.push(name);
+                    let found = find_fn(m, path, hash);
+                    path.pop();
+                    found
+                })
+            })
         }
 
-        self.lazy_functions
-            .as_ref()?
-            .qualified_index
-            .get(|| {
-                let mut index = LazyIndex::default();
-                index_module(self, &mut vec![""], &mut index);
-                index
-            })
-            .functions
-            .get(&hash_qualified_fn)
+        if !self.flags.contains(ModuleFlags::INDEXED_LAZY_FUNCTIONS) {
+            return None;
+        }
+
+        let path = &mut crate::StaticVec::new();
+        path.push("");
+        find_fn(self, path, hash_qualified_fn).map(|f| RhaiFunc::StaticPlugin { func: f.func })
     }
 
     /// Combine another [`Module`] into this [`Module`].
@@ -2894,10 +2854,10 @@ impl Module {
             self.all_functions = (!functions.is_empty()).then_some(functions);
             self.all_type_iterators = type_iterators;
 
-            if self.has_lazy_functions() {
-                let lazy_functions = self.lazy_functions.get_or_insert_with(Default::default);
-                lazy_functions.qualified_index = LazyIndexCell::default();
-            }
+            self.flags.set(
+                ModuleFlags::INDEXED_LAZY_FUNCTIONS,
+                self.has_lazy_functions(),
+            );
 
             self.flags |= ModuleFlags::INDEXED;
         }

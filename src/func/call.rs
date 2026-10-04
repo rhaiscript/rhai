@@ -897,7 +897,7 @@ impl Engine {
         }
 
         // Clone first argument if the function is not a method after-all
-        if !func.map_or(true, RhaiFunc::is_method) {
+        if !func.as_deref().map_or(true, RhaiFunc::is_method) {
             if let Some(first) = first_arg_value {
                 *first = args[0].clone();
                 args[0] = first;
@@ -906,7 +906,7 @@ impl Engine {
 
         defer! { let orig_level = global.level; global.level += 1 }
 
-        match func {
+        match func.as_deref() {
             #[cfg(not(feature = "no_function"))]
             Some(RhaiFunc::Script { fn_def, env }) => {
                 let env = env.as_deref();
