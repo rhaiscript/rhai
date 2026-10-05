@@ -3,7 +3,7 @@
 
 #![no_main]
 #![no_std]
-#![feature(alloc_error_handler, core_intrinsics, link_cfg)]
+#![feature(alloc_error_handler, abort_immediate)]
 
 extern crate alloc;
 extern crate wee_alloc;
@@ -31,12 +31,12 @@ pub extern "C" fn main(_argc: isize, _argv: *const *const u8) -> isize {
 
 #[alloc_error_handler]
 fn foo(_: core::alloc::Layout) -> ! {
-    core::intrinsics::abort();
+    core::process::abort_immediate()
 }
 
 #[panic_handler]
 fn rust_begin_panic(_: &core::panic::PanicInfo) -> ! {
-    core::intrinsics::abort();
+    core::process::abort_immediate()
 }
 
 #[no_mangle]

@@ -6,6 +6,11 @@ use std::prelude::v1::*;
 
 bitflags! {
     /// Capability flags.
+    ///
+    /// Each flag represents a capability that a script requires to run.
+    ///
+    /// It also represents a capability that the host [`Engine`][crate::Engine]
+    /// supports (or does not support when missing).
     //
     // Order is the wire order and must never change; append only.
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

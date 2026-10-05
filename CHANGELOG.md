@@ -30,7 +30,7 @@ Enhancements
 ------------
 
 * Added `AGENTS.md` files.
-* The standard library is now resolved lazily by default: all built-in packages use `Module::combine_manifest`, so `Engine::new()` registers only the few functions that are not in plugin modules (about 16x less heap and 8x faster to build the standard library). Resolving a function for the first time in an evaluation is slower; call `Module::register_lazy_functions` on the standard library to trade the heap back for speed. Metadata APIs (e.g. `Engine::gen_fn_signatures`) still list all functions.
+* Every package defined via `def_package!` now has a `new_lazy` constructor that keeps the functions of plugin modules in their manifests, looking them up only when called. For example, `Engine::new_raw()` with `StandardPackage::new_lazy()` uses about 16x less heap than `Engine::new()`, and builds the standard library about 8x faster, at the cost of slower function resolution the first time a function is called in each evaluation. `new` is unchanged and registers every function up-front.
 * Failed function resolutions are cached again for calls with other than two arguments (a regression from version 1.10), so e.g. checking for a script-defined function before calling a native one in a loop no longer searches all modules on every iteration.
 * A function resolution cache is now kept for the rest of an evaluation when the first one is created inside a block. Previously, a loop body evaluated with no cache yet would resolve every function call again on each iteration.
 * String interpolation now resolves `to_string` with the evaluation's function resolution caches, instead of creating a new `NativeCallContext` (which cloned the global runtime state) for each interpolated value.

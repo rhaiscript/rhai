@@ -822,3 +822,19 @@ fn on_missing_function_isolates_nested_cache_frame() {
 
     assert_eq!(call_idx.load(Ordering::SeqCst), 3, "on_missing_function must fire exactly three times");
 }
+
+#[test]
+fn test_functions_resolution_in_loop() {
+    let mut engine = Engine::new();
+    engine.register_fn("calc", |x: INT| x + 1);
+
+    // Script function with the same name but a different arity, so the native call misses it
+    #[cfg(not(feature = "no_function"))]
+    assert_eq!(engine.eval::<INT>("fn calc(x, y) { x * y } let t = 0; for i in 0..10 { t += calc(i) + calc(i, 2); } t").unwrap(), 145);
+
+    // Script function with the same arity takes precedence
+    #[cfg(not(feature = "no_function"))]
+    assert_eq!(engine.eval::<INT>("fn calc(x) { x * 10 } let t = 0; for i in 0..10 { t += calc(i); } t").unwrap(), 450);
+
+    assert_eq!(engine.eval::<INT>("let t = 0; for i in 0..10 { t += calc(i); } t").unwrap(), 55);
+}

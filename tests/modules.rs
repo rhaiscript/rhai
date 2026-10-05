@@ -590,3 +590,21 @@ fn test_module_dynamic() {
 
     assert_eq!(engine.eval::<INT>(r#"import "test" as test; test::test("test", 38);"#).unwrap(), 42);
 }
+
+#[test]
+fn test_module_import_in_block_resolution() {
+    let mut module = Module::new();
+    FuncRegistration::new("calc").with_namespace(rhai::FnNamespace::Global).set_into_module(&mut module, |x: INT| x * 10);
+
+    let mut resolver = StaticModuleResolver::new();
+    resolver.insert("m", module);
+
+    let mut engine = Engine::new();
+    engine.set_module_resolver(resolver);
+
+    assert_eq!(engine.eval::<INT>(r#"let t = 0; for i in 0..3 { import "m" as m; t += calc(i); } t"#).unwrap(), 30);
+
+    // Global functions imported in a block are no longer visible after it
+    assert!(matches!(*engine.run(r#"{ import "m" as m; calc(1); } calc(1);"#).unwrap_err(), EvalAltResult::ErrorFunctionNotFound(..)));
+    assert!(matches!(*engine.run(r#"for i in 0..3 { import "m" as m; calc(i); } calc(1);"#).unwrap_err(), EvalAltResult::ErrorFunctionNotFound(..)));
+}

@@ -257,6 +257,10 @@ fn test_string_format() {
     assert_eq!(engine.eval::<String>(r#"let x = new_ts(); x + "foo""#).unwrap(), "TS=42foo");
     #[cfg(not(feature = "no_index"))]
     assert_eq!(engine.eval::<String>(r#"let x = [new_ts()]; "foo" + x"#).unwrap(), "foo[!!!TS=42!!!]");
+    assert_eq!(engine.eval::<String>(r#"let x = new_ts(); `foo${x}`"#).unwrap(), "fooTS=42");
+    assert_eq!(engine.eval::<String>(r#"let s = ""; for i in 0..3 { s += `${new_ts()},`; } s"#).unwrap(), "TS=42,TS=42,TS=42,");
+    #[cfg(not(feature = "no_function"))]
+    assert_eq!(engine.eval::<String>(r#"fn f() { `<${new_ts()}>` } f() + f()"#).unwrap(), "<TS=42><TS=42>");
 }
 
 #[test]

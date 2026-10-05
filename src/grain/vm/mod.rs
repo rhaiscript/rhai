@@ -305,11 +305,20 @@ pub struct Fault {
     pub slot: Option<u32>,
 }
 
-/// Executes a [`Program`] against an `Engine`.
+/// A virtual machine for Rhai Grain. Executes a [`Program`] containing
+/// bytecodes through an [`Engine`].
+///
+/// A properly-configured [`Engine`] is still required for function
+/// registrations and dispatch, performing user callbacks, enforcing limits
+/// and other runtime responsibilities.
 pub struct Vm<'e> {
+    /// [`Engine`] instance.
     engine: &'e Engine,
+    /// Global runtime state.
     global: GlobalRuntimeState,
+    /// Functions resolution cache.
     caches: Caches,
+    /// Main operating stack.
     stack: Vec<Dynamic>,
     /// One entry per `for` loop currently running.
     ///
@@ -463,28 +472,20 @@ impl<'e> Vm<'e> {
     ///
     /// ### Global runtime state
     ///
-    /// The caller's runtime state is *cloned* rather than shared, and the
-    /// resolution cache starts empty.
-    ///
-    /// The clone is what carries the imported modules, the source name and —
-    /// the part that matters here — the function library holding the
-    /// wrappers, so a closure reached from a native can hand out a pointer of
-    /// its own.
+    /// [`GlobalRuntimeState`] is what carries the imported modules, source name
+    /// and — the part that matters here — the functions library holding the
+    /// callback wrappers, so a closure reached from a native can hand out a
+    /// function pointer of its own.
     ///
     /// ### Functions resolution cache
     ///
-    /// The empty `Caches` is the cost, and it is the one thing a `Vm` normally
-    /// exists to avoid. It cannot be helped: the outer `Vm` is borrowed by the
-    /// frame still running beneath this one. Rhai pays the same on its own
-    /// callbacks — but, similar to `Vm`, it also skips resolution entirely
-    /// for a pointer that is known to be a scripted function and carries its
-    /// own hash.
+    /// The empty [`Caches`] is the cost, and it is the one thing a [VM][`Vm`]
+    /// normally exists to avoid. It cannot be helped: the outer [`Vm`] is
+    /// borrowed by the frame still running beneath this one.
     ///
-    /// ### Operation counting
-    ///
-    /// Operation counting has the same shape and the same reason: increments
-    /// inside the callback land on the clone and are lost when it drops, as
-    /// they are for any re-entrant call Rhai makes.
+    /// Rhai pays the same on its own callbacks — but, similar to [`Vm`], it
+    /// also skips resolution entirely for a function pointer that is known to
+    /// be from a scripted function.
     #[must_use]
     pub fn with_global_state(engine: &'e Engine, global: GlobalRuntimeState) -> Self {
         Self {

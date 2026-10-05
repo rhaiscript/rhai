@@ -58,22 +58,28 @@ impl Function {
 /// A shared [`Program`].
 pub type SharedProgram = Shared<Program<'static>>;
 
-/// A script [`AST`] compiled into bytecodes, ready to run against an [`Engine`].
+/// A script [`AST`] compiled into bytecodes, ready to run against a [`Vm`]
+/// through an [`Engine`].
 ///
 /// Owns everything execution needs that is not the [`Engine`] itself, so the
-/// original [`AST`] can be dropped after compiling. On a small target that is the
-/// whole point: the [`AST`] is the part whose cost scales with the script's size.
+/// original [`AST`] can be dropped after compiling. On a resource-constrained
+/// embedded target, that is the whole point: the [`AST`] is the part whose cost
+/// scales with the script's size.
 ///
 /// # Residual Fragments
 ///
 /// _Residuals_ is the exception, and the reason a [`Program`] is not always
-/// serializable: fragments Rhai's [`AST`] interpreter still has to evaluate
-/// are held as real [`AST`] nodes, which is precisely what Rhai Grain is trying
-/// to remove. The artifact format refuses to write out a [`Program`] that has any,
+/// serializable.
+///
+/// Fragments that Rhai's [`AST`] interpreter still has to evaluate are held as
+/// [`AST`] nodes, which is precisely what Rhai Grain is here to remove.
+///
+/// The bytecodes format refuses to write out a [`Program`] that has any,
 /// so nothing reaching a device can depend on them.
 ///
 /// [`AST`]: crate::AST
 /// [`Engine`]: crate::Engine
+/// [`Vm`]: crate::grain::Vm
 pub struct Program<'a> {
     /// The capabilities required by this program's instructions.
     caps: Caps,

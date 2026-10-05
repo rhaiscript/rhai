@@ -11,10 +11,12 @@
 //! Rhai evaluates a script by walking its [`AST`], which the parser allocates
 //! a node at a time — so holding a script costs in proportion to how much program
 //! there is, and the parser's peak is higher again than what it settles at.
-//! That is what caps script size on a small target long before anything else does.
 //!
-//! Rhai Grain transpiles the tree to a flat instruction stream that can be produced
-//! elsewhere and loaded without a parser or even the [`AST`] interpreter.
+//! That is usually what caps script size on a resource-constrained embedded target
+//! long before anything else does.
+//!
+//! Rhai Grain transpiles the [`AST`] to a flat instruction stream that can be
+//! produced elsewhere and loaded without a parser or even the [`AST`] interpreter.
 //!
 //! ### Note
 //!
@@ -27,23 +29,9 @@
 //!
 //! # Reading and Writing Rhai Grain Programs
 //!
-//! A program that has been lowered all the way through can be written out with
+//! An [`AST`] that has been lowered all the way through can be written out with
 //! [`Program::write`] and read back with [`Program::read`]. That is the artifact
-//! the device loads, and the reason the tree never has to exist there.
-//!
-//! Coverage is total from the start, by construction rather than by effort.
-//! Anything the transpiler cannot yet lower is kept as an _AST fragment_ and
-//! handed back to Rhai's interpreter through
-//! [`Op::EvalAst`][crate::grain::bytecode::Op::EvalAst], so a [`Program`] always
-//! means the same thing as the [`AST`] it came from.
-//!
-//! # Residual Fragments
-//!
-//! [`Program::residual_count`] indicates how much of the [`AST`] is still residual.
-//!
-//! When it drops to zero, the [`AST`] has been fully lowered and the [`VM`] can execute
-//! it directly without any help from the [`AST`] interpreter, which can even be removed
-//! by enabling the `no_ast` feature.
+//! the device loads, and the reason the [`AST`] never has to exist there.
 //!
 //! # Transpiling and Executing Bytecodes
 //!
@@ -51,7 +39,7 @@
 //! the value type and every registered function is dispatched by the [`Engine`] itself.
 //!
 //! Only control flow, local variables access and operator fast paths are reimplemented
-//! by the vm.
+//! by the [`VM`].
 //!
 //! The [`Engine`] does the parsing to [`AST`] and, at runtime, all the functions
 //! dispatching. The [`VM`] essentially flattens and threads the [`AST`] into a linear
@@ -75,6 +63,21 @@
 //! assert_eq!(value.as_int().unwrap(), 45);
 //! # Ok::<_, Box<rhai::EvalAltResult>>(())
 //! ```
+//!
+//! # Residual Fragments
+//!
+//! Coverage is total from the start, by construction rather than by effort.
+//!
+//! Anything the transpiler cannot yet lower is kept as an _AST fragment_ and
+//! handed back to Rhai's interpreter through
+//! [`Op::EvalAst`][crate::grain::bytecode::Op::EvalAst], so a [`Program`] always
+//! means the same thing as the [`AST`] it came from.
+//!
+//! [`Program::residual_count`] indicates how much of the [`AST`] is still residual.
+//!
+//! When it drops to zero, the [`AST`] has been fully lowered and the [`VM`] can execute
+//! it directly without any help from the [`AST`] interpreter, which can even be removed
+//! by enabling the `no_ast` feature.
 //!
 //! # Shipping Bytecodes
 //!
@@ -155,11 +158,13 @@ assert_eq!(sites[1].unwrap().line, 2); // the call to it
 ```
 "##
 )]
-//! # Debugging
+//! # Debugging - Differences With the [`AST`] Interpreter
 //!
 //! A `debugging` build marks every statement, and the [`VM`] stops at the markers:
 //! back-trace, stepping, break-points by position as well as function-exit events
 //! all work.
+//!
+//! ### Statement-Level Debugging Only
 //!
 //! However, a _statement_ is as fine as Rhai Grain gets.
 //!
