@@ -201,14 +201,19 @@ fn test_lazy_imported_module() -> Result<(), Box<EvalAltResult>> {
 }
 
 #[test]
-fn test_lazy_standard_library_is_default() {
-    let std = StandardPackage::new().as_shared_module();
-    assert!(std.has_lazy_functions());
-
-    let mut eager = (*std).clone();
-    eager.register_lazy_functions();
+fn test_lazy_standard_library_is_opt_in() -> Result<(), Box<EvalAltResult>> {
+    let eager = StandardPackage::new().as_shared_module();
     assert!(!eager.has_lazy_functions());
-    assert!(eager.count().1 > std.count().1);
+
+    let lazy = StandardPackage::new_lazy().as_shared_module();
+    assert!(lazy.has_lazy_functions());
+    assert!(eager.count().1 > lazy.count().1);
+
+    let mut engine = Engine::new_raw();
+    StandardPackage::new_lazy().register_into_engine(&mut engine);
+    assert_eq!(engine.eval::<INT>(r#"len("hello") + abs(-4)"#)?, 9);
+
+    Ok(())
 }
 
 #[test]

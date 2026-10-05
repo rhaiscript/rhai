@@ -1,5 +1,6 @@
 //! Module defining external-loaded modules for Rhai.
 
+mod lazy;
 mod namespace;
 /// Module containing all built-in [module resolvers][ModuleResolver].
 pub mod resolvers;
@@ -632,32 +633,6 @@ bitflags! {
     }
 }
 
-/// Plugin module manifests whose functions are looked up only when called.
-#[derive(Debug, Clone, Default)]
-struct LazyFunctions {
-    /// Manifests, and whether their sub-modules are flattened. Later manifests take precedence.
-    manifests: Vec<(&'static crate::plugin::ModuleManifest, bool)>,
-}
-
-impl LazyFunctions {
-    /// Call a function on every function in the manifests, in order of precedence.
-    fn for_each_fn(&self, f: &mut dyn FnMut(&'static crate::plugin::FnManifestEntry)) {
-        for &(manifest, flatten) in &self.manifests {
-            manifest.for_each_fn(flatten, f);
-        }
-    }
-    /// Find the function in the manifests with the highest precedence that matches a predicate.
-    fn find_fn(
-        &self,
-        f: &mut dyn FnMut(&crate::plugin::FnManifestEntry) -> bool,
-    ) -> Option<&'static crate::plugin::FnManifestEntry> {
-        self.manifests
-            .iter()
-            .rev()
-            .find_map(|&(manifest, flatten)| manifest.find_fn(flatten, f))
-    }
-}
-
 /// A module which may contain variables, sub-modules, external Rust functions,
 /// and/or script-defined functions.
 #[derive(Clone)]
@@ -691,7 +666,7 @@ pub struct Module {
     /// Flags.
     flags: ModuleFlags,
     /// Functions in plugin module manifests, looked up only when called.
-    lazy_functions: Option<Box<LazyFunctions>>,
+    lazy_functions: Option<Box<lazy::LazyFunctions>>,
 }
 
 impl Default for Module {
@@ -1199,6 +1174,10 @@ impl Module {
 
     /// _(metadata)_ Generate signatures for all the non-private functions in the [`Module`].
     /// Exported under the `metadata` feature only.
+    ///
+    /// Functions in plugin module manifests (see [`Module::from_manifest`]) are not included until
+    /// they are registered via [`Module::register_lazy_functions`].
+    /// [`Engine::gen_fn_signatures`] includes them.
     #[cfg(feature = "metadata")]
     #[inline]
     pub fn gen_fn_signatures_with_mapper<'a>(
@@ -1359,7 +1338,7 @@ impl Module {
             #[cfg(feature = "metadata")]
             return_type: <_>::default(),
             #[cfg(feature = "metadata")]
-            comments: crate::StaticVec::new(),
+            comments: crate::StaticVec::new_const(),
         };
 
         self.functions
@@ -1991,130 +1970,6 @@ impl Module {
             .or_else(|| self.get_lazy_fn(hash_native).map(Cow::Owned))
     }
 
-    /// Look up a function in plugin module manifests by hash, calculating the hash of each
-    /// function in turn.
-    #[must_use]
-    fn get_lazy_fn(&self, hash_native: u64) -> Option<RhaiFunc> {
-        self.lazy_functions
-            .as_ref()?
-            .find_fn(&mut |f| f.calc_hash(&[]) == hash_native)
-            .map(|f| RhaiFunc::StaticPlugin { func: f.func })
-    }
-
-    /// Create a new [`Module`] from a plugin module's [manifest][crate::plugin::ModuleManifest].
-    ///
-    /// Functions are looked up in the manifest only when they are called. Constants, custom types
-    /// and sub-modules are registered immediately.
-    ///
-    /// This is the lazy equivalent of [`exported_module!`][crate::plugin::exported_module].
-    #[must_use]
-    pub fn from_manifest(manifest: &'static crate::plugin::ModuleManifest) -> Self {
-        let mut module = Self::new();
-        module.add_manifest(manifest, false);
-        (manifest.init_eager)(&mut module);
-
-        for &(name, sub_module) in manifest.sub_modules {
-            module.set_sub_module(name, Self::from_manifest(sub_module));
-        }
-
-        module.build_index();
-        module
-    }
-    /// Combine a plugin module's [manifest][crate::plugin::ModuleManifest] into this [`Module`],
-    /// flattening all sub-modules.
-    ///
-    /// Functions are looked up in the manifest only when they are called. Constants and custom
-    /// types are registered immediately.
-    ///
-    /// Functions registered normally into this [`Module`] take precedence over functions in
-    /// manifests.
-    ///
-    /// This is the lazy equivalent of
-    /// [`combine_with_exported_module!`][crate::plugin::combine_with_exported_module].
-    pub fn combine_manifest(
-        &mut self,
-        manifest: &'static crate::plugin::ModuleManifest,
-    ) -> &mut Self {
-        fn init_eager(module: &mut Module, manifest: &crate::plugin::ModuleManifest) {
-            (manifest.init_eager)(module);
-            for &(.., sub_module) in manifest.sub_modules {
-                init_eager(module, sub_module);
-            }
-        }
-
-        self.add_manifest(manifest, true);
-        init_eager(self, manifest);
-        self
-    }
-    /// Add a manifest whose functions are looked up only when called, taking precedence over
-    /// existing ones.
-    fn add_manifest(&mut self, manifest: &'static crate::plugin::ModuleManifest, flatten: bool) {
-        manifest.for_each_fn(flatten, &mut |f| {
-            if let Some(hash_script) = f.calc_dynamic_hash() {
-                self.dynamic_functions_filter.mark(hash_script);
-            }
-        });
-        self.push_manifests([(manifest, flatten)]);
-    }
-    /// Add manifests whose functions are looked up only when called, taking precedence over
-    /// existing ones, without updating the filter on functions with [`Dynamic`] parameters.
-    fn push_manifests(
-        &mut self,
-        manifests: impl IntoIterator<Item = (&'static crate::plugin::ModuleManifest, bool)>,
-    ) {
-        let lazy_functions = self.lazy_functions.get_or_insert_with(Default::default);
-        lazy_functions.manifests.extend(manifests);
-
-        self.flags
-            .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
-    }
-    /// Register all functions in plugin module manifests (including sub-modules), with full
-    /// metadata, so that they are no longer looked up only when called.
-    pub fn register_lazy_functions(&mut self) -> &mut Self {
-        if let Some(lazy_functions) = self.lazy_functions.take() {
-            // Functions registered normally take precedence over functions in manifests
-            let functions = self.functions.take();
-            lazy_functions.for_each_fn(&mut |f| (f.register)(self));
-            if let Some(functions) = functions {
-                self.functions
-                    .get_or_insert_with(|| new_hash_map(functions.len()))
-                    .extend(functions);
-            }
-        }
-        for m in self.modules.values_mut() {
-            if m.has_lazy_functions() {
-                let m = crate::func::shared_make_mut(m);
-                m.register_lazy_functions();
-                m.build_index();
-            }
-        }
-        self.flags
-            .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
-        self
-    }
-    /// Does this [`Module`] (or any sub-module) contain functions in plugin module manifests,
-    /// which are looked up only when called?
-    #[inline]
-    #[must_use]
-    pub fn has_lazy_functions(&self) -> bool {
-        self.lazy_functions.is_some() || self.modules.values().any(|m| m.has_lazy_functions())
-    }
-    /// Get this [`Module`] with all functions in plugin module manifests registered, cloning it
-    /// if necessary.
-    ///
-    /// Used for enumerating functions (e.g. for metadata), which is not a hot path.
-    #[inline]
-    #[must_use]
-    pub(crate) fn materialized(&self) -> Cow<'_, Self> {
-        if self.has_lazy_functions() {
-            let mut module = self.clone();
-            module.register_lazy_functions();
-            module.build_index();
-            Cow::Owned(module)
-        } else {
-            Cow::Borrowed(self)
-        }
-    }
     /// Can the particular function with [`Dynamic`] parameter(s) exist in the [`Module`]?
     ///
     /// A `true` return value does not automatically imply that the function _must_ exist.
@@ -2151,44 +2006,6 @@ impl Module {
                 self.get_lazy_qualified_fn(hash_qualified_fn)
                     .map(Cow::Owned)
             })
-    }
-
-    /// Get a namespace-qualified function in plugin module manifests, in this [`Module`] or any
-    /// sub-module, calculating the hash of each function in turn.
-    ///
-    /// The [`u64`] hash is calculated the same as [`build_index`][Module::build_index].
-    #[must_use]
-    fn get_lazy_qualified_fn(&self, hash_qualified_fn: u64) -> Option<RhaiFunc> {
-        fn find_fn<'a>(
-            module: &'a Module,
-            path: &mut crate::StaticVec<&'a str>,
-            hash: u64,
-        ) -> Option<&'static crate::plugin::FnManifestEntry> {
-            // Functions in the module take precedence over those in sub-modules
-            let found = module.lazy_functions.as_ref().and_then(|f| {
-                f.find_fn(&mut |f| {
-                    f.calc_hash(path) == hash
-                        || (f.namespace == FnNamespace::Global && f.calc_hash(&[]) == hash)
-                })
-            });
-
-            found.or_else(|| {
-                module.modules.iter().rev().find_map(|(name, m)| {
-                    path.push(name);
-                    let found = find_fn(m, path, hash);
-                    path.pop();
-                    found
-                })
-            })
-        }
-
-        if !self.flags.contains(ModuleFlags::INDEXED_LAZY_FUNCTIONS) {
-            return None;
-        }
-
-        let path = &mut crate::StaticVec::new();
-        path.push("");
-        find_fn(self, path, hash_qualified_fn).map(|f| RhaiFunc::StaticPlugin { func: f.func })
     }
 
     /// Combine another [`Module`] into this [`Module`].

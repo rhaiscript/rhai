@@ -1,7 +1,7 @@
 //! Lazy versus eager standard library: heap, construction time and script timings.
 //!
-//! The eager baseline is the standard library as it was before lazy resolution: the same package
-//! with every function in its manifests registered up-front via `Module::register_lazy_functions`.
+//! Eager is `StandardPackage::new()` (the default, every function registered up-front); lazy is
+//! `StandardPackage::new_lazy()` (functions in manifests looked up only when called).
 //!
 //! Indicative, not criterion: timings are the fastest of several runs. Run with `--release`
 //! (add `--features grain` to include the Grain VM).
@@ -86,13 +86,12 @@ fn fastest(mut f: impl FnMut()) -> Duration {
 }
 
 fn std_module(eager: bool) -> Module {
-    let mut module = Module::new();
-    <StandardPackage as Package>::init(&mut module);
-    if eager {
-        module.register_lazy_functions();
-    }
-    module.build_index();
-    module
+    let module = if eager {
+        StandardPackage::new().as_shared_module()
+    } else {
+        StandardPackage::new_lazy().as_shared_module()
+    };
+    rhai::Shared::try_unwrap(module).unwrap()
 }
 
 /// Standard library builds being compared.
