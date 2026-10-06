@@ -85,7 +85,6 @@ fn lazy_methods_getters_and_operators_resolve() {
 #[test]
 #[cfg(not(feature = "no_module"))]
 fn lazy_qualified_calls_resolve() {
-    // Qualified calls are left to the walker as fragments
-    assert_eq!(agree("kit::double(21)", false), "Ok(42)");
-    assert!(agree("kit::nope(21)", false).contains("ErrorFunctionNotFound"));
+    assert_eq!(agree("kit::double(21)", true), "Ok(42)");
+    assert!(agree("kit::nope(21)", true).contains("ErrorFunctionNotFound"));
 }

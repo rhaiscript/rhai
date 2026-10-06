@@ -35,8 +35,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dump(&program, code, "main", program.main());
 
     for f in program.functions() {
+        let access = match f.access {
+            rhai::FnAccess::Public => "",
+            rhai::FnAccess::Private => "private ",
+            _ => unreachable!(),
+        };
         let label = format!(
-            "fn {} : #{} ({} params)",
+            "{access}fn {} : #{} ({} params)",
             f.disassemble(&program),
             f.name,
             f.params.len(),

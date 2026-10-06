@@ -17,14 +17,14 @@ use crate::engine::{KEYWORD_FN_PTR_CALL, KEYWORD_FN_PTR_CURRY};
 #[cfg(not(feature = "no_function"))]
 use crate::func::{ScriptFuncDef, ScriptFuncPayload};
 use crate::types::{Span, Token};
-use crate::{Dynamic, ImmutableString, Position, AST};
+use crate::{Dynamic, FnAccess, ImmutableString, Position, AST};
 
 use crate::grain::bytecode::code::{assemble, resolve_switch_targets};
 #[cfg(not(feature = "no_custom_syntax"))]
 use crate::grain::bytecode::CustomSyntaxSite;
 use crate::grain::bytecode::{
-    AssignOp, Chain, Chunk, Op, Positions, Receiver, Root, Step, StepFlags, Switch, SwitchRange,
-    Tail,
+    constant_caps, AssignOp, Chain, Chunk, Op, Positions, Receiver, Root, Step, StepFlags, Switch,
+    SwitchRange, Tail,
 };
 use crate::grain::compile::poolable::is_poolable;
 use crate::grain::compile::slots::Slots;
@@ -51,22 +51,6 @@ macro_rules! has_namespace {
     }};
 }
 
-/// The same question for a call: is it `foo::bar()` rather than `bar()`.
-/// `FnCallExpr` carries no `namespace` field at all under `no_module`.
-#[cfg(not(feature = "no_module"))]
-macro_rules! call_has_namespace {
-    ($call:expr) => {
-        !$call.namespace.is_empty()
-    };
-}
-#[cfg(feature = "no_module")]
-macro_rules! call_has_namespace {
-    ($call:expr) => {{
-        let _ = $call;
-        false
-    }};
-}
-
 /// Lowers an [`AST`] into a [`Program`].
 ///
 /// Anything not yet lowered is kept as an [`AST`] fragment and handed back to
@@ -89,6 +73,7 @@ impl Compiler {
     pub fn compile(&self, ast: &AST) -> Program<'static> {
         let fresh = |caps| Lowering {
             caps,
+            level: 0,
             ..Lowering::default()
         };
 
@@ -150,6 +135,7 @@ impl Compiler {
                 name: f.name,
                 params: f.params,
                 this_type: f.this_type,
+                access: f.access,
                 chunk: Chunk::new(
                     offsets[f.first_op],
                     offsets[f.first_op + f.op_count],
@@ -304,6 +290,7 @@ enum Lowered {
 struct LoweredFn {
     name: u32,
     params: Vec<u32>,
+    access: FnAccess,
     /// The declared receiver type, as a name-pool index. See
     /// [`Function::this_type`](crate::grain::program::Function::this_type).
     this_type: Option<u32>,
@@ -331,6 +318,9 @@ struct Lowering {
     #[cfg(not(feature = "no_custom_syntax"))]
     custom_syntax: Vec<CustomSyntaxSite>,
     slots: Slots,
+    /// What level the statement currently being lowered belongs at:
+    /// the global level is level zero.
+    level: usize,
     max_stack: u16,
     loops: Vec<Loop>,
     /// How many iterators are live at this point in the lowering, so a jump
@@ -444,15 +434,12 @@ impl Lowering {
                     name: self.push_name(v.1.clone()),
                     pos: root.position(),
                 },
-                None => return false,
+                None => unreachable!("case above is always taken"),
             },
             Expr::ThisPtr(pos) => {
                 self.caps.insert(Caps::THIS);
                 Root::This { pos: *pos }
             }
-            // A qualified root resolves against imported modules, which need
-            // `import` — the escape hatch's job.
-            Expr::Variable(..) => return false,
             _ if matches!(tail, Tail::Read) => Root::Temporary,
             // Unreachable through the parser, which refuses `f().x = 1` outright.
             _ => return false,
@@ -901,6 +888,8 @@ impl Lowering {
         let first_residual = self.residuals.len();
         let saved_slots = std::mem::take(&mut self.slots);
         let saved_loops = std::mem::take(&mut self.loops);
+        let saved_level = self.level;
+        self.level += 1;
         // Per-function, like the slots: one body the model cannot handle must
         // not cost the rest of the program its lowering.
         let saved_defeated = std::mem::replace(&mut self.defeated, false);
@@ -940,6 +929,7 @@ impl Lowering {
 
         self.slots = saved_slots;
         self.loops = saved_loops;
+        self.level = saved_level;
         self.defeated = saved_defeated;
 
         if !lowered {
@@ -961,6 +951,7 @@ impl Lowering {
         Some(LoweredFn {
             name: self.push_name(def.name.clone()),
             params,
+            access: def.access,
             // A typed `this` is a method on a custom type, which is exactly
             // what `no_object` removes — Rhai drops the field with it.
             #[cfg(not(feature = "no_object"))]
@@ -1024,26 +1015,47 @@ impl Lowering {
             Stmt::Noop(..) => Lowered::Empty,
 
             Stmt::Var(payload, flags, ..) => {
-                // `export let x = ...` also binds a module alias, which the
-                // slot model does not represent.
-                if flags.contains(ASTFlags::EXPORTED) || self.slots.is_full() {
+                if self.slots.is_full() {
                     return Lowered::Defeated;
                 }
                 let is_const = flags.contains(ASTFlags::CONSTANT);
-
                 let (ident, init, index) = &**payload;
                 self.expression(init);
 
-                if let Some(index) = index {
+                let slot = if let Some(index) = index {
                     let slot = self.slots.depth() - index.get();
                     let slot =
                         u16::try_from(slot).expect("slot index is within the compiler's range");
                     self.emit(Op::StoreLocal { slot, is_const });
+                    slot
                 } else {
                     let name = self.push_name(ident.name.clone());
-                    self.slots.declare(ident.name.clone());
-                    self.emit(Op::DeclareLocal { name, is_const });
+                    let slot = self.slots.declare(ident.name.clone());
+                    if is_const && self.level == 0 {
+                        self.emit(Op::DeclareLocal {
+                            name,
+                            is_const,
+                            is_global: true,
+                        });
+                    } else {
+                        self.emit(Op::DeclareLocal {
+                            name,
+                            is_const,
+                            is_global: false,
+                        });
+                    }
+                    slot
+                };
+
+                // `export var`.
+                #[cfg(not(feature = "no_module"))]
+                if flags.contains(ASTFlags::EXPORTED) {
+                    self.caps.insert(Caps::EXPORT);
+                    let alias = self.push_name(ident.name.clone());
+                    self.emit(Op::ExportLocal { slot, alias });
                 }
+                #[cfg(feature = "no_module")]
+                let _ = slot;
 
                 // A declaration evaluates to unit.
                 Lowered::Empty
@@ -1146,12 +1158,6 @@ impl Lowering {
             Stmt::Assignment(payload)
                 if matches!(&payload.1.lhs, Expr::Dot(..) | Expr::Index(..)) =>
             {
-                if matches!(&payload.1.lhs, Expr::Dot(..)) {
-                    self.caps.insert(Caps::PROPERTY);
-                } else {
-                    self.caps.insert(Caps::INDEXING);
-                }
-
                 let (op_info, binary) = &**payload;
                 let op = self.op_assignment(op_info);
 
@@ -1285,6 +1291,7 @@ impl Lowering {
                     self.emit(Op::DeclareLocal {
                         name,
                         is_const: false,
+                        is_global: false,
                     });
                     self.slots.declare(ident.name.clone());
                     self.slots.depth() as u16 - 1
@@ -1294,6 +1301,7 @@ impl Lowering {
                 self.emit(Op::DeclareLocal {
                     name: var_name,
                     is_const: false,
+                    is_global: false,
                 });
                 self.slots.declare(var.name.clone());
                 let var_slot = self.slots.depth() as u16 - 1;
@@ -1555,19 +1563,37 @@ impl Lowering {
                 Lowered::Empty
             }
 
-            // The one statement the fragment fallback below cannot hold.
-            //
-            // `import` declares into the imports stack rather than the scope,
-            // and a fragment that rewinds truncates that stack on the way out
-            // — so the alias would be gone before the next statement could name
-            // it, and a qualified call is its own fragment.
-            //
-            // Refusing the lowering hands the body to the walker whole, which
-            // is where the alias lives long enough to be used.
             #[cfg(not(feature = "no_module"))]
-            Stmt::Import(..) => {
+            Stmt::Export(payload, ..) => {
+                self.caps.insert(Caps::EXPORT);
+
+                let (ident, alias) = &**payload;
+
+                let alias_name = if alias.name.is_empty() {
+                    ident.name.clone()
+                } else {
+                    alias.name.clone()
+                };
+                let alias = self.push_name(alias_name);
+
+                if let Some(slot) = self.slots.resolve(&ident.name) {
+                    self.emit(Op::ExportLocal { slot, alias });
+                } else {
+                    let name = self.push_name(ident.name.clone());
+                    self.emit_at(Op::ExportNamed { name, alias }, ident.pos);
+                }
+                Lowered::Empty
+            }
+
+            #[cfg(not(feature = "no_module"))]
+            Stmt::Import(payload, pos) => {
                 self.caps.insert(Caps::IMPORT);
-                Lowered::Defeated
+
+                let (expr, alias) = &**payload;
+                self.expression(expr);
+                let alias = self.push_name(alias.name.clone());
+                self.emit_at(Op::Import { alias }, *pos);
+                Lowered::Empty
             }
 
             // Not lowered yet, and listed rather than matched with `_` on
@@ -1589,17 +1615,6 @@ impl Lowering {
                 });
                 Lowered::Value
             }
-
-            #[cfg(not(feature = "no_module"))]
-            other @ Stmt::Export(..) => {
-                self.caps.insert(Caps::EXPORT);
-                let residual = self.push_residual(wrap_statements(vec![other.clone()]));
-                self.emit(Op::EvalAst {
-                    residual,
-                    rewind_scope: true,
-                });
-                Lowered::Value
-            }
         }
     }
 
@@ -1609,37 +1624,16 @@ impl Lowering {
             Expr::BoolConstant(value, ..) => self.emit(Op::Bool(*value)),
             Expr::Unit(..) => self.emit(Op::Unit),
 
-            Expr::IntegerConstant(value, ..) => self.constant(Dynamic::from(*value)),
-            Expr::CharConstant(value, ..) => self.constant(Dynamic::from(*value)),
+            Expr::IntegerConstant(value, ..) => self.constant(Dynamic::from_int(*value)),
+            Expr::CharConstant(value, ..) => self.constant(Dynamic::from_char(*value)),
             Expr::StringConstant(value, ..) => self.constant(Dynamic::from(value.clone())),
-            // Rhai has no float literal to parse under `no_float`, so there is
-            // no variant to match.
             #[cfg(not(feature = "no_float"))]
             Expr::FloatConstant(value, ..) => {
                 self.caps.insert(Caps::FLOAT);
-                self.constant(Dynamic::from(**value))
+                self.constant(Dynamic::from_float(**value))
             }
 
             Expr::DynamicConstant(value, ..) if is_poolable(value) => {
-                #[cfg(not(feature = "no_index"))]
-                if value.is_array() {
-                    self.caps.insert(Caps::ARRAY);
-                }
-                #[cfg(not(feature = "no_index"))]
-                if value.is_blob() {
-                    self.caps.insert(Caps::BLOB);
-                }
-                #[cfg(not(feature = "no_object"))]
-                if value.is_map() {
-                    self.caps.insert(Caps::MAP);
-                }
-                #[cfg(feature = "decimal")]
-                if value.is_decimal() {
-                    self.caps.insert(Caps::DECIMAL);
-                }
-                if value.is_fnptr() {
-                    self.caps.insert(Caps::FN_PTR);
-                }
                 self.constant((**value).clone());
             }
 
@@ -1653,13 +1647,20 @@ impl Lowering {
                     // Not a local this compiler declared, so no slot can name
                     // it: it is the caller's, a module's, or nothing. Looked
                     // up by name at run time, at the cost of a scope scan.
-                    _ if self.is_variable_name(is_qualified) => {
+                    _ if !is_qualified => {
                         let name = self.push_name(payload.1.clone());
                         self.emit_at(Op::LoadNamed(name), expr.position());
                     }
-                    // A qualified name resolves against imported modules, so it
-                    // stays Rhai's job.
-                    _ => self.residual_expr(expr),
+                    #[cfg(not(feature = "no_module"))]
+                    _ => {
+                        let name = self.push_name(
+                            crate::grain::bytecode::names::qualify(&payload.2, &payload.1).into(),
+                        );
+                        self.emit_at(Op::LoadNamed(name), payload.2.position());
+                        self.caps.insert(Caps::MODULE);
+                    }
+                    #[cfg(feature = "no_module")]
+                    _ => unreachable!("qualified variable access cannot exist under `no_module`"),
                 }
             }
 
@@ -1767,12 +1768,6 @@ impl Lowering {
             }
 
             Expr::Dot(..) | Expr::Index(..) => {
-                if matches!(expr, Expr::Dot(..)) {
-                    self.caps.insert(Caps::PROPERTY);
-                } else {
-                    self.caps.insert(Caps::INDEXING);
-                }
-
                 // A chain emits its own operands, so a failed attempt has to
                 // leave nothing behind.
                 let mark = self.mark();
@@ -1861,6 +1856,55 @@ impl Lowering {
         let capture_parent_scope = call.capture_parent_scope;
         let argc = u8::try_from(call.args.len()).expect("checked by is_lowerable_call");
 
+        // Namespace-qualified?
+        #[cfg(not(feature = "no_module"))]
+        if !call.namespace.is_empty() {
+            self.caps.insert(Caps::MODULE);
+            let mut name = crate::grain::bytecode::names::qualify(&call.namespace, &call.name);
+            if capture_parent_scope {
+                name.push('!');
+            }
+            let name = self.push_name(name.into());
+
+            // `ns::f(x, ..)` -> `ns::f(&mut x, ..)`
+            if let Some(receiver) = self.receiver(call) {
+                match receiver {
+                    Receiver::This => self.emit_at(Op::LoadThis, call.args[0].position()),
+                    Receiver::Named(var) => {
+                        self.emit_at(Op::LoadNamed(var), call.args[0].position())
+                    }
+                    _ => (),
+                }
+                for arg in call.args.iter().skip(1) {
+                    self.expression(arg);
+                }
+
+                self.emit_at(
+                    Op::CallRef {
+                        name,
+                        argc,
+                        receiver,
+                        capture_parent_scope,
+                    },
+                    pos,
+                );
+            } else {
+                for arg in call.args.iter() {
+                    self.expression(arg);
+                }
+                self.emit_at(
+                    Op::Call {
+                        name,
+                        argc,
+                        op: None,
+                        capture_parent_scope,
+                    },
+                    pos,
+                );
+            }
+            return;
+        }
+
         // `f(x, ..)` is `x.f(..)`, so the variable is read after the other
         // arguments and by reference. See [`Op::CallRef`].
         if let Some(receiver) = self.receiver(call) {
@@ -1931,10 +1975,9 @@ impl Lowering {
 
     /// Whether a name read is a variable read at all.
     ///
-    /// A qualified name resolves against imported modules rather than the
-    /// scope, so it stays a fragment.
+    /// Currently everything other than a namespace-qualified name
+    /// is considered a valid variable name.
     ///
-    /// Currently everything else is considered a valid variable name.
     /// Keeping this a separate function for future expansion purposes.
     #[inline(always)]
     const fn is_variable_name(&self, qualified: bool) -> bool {
@@ -2002,7 +2045,8 @@ impl Lowering {
     /// Matching those arities exactly is what keeps the two agreeing on
     /// the failures as well as the successes.
     fn fn_ptr_call(&mut self, call: &FnCallExpr, pos: Position) -> bool {
-        if call_has_namespace!(call) {
+        #[cfg(not(feature = "no_module"))]
+        if !call.namespace.is_empty() {
             return false;
         }
         let argc = call.args.len();
@@ -2085,9 +2129,7 @@ impl Lowering {
             crate::engine::KEYWORD_IS_SHARED,
         ];
 
-        !call_has_namespace!(call)
-            && call.args.len() <= u8::MAX as usize
-            && !SYNTACTIC.contains(&call.name.as_str())
+        call.args.len() <= u8::MAX as usize && !SYNTACTIC.contains(&call.name.as_str())
     }
 
     /// Lower `&&` or `||`: evaluate operands left to right, stopping at the
@@ -2155,24 +2197,34 @@ impl Lowering {
     /// block's value materializes the unit; whoever discards it does neither.
     fn block(&mut self, statements: &[Stmt]) -> Lowered {
         let depth = self.slots.depth();
+        let saved_level = self.level;
+        self.level += 1;
 
         let Some((last, leading)) = statements.split_last() else {
+            self.level = saved_level;
             return Lowered::Empty;
         };
 
         for stmt in leading {
             match self.statement(stmt) {
-                Lowered::Defeated => return Lowered::Defeated,
+                Lowered::Defeated => {
+                    self.level = saved_level;
+                    return Lowered::Defeated;
+                }
                 Lowered::Value => self.emit(Op::Pop),
                 Lowered::Empty => {}
             }
         }
         let lowered = match self.statement(last) {
-            Lowered::Defeated => return Lowered::Defeated,
+            Lowered::Defeated => {
+                self.level = saved_level;
+                return Lowered::Defeated;
+            }
             lowered => lowered,
         };
 
         self.unwind_to(depth);
+        self.level = saved_level;
         lowered
     }
 
@@ -2388,6 +2440,9 @@ impl Lowering {
     }
 
     fn push_const(&mut self, value: Dynamic) -> u32 {
+        if let Some(required_caps) = constant_caps(&value) {
+            self.caps.insert(required_caps);
+        }
         // Programs at this scale make a linear scan cheaper than a hash map,
         // and it keeps the pool in emission order for readable disassembly.
         let rendered = format!("{value:?}");

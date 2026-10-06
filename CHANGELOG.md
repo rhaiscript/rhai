@@ -17,6 +17,7 @@ Bug fixes
 * Capturing the caller's scope via `call!(fnptr, args...)` now works properly in Rhai Grain.
 * `.call(fnptr, args...)` and `.curry(...)` method calls now work properly in any position (instead of only on a chain's root) in Rhai Grain.
 * `.shared()` method calls now work property in Rhai Grain.
+* Missing capabilities in scripts related to some constants (especially in `switch` cases, arrays and object maps) now work properly in Rhai Grain (thanks [`@yinho999`](https://github.com/yinho999) [`#1182`](https://github.com/rhaiscript/rhai/pull/1182)).
 
 New features
 ------------
@@ -25,6 +26,7 @@ New features
 * Functions in plugin modules can now be resolved lazily: a `Module` can hold static manifests of plugin modules (generated via `#[export_module(manifest)]` and `exported_manifest!`) alongside its normal functions, and functions in manifests are not registered but looked up only when called (by calculating the hash of each function in turn), in both the `AST` interpreter and Rhai Grain. Use `Module::from_manifest` (the lazy `exported_module!`) or `Module::combine_manifest` (the lazy `combine_with_exported_module!`). `Module::register_lazy_functions` registers all of them up-front instead, for the same speed as before. The `rhai_codegen` crate dependency is bumped to `3.3.0` or later.
 * New `no_ast` feature that excludes the `AST`, its interpreter, the tokenizer, parser and optimizer for a minimized build.  Under this feature flag, the Rhai Grain VM is the only venue to evaluate a script.
 * Custom syntax that does not modify the `scope` is now fully supported in Rhai Grain ([`#1173`](https://github.com/rhaiscript/rhai/pull/1173)). Custom syntax that modifies the `scope` remains non-lowerable fragments.
+* Importing modules, the `global::` namespace, the `export` and `import` statements are all supported by Rhai Grain ([`#1179`](https://github.com/rhaiscript/rhai/pull/1179)).
 
 Enhancements
 ------------

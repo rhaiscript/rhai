@@ -1,10 +1,11 @@
 use crate::grain::bytecode::code::{self, tag};
 use crate::grain::bytecode::{
-    Chain, Chunk, CustomSyntaxSite, Op, Receiver, Root, Step, Switch, Tail,
+    Chain, Chunk, CustomSyntaxSite, Op, Receiver, Root, Step, Strings, Switch, Tail,
 };
 use crate::grain::format::Caps;
 use crate::grain::program::Function;
-use crate::Dynamic;
+use crate::{Dynamic, INT};
+use std::ops::{Range, RangeInclusive};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -18,8 +19,8 @@ use std::prelude::v1::*;
 pub struct Pools<'a> {
     /// How many constants there are.
     pub consts: usize,
-    /// How many interned names there are.
-    pub names: usize,
+    /// Interned names.
+    pub names: &'a Strings<'a>,
     /// How many operator tokens there are.
     pub tokens: usize,
     /// How many op-assignments there are.
@@ -142,6 +143,66 @@ pub enum VerifyError {
     },
 }
 
+/// Recursively determine the capabilities required by a constant
+/// [`Dynamic`] value.
+///
+/// Returns `None` if the value is not a constant (e.g. a shared value).
+pub fn constant_caps(value: &Dynamic) -> Option<Caps> {
+    let mut caps = Caps::empty();
+
+    #[cfg(not(feature = "no_closure"))]
+    if value.is_shared() {
+        return None;
+    }
+    if value.is_unit() || value.is_bool() || value.is_int() || value.is_char() || value.is_string()
+    {
+        return Some(caps);
+    }
+    if value.is::<Range<INT>>() || value.is::<RangeInclusive<INT>>() {
+        return Some(caps);
+    }
+    #[cfg(not(feature = "no_float"))]
+    if value.is_float() {
+        caps.insert(Caps::FLOAT);
+        return Some(caps);
+    }
+    #[cfg(feature = "decimal")]
+    if value.is_decimal() {
+        caps.insert(Caps::DECIMAL);
+        return Some(caps);
+    }
+    #[cfg(not(feature = "no_index"))]
+    if let Some(arr) = value.downcast_ref::<crate::Array>() {
+        caps.insert(Caps::ARRAY);
+        for value in arr.iter() {
+            caps.insert(constant_caps(value)?);
+        }
+        return Some(caps);
+    }
+    #[cfg(not(feature = "no_index"))]
+    if value.is_blob() {
+        caps.insert(Caps::BLOB);
+        return Some(caps);
+    }
+    #[cfg(not(feature = "no_object"))]
+    if let Some(map) = value.downcast_ref::<crate::Map>() {
+        caps.insert(Caps::MAP);
+        for value in map.values() {
+            caps.insert(constant_caps(value)?);
+        }
+        return Some(caps);
+    }
+    if let Some(fnptr) = value.downcast_ref::<crate::FnPtr>() {
+        caps.insert(Caps::FN_PTR);
+        for value in fnptr.curry() {
+            caps.insert(constant_caps(value)?);
+        }
+        return Some(caps);
+    }
+
+    None
+}
+
 /// Check that a chunk is internally consistent before running it.
 ///
 /// Two passes. The first decodes straight through, recording where each
@@ -176,29 +237,15 @@ pub fn verify(
 ) -> Result<Vec<u16>, VerifyError> {
     // Before we start, check whether we need caps to handle constants.
     for v in consts {
-        fn check_caps(do_check: bool, host: Caps, required: Caps) -> Result<(), VerifyError> {
-            if do_check && !host.contains(required) {
-                Err(VerifyError::MissingCaps {
-                    at: 0,
-                    artifact: host.to_string(),
-                    missing: required.to_string(),
-                })
-            } else {
-                Ok(())
-            }
-        }
-
-        #[cfg(not(feature = "no_float"))]
-        check_caps(v.is_float(), caps, Caps::FLOAT)?;
-        #[cfg(feature = "decimal")]
-        check_caps(v.is_decimal(), caps, Caps::DECIMAL)?;
-        #[cfg(not(feature = "no_index"))]
-        check_caps(v.is_array(), caps, Caps::ARRAY)?;
-        #[cfg(not(feature = "no_index"))]
-        check_caps(v.is_blob(), caps, Caps::BLOB)?;
-        #[cfg(not(feature = "no_object"))]
-        check_caps(v.is_map(), caps, Caps::MAP)?;
-        check_caps(v.is_fnptr(), caps, Caps::FN_PTR)?;
+        match constant_caps(v) {
+            Some(required_caps) if caps.contains(required_caps) => Ok(()),
+            Some(required_caps) => Err(VerifyError::MissingCaps {
+                at: 0,
+                artifact: caps.to_string(),
+                missing: required_caps.to_string(),
+            }),
+            None => Ok(()),
+        }?;
     }
 
     // Pass one: where do instructions start?
@@ -494,7 +541,6 @@ fn required_caps(op: &Op, pools: &Pools) -> Caps {
         | Op::Unit
         | Op::Bool(..)
         | Op::LoadLocal(..)
-        | Op::LoadNamed(..)
         | Op::StoreLocal { .. }
         | Op::DeclareLocal { .. }
         | Op::Pop
@@ -510,7 +556,6 @@ fn required_caps(op: &Op, pools: &Pools) -> Caps {
         | Op::PushHandler { .. }
         | Op::PopHandler
         | Op::SkipIfNotUnit { .. }
-        | Op::Call { .. }
         | Op::Rotate(..)
         | Op::CheckSize { .. }
         | Op::InterpolateStart
@@ -538,16 +583,63 @@ fn required_caps(op: &Op, pools: &Pools) -> Caps {
 
         Op::RequireThis | Op::LoadThis | Op::LoadThisShared | Op::AssignThis { .. } => Caps::THIS,
 
-        Op::CallRef { receiver, .. } => match receiver {
-            Receiver::Local(..) | Receiver::Named(..) => Caps::empty(),
-            Receiver::This => Caps::THIS,
-        },
-
         Op::MakeArray(..) => Caps::ARRAY,
         Op::MakeMap(..) => Caps::MAP,
         Op::IsShared => Caps::SHARING,
 
         Op::CustomSyntax(..) => Caps::CUSTOM_SYNTAX,
+
+        Op::ExportLocal { .. } | Op::ExportNamed { .. } => Caps::EXPORT,
+        Op::Import { .. } => Caps::IMPORT,
+        Op::LoadNamed(name) => {
+            #[cfg(not(feature = "no_module"))]
+            let is_qualified = pools
+                .names
+                .get(*name)
+                .map_or(false, |name| super::names::split_qualified(name).is_some());
+            #[cfg(feature = "no_module")]
+            let is_qualified = {
+                let _ = name;
+                false
+            };
+
+            if is_qualified {
+                Caps::MODULE
+            } else {
+                Caps::empty()
+            }
+        }
+        Op::Call { name, .. } | Op::CallRef { name, .. } => {
+            #[cfg(not(feature = "no_module"))]
+            let is_qualified = pools
+                .names
+                .get(*name)
+                .map_or(false, |name| super::names::split_qualified(name).is_some());
+            #[cfg(feature = "no_module")]
+            let is_qualified = {
+                let _ = name;
+                false
+            };
+            let receiver_is_this = matches!(
+                op,
+                Op::CallRef {
+                    receiver: Receiver::This,
+                    ..
+                }
+            );
+            if is_qualified {
+                Caps::MODULE
+                    | if receiver_is_this {
+                        Caps::THIS
+                    } else {
+                        Caps::empty()
+                    }
+            } else if receiver_is_this {
+                Caps::THIS
+            } else {
+                Caps::empty()
+            }
+        }
     }
 }
 
@@ -658,6 +750,9 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
         // Pops the thrown value; nothing follows, so what it leaves is moot.
         Op::Throw | Op::StoreShared(..) => (1, 1, 0),
 
+        Op::ExportLocal { .. } | Op::ExportNamed { .. } => (0, 0, 0),
+        Op::Import { .. } => (1, 1, 0),
+
         // The iterable goes onto the iterator stack, not back onto this one.
         Op::IterInit => (1, 1, 0),
         // Its two edges disagree, so the successor match does the work.
@@ -686,46 +781,59 @@ fn check_indices(at: usize, code: &[u8], pools: &Pools) -> Result<(), VerifyErro
     };
 
     match code[at] {
-        tag::CONST => bounded(index(1), "constant", pools.consts),
-        tag::DECLARE_LOCAL | tag::DECLARE_CONST => bounded(index(1), "name", pools.names),
+        tag::LOAD_CONST => bounded(index(1), "constant", pools.consts),
+        tag::DECLARE_LOCAL | tag::DECLARE_CONST | tag::DECLARE_GLOBAL_CONST => {
+            bounded(index(1), "name", pools.names.len())
+        }
         tag::CALL | tag::CALL_LOCAL_REF | tag::CALL_THIS_REF => {
-            bounded(index(1), "name", pools.names)
+            bounded(index(1), "name", pools.names.len())
         }
         // The function's, then the receiver variable's. The slot a local
         // receiver names is not a pool index and is checked against the scope
         // when it runs, as every other slot is.
         tag::CALL_NAMED_REF => {
-            bounded(index(1), "name", pools.names)?;
-            bounded(index(4), "name", pools.names)
+            bounded(index(1), "name", pools.names.len())?;
+            bounded(index(4), "name", pools.names.len())
         }
         tag::CALL_OP => {
-            bounded(index(1), "name", pools.names)?;
+            bounded(index(1), "name", pools.names.len())?;
             bounded(index(4), "operator", pools.tokens)
         }
-        tag::ASSIGN_LOCAL => bounded(index(3), "name", pools.names),
+        // The receiver's name, which the write-back resolves the scope entry
+        // by. A local's slot is not a pool index and is checked against the
+        // scope when it runs, as every other slot is.
+        tag::CALL_FN_PTR_ON_NAMED => bounded(index(2), "name", pools.names.len()),
+
         tag::LOAD_NAMED
         | tag::LOAD_SHARED_NAMED
         | tag::ASSIGN_NAMED
         | tag::SHARE_NAMED
-        | tag::MAKE_CLOSURE => bounded(index(1), "name", pools.names),
+        | tag::MAKE_CLOSURE => bounded(index(1), "name", pools.names.len()),
+
+        tag::ASSIGN_LOCAL => bounded(index(3), "name", pools.names.len()),
         tag::ASSIGN_NAMED_OP => {
-            bounded(index(1), "name", pools.names)?;
+            bounded(index(1), "name", pools.names.len())?;
             bounded(index(3), "op-assignment", pools.assign_ops)
         }
         tag::ASSIGN_LOCAL_OP => {
-            bounded(index(3), "name", pools.names)?;
+            bounded(index(3), "name", pools.names.len())?;
             bounded(index(5), "op-assignment", pools.assign_ops)
         }
         // `this` needs no name, so the operator is the whole of it — and
         // omitting this would hand `program.assign_op` an unchecked index out
         // of a corrupt artifact.
         tag::ASSIGN_THIS_OP => bounded(index(1), "op-assignment", pools.assign_ops),
-        // The receiver's name, which the write-back resolves the scope entry
-        // by. A local's slot is not a pool index and is checked against the
-        // scope when it runs, as every other slot is.
-        tag::CALL_FN_PTR_ON_NAMED => bounded(index(2), "name", pools.names),
+
+        tag::EXPORT_LOCAL => bounded(index(3), "name", pools.names.len()),
+        tag::EXPORT_NAMED => {
+            bounded(index(1), "name", pools.names.len())?;
+            bounded(index(3), "name", pools.names.len())
+        }
+        tag::IMPORT => bounded(index(1), "name", pools.names.len()),
+
         #[cfg(not(feature = "no_ast"))]
         tag::EVAL_AST | tag::EVAL_AST_KEEP => bounded(index(1), "fragment", pools.residuals),
+
         tag::CHAIN => {
             bounded(index(1), "chain", pools.chains.len())?;
             check_chain_indices(at, &pools.chains[index(1) as usize], pools)
@@ -758,7 +866,7 @@ fn check_chain_indices(at: usize, chain: &Chain, pools: &Pools) -> Result<(), Ve
 
     match chain.root {
         Root::Local { name, .. } | Root::Named { name, .. } => {
-            bounded(name, "name", pools.names)?;
+            bounded(name, "name", pools.names.len())?;
         }
         // Neither names anything in a pool: a temporary has no name at all, and
         // `this` is a register rather than an entry.
@@ -775,11 +883,11 @@ fn check_chain_indices(at: usize, chain: &Chain, pools: &Pools) -> Result<(), Ve
                 setter,
                 ..
             } => {
-                bounded(*name, "name", pools.names)?;
-                bounded(*getter, "name", pools.names)?;
-                bounded(*setter, "name", pools.names)?;
+                bounded(*name, "name", pools.names.len())?;
+                bounded(*getter, "name", pools.names.len())?;
+                bounded(*setter, "name", pools.names.len())?;
             }
-            Step::Method { name, .. } => bounded(*name, "name", pools.names)?,
+            Step::Method { name, .. } => bounded(*name, "name", pools.names.len())?,
         }
     }
 
@@ -830,7 +938,7 @@ fn check_custom_syntax_indices(
         }
     };
 
-    bounded(site.key, "name", pools.names)?;
+    bounded(site.key, "name", pools.names.len())?;
     bounded(site.state, "constant", pools.consts)?;
 
     for (_, literal) in &site.inputs {
@@ -854,10 +962,14 @@ mod tests {
     use crate::grain::bytecode::code::assemble;
     use crate::grain::format::Abi;
 
+    fn name_table(names: &[&str]) -> &'static Strings<'static> {
+        Box::leak(Box::new(Strings::new(names.iter().copied())))
+    }
+
     fn pools() -> Pools<'static> {
         Pools {
             consts: 0,
-            names: 0,
+            names: name_table(&[]),
             tokens: 0,
             assign_ops: 0,
             #[cfg(not(feature = "no_ast"))]
@@ -983,7 +1095,7 @@ mod tests {
             let (code, _) = assemble(&ops).expect("must assemble");
             let chunk = Chunk::new(0, code.len() as u32, 8);
             let pools = Pools {
-                names: 1,
+                names: name_table(&["name"]),
                 chains: core::slice::from_ref(&chain),
                 ..pools()
             };
@@ -1016,7 +1128,7 @@ mod tests {
                 &[],
                 &[chunk],
                 &Pools {
-                    names: 1,
+                    names: name_table(&["name"]),
                     chains: core::slice::from_ref(&assigning),
                     ..pools()
                 },
@@ -1287,7 +1399,7 @@ mod tests {
     #[test]
     fn rejects_an_instruction_whose_operands_are_cut_off() {
         assert_eq!(
-            check_bytes(vec![tag::CONST, 0], 8),
+            check_bytes(vec![tag::LOAD_CONST, 0], 8),
             Err(VerifyError::Undecodable { at: 0 }),
         );
     }

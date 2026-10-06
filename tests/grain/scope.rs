@@ -405,21 +405,18 @@ fn a_global_module_constant_resolves() {
     assert!(matches!(*err, rhai::EvalAltResult::ErrorAssignmentToConstant(..)), "got {err:?}",);
 }
 
-/// A script `import` costs the whole body its lowering, and must.
-///
-/// `import` declares into the imports stack, not the scope. A per-statement
-/// fragment rewinds that stack on the way out (`eval/stmt.rs:55`), so the alias
-/// would be dropped before the qualified call — itself a separate fragment —
-/// could name it, and the VM answered `Module not found` where the walker
-/// answered. That is a wrong result rather than a missing feature, which is the
-/// one thing the fragment fallback is not allowed to produce.
-///
-/// So the compiler refuses the lowering instead, and the walker takes the body
-/// as one block. These cases are here to keep it refusing: an `import` that
-/// started lowering again would put the divergence straight back.
+/// A top-level `const` is available to a locally-defined function only through
+/// the `global` module; a block-local constant is not.
+#[test]
+#[cfg(not(any(feature = "no_function", feature = "no_module")))]
+fn a_script_function_reads_global_constants() {
+    agree("const ANSWER = 42; fn answer() { global::ANSWER } answer()", |_| {}, true);
+    agree("fn answer() { global::ANSWER } { const ANSWER = 42; answer() }", |_| {}, true);
+}
+
+// The module the `import` resolves to is itself a script function.
 #[test]
 #[cfg(not(feature = "no_module"))]
-// The module the `import` resolves to is itself a script function.
 #[cfg(not(feature = "no_function"))]
 fn an_import_keeps_the_walkers_answer() {
     let mut engine = corpus::engine();
@@ -430,19 +427,20 @@ fn an_import_keeps_the_walkers_answer() {
     resolver.insert("kit", module);
     engine.set_module_resolver(resolver);
 
-    // An `import` in the body costs the body its lowering, so the program is a
-    // fragment Rhai's walker has to evaluate and cannot become an artifact.
+    // An `import` in the body with namespaced calls is natively lowered into
+    // Grain VM bytecode, so agree_with verifies it produces the same answer
+    // as the walker and is fully writable.
     for source in [
         r#"import "kit" as k; k::double(21)"#,
         r#"import "kit" as k; k::LIMIT"#,
         r#"let r = 0; { import "kit" as k; r = k::double(4); } r"#,
         r#"import "kit" as k; let t = 0; for i in 0..3 { t += k::double(i); } t"#,
     ] {
-        agree_with(&engine, source, |_| {}, false);
+        agree_with(&engine, source, |_| {}, true);
     }
 
-    // In a function body the fallback is per-function: that body stays an AST
-    // in the library and the top level still lowers whole.
+    // In a function body `import` with namespaced call is also natively lowered
+    // into Grain VM bytecode.
     agree_with(&engine, r#"fn via_kit() { import "kit" as k; k::double(3) } via_kit()"#, |_| {}, true);
 }
 

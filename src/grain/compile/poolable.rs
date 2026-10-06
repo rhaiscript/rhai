@@ -1,12 +1,5 @@
-#[cfg(not(feature = "no_object"))]
-use rhai::Map;
-#[cfg(not(feature = "no_index"))]
-use rhai::{Array, Blob};
-use rhai::{Dynamic, INT};
-#[cfg(feature = "decimal")]
-use rust_decimal::Decimal;
-
-use std::ops::{Range, RangeInclusive};
+use crate::grain::bytecode::constant_caps;
+use crate::Dynamic;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -18,67 +11,8 @@ use std::prelude::v1::*;
 /// carrying a host `TypeId`, a live `Rc`, or a clock reading: `Variant`,
 /// `Shared`, `TimeStamp`.
 pub(crate) fn is_poolable(value: &Dynamic) -> bool {
-    // A shared cell first, because every question below sees through one:
-    // `is_array` and friends unwrap `Union::Shared`, so a shared array of ints
-    // would answer yes and be pooled by cloning the `Rc` — leaving the pool
-    // aliasing a cell the host can still write to. Nothing a `Program` owns may
-    // alias mutable state: the pool is immutable after `Program::new`, and that
-    // is what makes the reference graph among programs acyclic.
-    #[cfg(not(feature = "no_closure"))]
-    if value.is_shared() {
-        return false;
-    }
-
-    // Under `no_float` Rhai has no float type and no `is_float` to ask, so
-    // there is nothing here for the question to be about.
-    #[cfg(not(feature = "no_float"))]
-    if value.is_float() {
-        return true;
-    }
-
-    if value.is_unit() || value.is_bool() || value.is_int() || value.is_char() || value.is_string()
-    {
-        return true;
-    }
-
-    // Arrays and blobs go with `no_index`, maps with `no_object` — the same
-    // reason as the float above: no type, and no question to ask about one.
-    #[cfg(not(feature = "no_index"))]
-    if value.is_array() {
-        return value
-            .read_lock::<Array>()
-            .map_or(false, |array| array.iter().all(is_poolable));
-    }
-
-    #[cfg(not(feature = "no_object"))]
-    if value.is_map() {
-        return value
-            .read_lock::<Map>()
-            .map_or(false, |map| map.values().all(is_poolable));
-    }
-
-    #[cfg(not(feature = "no_index"))]
-    if value.is_blob() {
-        return value.read_lock::<Blob>().is_some();
-    }
-
-    // Decimals are enabled by `decimal`.
-    #[cfg(feature = "decimal")]
-    if value.is_decimal() {
-        return value.read_lock::<Decimal>().is_some();
-    }
-
-    if value.is_fnptr() {
-        return value.read_lock::<rhai::FnPtr>().is_some();
-    }
-
-    // A range is a host type by representation but not by nature: Rhai builds
-    // one for `0..5` and indexes strings and arrays with it, and its `TypeId`
-    // is one both sides can name. Without this every slice is a fragment.
-    if value.is::<Range<INT>>() || value.is::<RangeInclusive<INT>>() {
-        return true;
-    }
-
-    // Anything else — TimeStamp, a custom type, a shared cell.
-    false
+    // Check if the value is a valid constant.
+    // Anything else — TimeStamp, a custom type, a shared cell, etc.,
+    // cannot be pooled.
+    constant_caps(value).is_some()
 }

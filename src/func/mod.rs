@@ -1,12 +1,10 @@
 //! Module defining mechanisms to handle function calls in Rhai.
 
 pub mod builtin;
-#[cfg(not(feature = "no_ast"))]
 pub mod call;
 pub mod func_args;
 pub mod func_call;
 #[allow(clippy::module_inception)]
-#[cfg(not(feature = "no_ast"))]
 pub mod func_trait;
 pub mod function;
 pub mod hashing;

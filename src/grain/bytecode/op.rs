@@ -149,6 +149,15 @@ pub enum Op {
 
     /// Push the value in local slot `.0`.
     LoadLocal(u16),
+
+    /// Export local slot `slot` with alias `alias`.
+    ExportLocal {
+        /// The local slot index.
+        slot: u16,
+        /// The alias name index.
+        alias: u32,
+    },
+
     /// Pop and write into local slot `.0`, which must already exist.
     StoreLocal {
         /// The slot index
@@ -163,9 +172,22 @@ pub enum Op {
     /// had in its [`Scope`][crate::Scope], which sit below the base every slot
     /// is measured from.
     ///
-    /// A reverse scan of the [`Scope`][crate::Scope] is needed — only emitted
-    /// for a name that cannot be resolved.
+    /// A namespace-qualified variable is encoded as `namespace::name` and
+    /// resolved against imported modules instead.
+    ///
+    /// For unqualified names, a reverse scan of the [`Scope`][crate::Scope] is
+    /// needed — only emitted for a name that cannot be resolved.
+    //
+    // (See [`names`][super::names]).
     LoadNamed(u32),
+
+    /// Export variable `name` with alias `alias`.
+    ExportNamed {
+        /// The variable name index.
+        name: u32,
+        /// The alias name index.
+        alias: u32,
+    },
 
     /// Pop a value and assign it to the variable named `name`, optionally
     /// through an operator.
@@ -213,6 +235,8 @@ pub enum Op {
         name: u32,
         /// Whether the variable is declared `const`.
         is_const: bool,
+        /// Whether the variable is declared at root (global) level.
+        is_global: bool,
     },
 
     /// Discard the top of the operand stack.
@@ -269,6 +293,8 @@ pub enum Op {
     ///
     /// Dispatch goes through Rhai, so every registered function, operator and
     /// script function resolves identically to Rhai.
+    /// A namespace-qualified function is encoded as `namespace::name`.
+    //  (See [`names`][super::names]).
     ///
     /// ## Syntactic Function Calls
     ///
@@ -866,6 +892,12 @@ pub enum Op {
 
     /// End the chunk, yielding the top of the operand stack, or unit if empty.
     Return,
+
+    /// Pop a module path and import it with alias `export`.
+    Import {
+        /// Index into the name pool for the module alias, or empty string.
+        alias: u32,
+    },
 }
 
 impl Op {
@@ -898,11 +930,16 @@ impl Op {
                     format!("{self:?} : {}", program.name(*var_name).unwrap(),)
                 }
             }
-            Op::DeclareLocal { name, is_const } => {
+            Op::DeclareLocal {
+                name,
+                is_const,
+                is_global,
+            } => {
                 format!(
-                    "{self:?} : {} {}",
+                    "{self:?} : {} {}{}",
                     if *is_const { "const" } else { "let" },
-                    program.name(*name).unwrap()
+                    program.name(*name).unwrap(),
+                    if *is_global { " (global)" } else { "" }
                 )
             }
             Op::Call { name, op, .. } => {
@@ -916,8 +953,7 @@ impl Op {
                     format!("{self:?} : {}", program.name(*name).unwrap(),)
                 }
             }
-
-            Op::CallRef { name, .. } => format!("{self:?} : {}", program.name(*name).unwrap(),),
+            Op::CallRef { name, .. } => format!("{self:?} : {}", program.name(*name).unwrap()),
             Op::Switch(idx) => format!(
                 "Switch({idx}) {}",
                 program.switch(*idx).unwrap().disassemble(program),
@@ -943,6 +979,18 @@ impl Op {
                 let custom_syntax = program.custom_syntax_site(*idx).unwrap();
                 format!("{self:?} : {}", custom_syntax.disassemble(program))
             }
+
+            Op::ExportLocal { alias, .. } => {
+                format!("{self:?} : as {}", program.name(*alias).unwrap())
+            }
+            Op::ExportNamed { name, alias } => {
+                format!(
+                    "{self:?} : {} as {}",
+                    program.name(*name).unwrap(),
+                    program.name(*alias).unwrap()
+                )
+            }
+            Op::Import { alias } => format!("{self:?} : {}", program.name(*alias).unwrap()),
 
             _ => format!("{self:?}"),
         }

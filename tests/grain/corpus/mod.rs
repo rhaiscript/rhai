@@ -158,7 +158,11 @@ fn applies_to_this_build(name: &str) -> bool {
         return false;
     }
     #[cfg(feature = "no_module")]
-    if name.starts_with("import_") || name.starts_with("export_") {
+    if name.starts_with("global_") || name.starts_with("import_") || name.starts_with("export_") {
+        return false;
+    }
+    #[cfg(feature = "no_function")]
+    if name.starts_with("global_") {
         return false;
     }
     // `unchecked` removes the arithmetic guards, so `1 / 0` panics inside
@@ -173,7 +177,7 @@ fn applies_to_this_build(name: &str) -> bool {
     #[cfg(feature = "no_float")]
     if matches!(
         name,
-        "float_arithmetic" | "mixed_numeric" | "interpolation_of_every_type" | "switch_float_in_range" | "error_operator_undefined_for_types" | "error_op_assign_undefined_for_types"
+        "float_arithmetic" | "mixed_numeric" | "interpolation_of_every_type" | "switch_float_literal" | "switch_float_in_range" | "error_operator_undefined_for_types" | "error_op_assign_undefined_for_types"
     ) {
         return false;
     }
@@ -453,6 +457,8 @@ pub const CASES: &[Case] = &[
     case("for_over_captured_array", "let a = [1, 2, 3]; { let f = || a; } let s = 0; for x in a { s += x; } s"),
     // --- switch -----------------------------------------------------------
     case("switch_literal", "let x = 2; switch x { 1 => \"one\", 2 => \"two\", _ => \"other\" }"),
+    // A literal case is stored as a constant, so it requires the `FLOAT` cap.
+    case("switch_float_literal", " let x = 2; switch x { 1.5 => 1, _=> 0 }"),
     case("switch_range", "let x = 42; switch x { 0..=9 => \"small\", 10..=99 => \"medium\", _ => \"large\" }"),
     // A failing guard must fall through to the next matching case, not to the
     // default, so both single-digit arms are needed to tell those apart.
@@ -508,6 +514,9 @@ pub const CASES: &[Case] = &[
     case("shadowing_nested", "let x = 1; { let x = 2; { let x = 3; } } x"),
     case("block_scope_discarded", "let x = 1; { let y = 2; x += y; } x"),
     case("const_read", "const K = 10; K * 2"),
+    // A top-level `const` becomes visible through `global::` only to scripted
+    // functions, via the shared global-constants cache.
+    case("global_constant_in_scripted_function", "const K = 10; fn read_global() { global::K } read_global()"),
     // --- functions --------------------------------------------------------
     case("fn_call", "fn add(a, b) { a + b } add(2, 3)"),
     case("fn_call_captures_parent_scope", r#"fn foo(x) { x + y * z }  let x = 42; let y = 1; let z = 9; foo!(x)"#),

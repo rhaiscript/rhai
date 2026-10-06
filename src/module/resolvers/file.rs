@@ -4,7 +4,7 @@
 use crate::eval::GlobalRuntimeState;
 use crate::func::{locked_read, locked_write};
 use crate::{
-    Engine, Identifier, Locked, Module, ModuleResolver, Position, RhaiResultOf, Scope, Shared,
+    Engine, Identifier, Locked, Module, ModuleResolver, Position, RhaiResultOf, Scope,
     SharedModule, ERR,
 };
 
@@ -14,7 +14,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(not(feature = "no_ast"))]
 pub const RHAI_SCRIPT_EXTENSION: &str = "rhai";
+
+#[cfg(feature = "grain")]
+pub const RHAI_GRAIN_EXTENSION: &str = "rgrn";
 
 /// A [module][Module] resolution service that loads [module][Module] script files from the file system.
 ///
@@ -73,7 +77,7 @@ impl Default for FileModuleResolver {
 impl FileModuleResolver {
     /// Create a new [`FileModuleResolver`] with the current directory as base path.
     ///
-    /// The default extension is `.rhai`.
+    /// The default extension is `.rhai`, or `.rgrn` (under `no_ast` and `grain`).
     ///
     /// # Example
     ///
@@ -91,12 +95,21 @@ impl FileModuleResolver {
     #[inline(always)]
     #[must_use]
     pub fn new() -> Self {
-        Self::new_with_extension(RHAI_SCRIPT_EXTENSION)
+        #[cfg(not(feature = "no_ast"))]
+        return Self::new_with_extension(RHAI_SCRIPT_EXTENSION);
+
+        #[cfg(feature = "grain")]
+        #[cfg(feature = "no_ast")]
+        return Self::new_with_extension(RHAI_GRAIN_EXTENSION);
+
+        #[cfg(not(feature = "grain"))]
+        #[cfg(feature = "no_ast")]
+        unreachable!();
     }
 
     /// Create a new [`FileModuleResolver`] with a specific base path.
     ///
-    /// The default extension is `.rhai`.
+    /// The default extension is `.rhai`, or `.rgrn` (under `no_ast` and `grain`).
     ///
     /// # Example
     ///
@@ -114,7 +127,16 @@ impl FileModuleResolver {
     #[inline(always)]
     #[must_use]
     pub fn new_with_path(path: impl Into<PathBuf>) -> Self {
-        Self::new_with_path_and_extension(path, RHAI_SCRIPT_EXTENSION)
+        #[cfg(not(feature = "no_ast"))]
+        return Self::new_with_path_and_extension(path, RHAI_SCRIPT_EXTENSION);
+
+        #[cfg(feature = "grain")]
+        #[cfg(feature = "no_ast")]
+        return Self::new_with_path_and_extension(path, RHAI_GRAIN_EXTENSION);
+
+        #[cfg(not(feature = "grain"))]
+        #[cfg(feature = "no_ast")]
+        unreachable!();
     }
 
     /// Create a new [`FileModuleResolver`] with a file extension.
@@ -285,6 +307,16 @@ impl FileModuleResolver {
             file_path = path.into();
         }
 
+        // If the file has a Grain extension, don't change it.
+        #[cfg(feature = "grain")]
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map_or(false, |ext| ext.eq_ignore_ascii_case(RHAI_GRAIN_EXTENSION))
+        {
+            return file_path;
+        }
+
         file_path.set_extension(self.extension.as_str()); // Force extension
         file_path
     }
@@ -305,36 +337,101 @@ impl FileModuleResolver {
             .or(source)
             .and_then(|p| Path::new(p).parent());
 
-        let file_path = self.get_file_path(path, source_path);
+        #[cfg(feature = "grain")]
+        let mut is_grain_file = Path::new(path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map_or(false, |ext| ext.eq_ignore_ascii_case(RHAI_GRAIN_EXTENSION));
 
+        let mut _file_path = self.get_file_path(path, source_path);
+
+        #[cfg(feature = "grain")]
+        if !is_grain_file {
+            let mut grain_path = _file_path.clone();
+            grain_path.set_extension(RHAI_GRAIN_EXTENSION);
+
+            if cfg!(feature = "no_ast") || grain_path.is_file() {
+                is_grain_file = true;
+                _file_path = grain_path;
+            }
+        }
+
+        // Serve from cache?
         if self.is_cache_enabled() {
-            if let Some(module) = locked_read(&self.cache).unwrap().get(&file_path) {
+            if let Some(module) = locked_read(&self.cache).unwrap().get(&_file_path) {
                 return Ok(module.clone());
             }
         }
 
-        let mut ast = engine
-            .compile_file_with_scope(&self.scope, file_path.clone())
-            .map_err(|err| match *err {
-                ERR::ErrorSystem(.., err) if err.is::<IoError>() => {
-                    Box::new(ERR::ErrorModuleNotFound(path.to_string(), pos))
-                }
-                _ => Box::new(ERR::ErrorInModule(path.to_string(), err, pos)),
+        // Load from file system
+        let mut module: Option<SharedModule> = None;
+
+        // Load from Grain file
+        #[cfg(feature = "grain")]
+        if is_grain_file {
+            let buf = std::fs::read(&_file_path).map_err(|err| {
+                let path = path.to_string();
+                Box::new(match err.kind() {
+                    std::io::ErrorKind::NotFound => ERR::ErrorModuleNotFound(path, pos),
+                    _ => {
+                        let msg = format!(
+                            "cannot read Rhai Grain file '{}'",
+                            _file_path.to_string_lossy()
+                        );
+                        ERR::ErrorInModule(path, ERR::ErrorSystem(msg, err.into()).into(), pos)
+                    }
+                })
             })?;
 
-        ast.set_source(path);
+            let mut program = crate::grain::Program::read(&buf).map_err(|err| {
+                Box::new(ERR::ErrorInModule(
+                    path.to_string(),
+                    ERR::ErrorRuntime(format!("failed to load Rhai Grain file: {err}").into(), pos)
+                        .into(),
+                    pos,
+                ))
+            })?;
 
-        let m: Shared<_> = Module::eval_ast_as_new_raw(engine, scope, global, &ast)
-            .map_err(|err| Box::new(ERR::ErrorInModule(path.to_string(), err, pos)))?
-            .into();
+            program.set_source(path);
+
+            module = Some(
+                Module::eval_grain_as_new_raw(engine, scope, global, program.into_shared())
+                    .map_err(|err| Box::new(ERR::ErrorInModule(path.to_string(), err, pos)))?
+                    .into(),
+            );
+        }
+
+        #[cfg(not(feature = "no_ast"))]
+        if module.is_none() {
+            let mut ast = engine
+                .compile_file_with_scope(&self.scope, _file_path.clone())
+                .map_err(|err| match *err {
+                    ERR::ErrorSystem(.., err) if err.is::<IoError>() => {
+                        Box::new(ERR::ErrorModuleNotFound(path.to_string(), pos))
+                    }
+                    _ => Box::new(ERR::ErrorInModule(path.to_string(), err, pos)),
+                })?;
+
+            ast.set_source(path);
+
+            module = Some(
+                Module::eval_ast_as_new_raw(engine, scope, global, &ast)
+                    .map_err(|err| Box::new(ERR::ErrorInModule(path.to_string(), err, pos)))?
+                    .into(),
+            );
+        }
+
+        let Some(module) = module else {
+            return Err(Box::new(ERR::ErrorModuleNotFound(path.to_string(), pos)));
+        };
 
         if self.is_cache_enabled() {
             locked_write(&self.cache)
                 .unwrap()
-                .insert(file_path, m.clone());
+                .insert(_file_path, module.clone());
         }
 
-        Ok(m)
+        Ok(module)
     }
 }
 
@@ -366,6 +463,7 @@ impl ModuleResolver for FileModuleResolver {
     /// Resolve an `AST` based on a path string.
     ///
     /// The file system is accessed during each call; the internal cache is by-passed.
+    #[cfg(not(feature = "no_ast"))]
     fn resolve_ast(
         &self,
         engine: &Engine,
@@ -373,8 +471,26 @@ impl ModuleResolver for FileModuleResolver {
         path: &str,
         pos: Position,
     ) -> Option<RhaiResultOf<crate::AST>> {
+        #[cfg(feature = "grain")]
+        if Path::new(path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map_or(false, |ext| ext.eq_ignore_ascii_case(RHAI_GRAIN_EXTENSION))
+        {
+            return None;
+        }
+
         // Construct the script file path
         let file_path = self.get_file_path(path, source_path.map(Path::new));
+
+        #[cfg(feature = "grain")]
+        if !file_path.is_file() {
+            let mut grain_path = file_path.clone();
+            grain_path.set_extension(RHAI_GRAIN_EXTENSION);
+            if grain_path.is_file() {
+                return None;
+            }
+        }
 
         // Load the script file and compile it
         Some(
