@@ -731,6 +731,10 @@ impl Engine {
     /// 2) Functions in registered sub-modules
     /// 3) Functions in registered packages
     /// 4) Functions in standard packages (optional)
+    ///
+    /// Modules with functions that are looked up only when called (see
+    /// [`Module::from_manifest`][crate::Module::from_manifest]) are cloned and have those
+    /// functions registered first, which may be expensive.
     #[cfg(feature = "metadata")]
     #[inline]
     #[must_use]
@@ -738,15 +742,18 @@ impl Engine {
         let mut signatures = Vec::with_capacity(64);
 
         if let Some(global_namespace) = self.global_modules.first() {
-            let m = global_namespace.materialized();
-            signatures.extend(m.gen_fn_signatures_with_mapper(|s| self.format_param_type(s)));
+            signatures.extend(
+                global_namespace
+                    .materialized()
+                    .gen_fn_signatures_with_mapper(|s| self.format_param_type(s)),
+            );
         }
 
         #[cfg(not(feature = "no_module"))]
         for (name, m) in &self.global_sub_modules {
-            let m = m.materialized();
             signatures.extend(
-                m.gen_fn_signatures_with_mapper(|s| self.format_param_type(s))
+                m.materialized()
+                    .gen_fn_signatures_with_mapper(|s| self.format_param_type(s))
                     .map(|f| format!("{name}::{f}")),
             );
         }
@@ -757,8 +764,10 @@ impl Engine {
             .skip(1)
             .filter(|m| include_standard_packages || !m.is_standard_lib())
         {
-            let m = m.materialized();
-            signatures.extend(m.gen_fn_signatures_with_mapper(|s| self.format_param_type(s)));
+            signatures.extend(
+                m.materialized()
+                    .gen_fn_signatures_with_mapper(|s| self.format_param_type(s)),
+            );
         }
 
         signatures

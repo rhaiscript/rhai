@@ -25,7 +25,7 @@ num-traits = { version = "0.2.14", default-features = false }
 once_cell = { version = "1.20.1", default-features = false, features = ["race", "portable-atomic", "alloc"] }
 bitflags = { version = "2.3.3", default-features = false }
 smartstring = { version = "1.0.0", default-features = false }
-rhai_codegen = { version = "3.2.0", path = "codegen" }
+rhai_codegen = { version = "3.3.0", path = "codegen" }
 
 no-std-compat = { git = "https://gitlab.com/jD91mZM2/no-std-compat.git", version = "0.4.1", default-features = false, features = ["alloc"], optional = true }
 libm = { version = "0.2.0", default-features = false, optional = true }

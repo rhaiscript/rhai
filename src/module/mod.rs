@@ -629,7 +629,7 @@ bitflags! {
         /// Does the [`Module`] contain indexed functions that have been exposed to the global namespace?
         const INDEXED_GLOBAL_FUNCTIONS = 0b0000_1000;
         /// Does the [`Module`] (including sub-modules) contain functions in plugin module manifests?
-        const INDEXED_LAZY_FUNCTIONS = 0b0001_0000;
+        const HAS_LAZY_FUNCTIONS = 0b0001_0000;
     }
 }
 
@@ -2013,7 +2013,7 @@ impl Module {
     #[inline]
     pub fn combine(&mut self, other: Self) -> &mut Self {
         if let Some(lazy_functions) = other.lazy_functions {
-            self.push_manifests(lazy_functions.manifests);
+            self.push_manifests(lazy_functions.manifests.into_vec());
         }
         self.modules.extend(other.modules);
         self.variables.extend(other.variables);
@@ -2050,7 +2050,7 @@ impl Module {
             self.combine_flatten(shared_take_or_clone(m));
         }
         if let Some(lazy_functions) = other.lazy_functions {
-            self.push_manifests(lazy_functions.manifests);
+            self.push_manifests(lazy_functions.manifests.into_vec());
         }
         self.variables.extend(other.variables);
         match self.functions {
@@ -2083,7 +2083,7 @@ impl Module {
     pub fn fill_with(&mut self, other: &Self) -> &mut Self {
         // Existing manifests take precedence, so these go before them
         if let Some(ref lazy_functions) = other.lazy_functions {
-            let existing = self.lazy_functions.take().map(|f| f.manifests);
+            let existing = self.lazy_functions.take().map(|f| f.manifests.into_vec());
             self.push_manifests(lazy_functions.manifests.iter().copied());
             self.push_manifests(existing.into_iter().flatten());
         }
@@ -2155,8 +2155,14 @@ impl Module {
         // Functions in manifests must be registered to be filtered
         if let Some(ref lazy_functions) = other.lazy_functions {
             lazy_functions.for_each_fn(&mut |f| {
-                if _filter(f.namespace, FnAccess::Public, false, f.name, f.num_params()) {
-                    (f.register)(self);
+                if _filter(
+                    f.namespace(),
+                    FnAccess::Public,
+                    false,
+                    f.name(),
+                    f.num_params(),
+                ) {
+                    f.register_into(self);
                 }
             });
         }
@@ -2571,7 +2577,7 @@ impl Module {
             // Functions in manifests are indexed on first lookup, but may be in the global namespace
             if let Some(ref lazy_functions) = module.lazy_functions {
                 lazy_functions.for_each_fn(&mut |f| {
-                    if f.namespace == FnNamespace::Global {
+                    if f.namespace() == FnNamespace::Global {
                         contains_indexed_global_functions = true;
                     }
                 });
@@ -2671,10 +2677,8 @@ impl Module {
             self.all_functions = (!functions.is_empty()).then_some(functions);
             self.all_type_iterators = type_iterators;
 
-            self.flags.set(
-                ModuleFlags::INDEXED_LAZY_FUNCTIONS,
-                self.has_lazy_functions(),
-            );
+            self.flags
+                .set(ModuleFlags::HAS_LAZY_FUNCTIONS, self.has_lazy_functions());
 
             self.flags |= ModuleFlags::INDEXED;
         }

@@ -77,11 +77,11 @@ fn engine_with(module: Module) -> Engine {
 #[test]
 fn test_lazy_manifest() {
     let manifest = exported_manifest!(kit);
-    let names: Vec<_> = manifest.functions.iter().map(|f| f.name).collect();
+    let names: Vec<_> = manifest.functions().iter().map(|f| f.name()).collect();
     assert!(names.contains(&"get$size"));
     assert_eq!(names.iter().filter(|&&n| n == "area").count(), 2);
-    assert_eq!(manifest.sub_modules.len(), 1);
-    assert_eq!(manifest.sub_modules[0].0, "sub");
+    assert_eq!(manifest.sub_modules().len(), 1);
+    assert_eq!(manifest.sub_modules()[0].0, "sub");
 }
 
 #[test]

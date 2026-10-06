@@ -1,6 +1,6 @@
 [package]
 name = "rhai_codegen"
-version = "3.2.0"
+version = "3.3.0"
 edition = "2018"
 resolver = "2"
 authors = ["jhwgh1968", "Stephen Chung"]

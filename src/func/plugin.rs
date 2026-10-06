@@ -61,30 +61,44 @@ pub trait PluginFunc {
 /// It lists every exported function without registering any of them. A [`Module`] holding a
 /// manifest (see [`Module::from_manifest`] and [`Module::combine_manifest`]) looks up its functions
 /// by hash only when they are called.
+///
+/// Fields are public only so that generated code can build a manifest in a `static`. Use the
+/// methods instead.
 #[derive(Clone, Copy)]
 pub struct ModuleManifest {
     /// Exported functions.
+    #[cfg_attr(not(feature = "internals"), doc(hidden))]
     pub functions: &'static [FnManifestEntry],
     /// Sub-modules.
+    #[cfg_attr(not(feature = "internals"), doc(hidden))]
     pub sub_modules: &'static [(&'static str, &'static ModuleManifest)],
     /// Register everything that is not a function (i.e. constants and custom types) into a [`Module`].
+    #[cfg_attr(not(feature = "internals"), doc(hidden))]
     pub init_eager: fn(&mut Module),
 }
 
 /// A function entry in a [`ModuleManifest`].
+///
+/// Fields are public only so that generated code can build a manifest in a `static`. Use the
+/// methods instead.
 #[derive(Clone, Copy)]
 pub struct FnManifestEntry {
     /// Name of the function, as registered.
+    #[cfg_attr(not(feature = "internals"), doc(hidden))]
     pub name: &'static str,
     /// Function namespace.
+    #[cfg_attr(not(feature = "internals"), doc(hidden))]
     pub namespace: FnNamespace,
     /// The plugin function.
     ///
     /// It is always [`Send`] + [`Sync`] because it lives in a `static`.
+    #[cfg_attr(not(feature = "internals"), doc(hidden))]
     pub func: &'static (dyn PluginFunc + Send + Sync),
     /// Call a function with the parameter types of the plugin function.
+    #[cfg_attr(not(feature = "internals"), doc(hidden))]
     pub param_types: fn(&mut dyn FnMut(&[TypeId])),
     /// Register this function (and only this function), with full metadata, into a [`Module`].
+    #[cfg_attr(not(feature = "internals"), doc(hidden))]
     pub register: fn(&mut Module),
 }
 
@@ -112,13 +126,29 @@ impl std::fmt::Debug for FnManifestEntry {
 }
 
 impl ModuleManifest {
+    /// Get the exported functions, not including those in sub-modules.
+    #[inline(always)]
+    #[must_use]
+    pub const fn functions(&self) -> &'static [FnManifestEntry] {
+        self.functions
+    }
+    /// Get the sub-modules, with their names.
+    #[inline(always)]
+    #[must_use]
+    pub const fn sub_modules(&self) -> &'static [(&'static str, &'static ModuleManifest)] {
+        self.sub_modules
+    }
+    /// Register everything that is not a function (i.e. constants and custom types) into a
+    /// [`Module`], not including sub-modules.
+    #[inline(always)]
+    pub fn init_eager(&self, module: &mut Module) {
+        (self.init_eager)(module);
+    }
     /// Call a function on every exported function, optionally including those in sub-modules
-    /// (flattened).
-    pub(crate) fn for_each_fn(
-        &'static self,
-        flatten: bool,
-        f: &mut dyn FnMut(&'static FnManifestEntry),
-    ) {
+    /// (flattened), from the lowest precedence to the highest.
+    ///
+    /// Registering each function in turn leaves the one with the highest precedence in place.
+    pub fn for_each_fn(&'static self, flatten: bool, f: &mut dyn FnMut(&'static FnManifestEntry)) {
         self.functions.iter().for_each(&mut *f);
 
         if flatten {
@@ -129,7 +159,8 @@ impl ModuleManifest {
     }
     /// Find the exported function with the highest precedence that matches a predicate,
     /// optionally including those in sub-modules (flattened, taking precedence).
-    pub(crate) fn find_fn(
+    #[must_use]
+    pub fn find_fn(
         &'static self,
         flatten: bool,
         f: &mut dyn FnMut(&FnManifestEntry) -> bool,
@@ -146,21 +177,49 @@ impl ModuleManifest {
 }
 
 impl FnManifestEntry {
+    /// Get the name of the function, as registered.
+    #[inline(always)]
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+    /// Get the function namespace.
+    #[inline(always)]
+    #[must_use]
+    pub const fn namespace(&self) -> FnNamespace {
+        self.namespace
+    }
+    /// Get the plugin function.
+    #[inline(always)]
+    #[must_use]
+    pub const fn func(&self) -> &'static (dyn PluginFunc + Send + Sync) {
+        self.func
+    }
+    /// Call a function with the parameter types of the plugin function.
+    #[inline(always)]
+    pub fn with_param_types(&self, f: &mut dyn FnMut(&[TypeId])) {
+        (self.param_types)(f);
+    }
+    /// Register this function (and only this function), with full metadata, into a [`Module`].
+    #[inline(always)]
+    pub fn register_into(&self, module: &mut Module) {
+        (self.register)(module);
+    }
     /// Get the number of parameters.
     #[must_use]
-    pub(crate) fn num_params(&self) -> usize {
+    pub fn num_params(&self) -> usize {
         let mut num_params = 0;
-        (self.param_types)(&mut |types| num_params = types.len());
+        self.with_param_types(&mut |types| num_params = types.len());
         num_params
     }
     /// Calculate the hash of this function under a namespace path, the same as when it is
     /// registered into (or indexed by) a [`Module`].
     #[must_use]
-    pub(crate) fn calc_hash(&self, path: &[&str]) -> u64 {
+    pub fn calc_hash(&self, path: &[&str]) -> u64 {
         let is_method = self.func.is_method_call();
         let mut hash = 0;
 
-        (self.param_types)(&mut |types| {
+        self.with_param_types(&mut |types| {
             let hash_script = crate::calc_fn_hash(path.iter().copied(), self.name, types.len());
             let types = types.iter().enumerate();
             hash = crate::calc_fn_hash_full(
@@ -174,10 +233,10 @@ impl FnManifestEntry {
     /// If this function has any [`Dynamic`] parameter, get its hash in scripted format (i.e.
     /// without parameter types).
     #[must_use]
-    pub(crate) fn calc_dynamic_hash(&self) -> Option<u64> {
+    pub fn calc_dynamic_hash(&self) -> Option<u64> {
         let mut hash = None;
 
-        (self.param_types)(&mut |types| {
+        self.with_param_types(&mut |types| {
             if types.contains(&TypeId::of::<Dynamic>()) {
                 hash = Some(crate::calc_fn_hash(None, self.name, types.len()));
             }

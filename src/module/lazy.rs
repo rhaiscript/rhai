@@ -11,13 +11,16 @@ use std::prelude::v1::*;
 #[derive(Debug, Clone, Default)]
 pub(super) struct LazyFunctions {
     /// Manifests, and whether their sub-modules are flattened. Later manifests take precedence.
-    pub(super) manifests: Vec<(&'static ModuleManifest, bool)>,
+    pub(super) manifests: Box<[(&'static ModuleManifest, bool)]>,
 }
 
 impl LazyFunctions {
-    /// Call a function on every function in the manifests, in order of precedence.
+    /// Call a function on every function in the manifests, from the lowest precedence to the
+    /// highest.
+    ///
+    /// Registering each function in turn leaves the one with the highest precedence in place.
     pub(super) fn for_each_fn(&self, f: &mut dyn FnMut(&'static FnManifestEntry)) {
-        for &(manifest, flatten) in &self.manifests {
+        for &(manifest, flatten) in &*self.manifests {
             manifest.for_each_fn(flatten, f);
         }
     }
@@ -41,7 +44,7 @@ impl Module {
         self.lazy_functions
             .as_ref()?
             .find_fn(&mut |f| f.calc_hash(&[]) == hash_native)
-            .map(|f| RhaiFunc::StaticPlugin { func: f.func })
+            .map(|f| RhaiFunc::StaticPlugin { func: f.func() })
     }
     /// Create a new [`Module`] from a plugin module's [manifest][crate::plugin::ModuleManifest].
     ///
@@ -53,9 +56,9 @@ impl Module {
     pub fn from_manifest(manifest: &'static ModuleManifest) -> Self {
         let mut module = Self::new();
         module.add_manifest(manifest, false);
-        (manifest.init_eager)(&mut module);
+        manifest.init_eager(&mut module);
 
-        for &(name, sub_module) in manifest.sub_modules {
+        for &(name, sub_module) in manifest.sub_modules() {
             module.set_sub_module(name, Self::from_manifest(sub_module));
         }
 
@@ -75,8 +78,8 @@ impl Module {
     /// [`combine_with_exported_module!`][crate::plugin::combine_with_exported_module].
     pub fn combine_manifest(&mut self, manifest: &'static ModuleManifest) -> &mut Self {
         fn init_eager(module: &mut Module, manifest: &ModuleManifest) {
-            (manifest.init_eager)(module);
-            for &(.., sub_module) in manifest.sub_modules {
+            manifest.init_eager(module);
+            for &(.., sub_module) in manifest.sub_modules() {
                 init_eager(module, sub_module);
             }
         }
@@ -102,7 +105,8 @@ impl Module {
         manifests: impl IntoIterator<Item = (&'static ModuleManifest, bool)>,
     ) {
         let lazy_functions = self.lazy_functions.get_or_insert_with(Default::default);
-        lazy_functions.manifests.extend(manifests);
+        let existing = std::mem::take(&mut lazy_functions.manifests).into_vec();
+        lazy_functions.manifests = existing.into_iter().chain(manifests).collect();
 
         self.flags
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
@@ -116,7 +120,7 @@ impl Module {
         if let Some(lazy_functions) = self.lazy_functions.take() {
             // Functions registered normally take precedence over functions in manifests
             let functions = self.functions.take();
-            lazy_functions.for_each_fn(&mut |f| (f.register)(self));
+            lazy_functions.for_each_fn(&mut |f| f.register_into(self));
             if let Some(functions) = functions {
                 self.functions
                     .get_or_insert_with(|| new_hash_map(functions.len()))
@@ -173,7 +177,7 @@ impl Module {
             let found = module.lazy_functions.as_ref().and_then(|f| {
                 f.find_fn(&mut |f| {
                     f.calc_hash(path) == hash
-                        || (f.namespace == FnNamespace::Global && f.calc_hash(&[]) == hash)
+                        || (f.namespace() == FnNamespace::Global && f.calc_hash(&[]) == hash)
                 })
             });
 
@@ -187,12 +191,12 @@ impl Module {
             })
         }
 
-        if !self.flags.contains(ModuleFlags::INDEXED_LAZY_FUNCTIONS) {
+        if !self.flags.contains(ModuleFlags::HAS_LAZY_FUNCTIONS) {
             return None;
         }
 
         let path = &mut crate::StaticVec::new();
         path.push("");
-        find_fn(self, path, hash_qualified_fn).map(|f| RhaiFunc::StaticPlugin { func: f.func })
+        find_fn(self, path, hash_qualified_fn).map(|f| RhaiFunc::StaticPlugin { func: f.func() })
     }
 }

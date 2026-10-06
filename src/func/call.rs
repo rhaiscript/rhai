@@ -924,14 +924,8 @@ impl Engine {
                 Err(ERR::ErrorNonPureMethodCallOnConstant(fn_name.to_string(), pos).into())
             }
 
-            Some(RhaiFunc::Plugin { func }) => {
-                let context = func
-                    .has_context()
-                    .then(|| (self, fn_name, module.id(), &*global, pos).into());
-                func.call(context, args)
-                    .and_then(|r| self.check_data_size(r, pos))
-            }
-            Some(RhaiFunc::StaticPlugin { func }) => {
+            Some(f @ (RhaiFunc::Plugin { .. } | RhaiFunc::StaticPlugin { .. })) => {
+                let func = f.get_plugin_fn().unwrap();
                 let context = func
                     .has_context()
                     .then(|| (self, fn_name, module.id(), &*global, pos).into());
