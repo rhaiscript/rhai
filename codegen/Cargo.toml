@@ -25,5 +25,5 @@ syn = { version = "2.0.0", features = ["full", "parsing", "printing", "proc-macr
 quote = "1.0.0"
 
 [dev-dependencies]
-rhai = { path = "..", version = "1.17.0", features = ["metadata"] }
+rhai = { path = "..", version = "1.27.0", features = ["metadata"] }
 trybuild = "1.0.0"

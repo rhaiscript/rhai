@@ -665,8 +665,8 @@ pub struct Module {
     all_type_iterators: BTreeMap<TypeId, Shared<FnIterator>>,
     /// Flags.
     flags: ModuleFlags,
-    /// Functions in plugin module manifests, looked up only when called.
-    lazy_functions: Option<Box<lazy::LazyFunctions>>,
+    /// Functions in plugin module manifests, looked up only when called. Never empty if [`Some`].
+    lazy_functions: Option<lazy::LazyFunctions>,
 }
 
 impl Default for Module {

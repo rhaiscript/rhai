@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::prelude::v1::*;
 
 /// Plugin module manifests whose functions are looked up only when called.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(super) struct LazyFunctions {
     /// Manifests, and whether their sub-modules are flattened. Later manifests take precedence.
     pub(super) manifests: Box<[(&'static ModuleManifest, bool)]>,
@@ -104,9 +104,14 @@ impl Module {
         &mut self,
         manifests: impl IntoIterator<Item = (&'static ModuleManifest, bool)>,
     ) {
-        let lazy_functions = self.lazy_functions.get_or_insert_with(Default::default);
-        let existing = std::mem::take(&mut lazy_functions.manifests).into_vec();
-        lazy_functions.manifests = existing.into_iter().chain(manifests).collect();
+        let existing = self
+            .lazy_functions
+            .take()
+            .map_or_else(Vec::new, |f| f.manifests.into_vec());
+        let manifests: Box<[_]> = existing.into_iter().chain(manifests).collect();
+        if !manifests.is_empty() {
+            self.lazy_functions = Some(LazyFunctions { manifests });
+        }
 
         self.flags
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
