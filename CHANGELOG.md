@@ -16,6 +16,7 @@ Bug fixes
 * Failed function resolutions are now cached properly for calls with other than two arguments - a regression from version 1.10 (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1183`](https://github.com/rhaiscript/rhai/pull/1183)).
 * A function resolution cache is now created (if none exists) when entering a block. Previously, a loop body evaluated with no cache yet would resolve every function call again on each iteration (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1183`](https://github.com/rhaiscript/rhai/pull/1183)).
 * Assigning a constant into a container variable (array, map etc.) now works properly without making the value read-only (thanks [`@cuervolu`](https://github.com/cuervolu) [`#1187`](https://github.com/rhaiscript/rhai/pull/1187)).
+* A panic inside a native Rust function that takes its first argument by value, called with a variable first argument, now unwinds normally and can be caught by `catch_unwind`. Previously the copied first argument was restored only on the normal-return path, so the unwind tripped an internal assertion and the process aborted (thanks [`@yuvalrakavy`](https://github.com/yuvalrakavy) [`#1189`](https://github.com/rhaiscript/rhai/pull/1189)).
 
 Rhai Grain is now at feature parity with the AST interpreter
 ------------------------------------------------------------
