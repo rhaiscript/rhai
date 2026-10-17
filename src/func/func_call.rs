@@ -584,6 +584,12 @@ impl Engine {
                 backup.change_first_arg_to_copy(args);
             }
 
+            // Restore the first argument on every exit, including an unwind. If it were restored
+            // only on the normal path, a panic in the native function would drop the backup
+            // unrestored, its `Drop` assertion would panic during the unwind, and the process
+            // would abort.
+            defer! { args = (args) if swap => move |a| backup.restore_first_arg(a) }
+
             #[cfg(feature = "debugging")]
             if self.is_debugger_registered() {
                 let source = source.clone().or_else(|| global.source.clone());
@@ -612,10 +618,6 @@ impl Engine {
             }
             .and_then(|r| self.check_data_size(r, pos))
             .map_err(|err| err.fill_position(pos));
-
-            if swap {
-                backup.restore_first_arg(args);
-            }
 
             #[cfg(feature = "debugging")]
             if self.is_debugger_registered() {

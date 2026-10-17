@@ -78,3 +78,33 @@ fn test_native_call_fn_raw_reaches_syntactic_functions() {
     // And the answer is the script spelling's, whatever the numeric build is.
     assert_eq!(engine.eval::<String>("let x = 1; ask_type(x)").unwrap(), engine.eval::<String>("let x = 1; type_of(x)").unwrap(),);
 }
+
+/// A native function that takes its first argument by value, called with a variable first
+/// argument, runs on a copy of that argument. A panic inside it must unwind like any other panic,
+/// so the host can contain it with `catch_unwind`. If the original argument were restored only
+/// on the normal-return path, the unwind would drop the backup unrestored, its `Drop` assertion
+/// would panic during the unwind, and the process would abort.
+#[test]
+fn test_native_panic_with_variable_first_argument_unwinds() {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    let mut engine = Engine::new();
+    engine.register_fn("buggy", |_x: INT| -> INT { panic!("buggy native function") });
+
+    // `buggy(t)` is the case that aborted: a non-method call whose first argument is a variable,
+    // so the engine swaps a copy in and must restore the original on the way out. The method-call
+    // spelling is the control; it needs the dot syntax, which `no_object` disables.
+    #[cfg(not(feature = "no_object"))]
+    let scripts = ["let t = 1; buggy(t)", "let t = 1; t.buggy()"];
+    #[cfg(feature = "no_object")]
+    let scripts = ["let t = 1; buggy(t)"];
+
+    for script in scripts {
+        let outcome = catch_unwind(AssertUnwindSafe(|| engine.eval::<INT>(script)));
+        let payload = outcome.expect_err(script);
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"buggy native function"), "{script}");
+    }
+
+    // The engine is still usable afterwards.
+    assert_eq!(engine.eval::<INT>("let t = 41; t + 1").unwrap(), 42);
+}
