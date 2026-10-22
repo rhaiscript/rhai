@@ -39,12 +39,23 @@ impl LazyFunctions {
 impl Module {
     /// Look up a function in plugin module manifests by hash, calculating the hash of each
     /// function in turn.
+    ///
+    /// Also looks up the functions of a Grain program this [`Module`] holds.
     #[must_use]
     pub(super) fn get_lazy_fn(&self, hash_native: u64) -> Option<RhaiFunc> {
-        self.lazy_functions
-            .as_ref()?
-            .find_fn(&mut |f| f.calc_hash(&[]) == hash_native)
-            .map(|f| RhaiFunc::StaticPlugin { func: f.func() })
+        let found = self
+            .lazy_functions
+            .as_ref()
+            .and_then(|f| f.find_fn(&mut |f| f.calc_hash(&[]) == hash_native))
+            .map(|f| RhaiFunc::StaticPlugin { func: f.func() });
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        let found = found.or_else(|| {
+            self.grain_functions
+                .as_ref()
+                .and_then(|g| g.get(hash_native))
+        });
+        found
     }
     /// Create a new [`Module`] from a plugin module's [manifest][crate::plugin::ModuleManifest].
     ///
@@ -118,10 +129,15 @@ impl Module {
     }
     /// Register all functions in plugin module manifests (including sub-modules), with full
     /// metadata, so that they are no longer looked up only when called.
+    ///
+    /// The functions of a Grain program this [`Module`] holds are registered too.
     pub fn register_lazy_functions(&mut self) -> &mut Self {
         if !self.has_lazy_functions() {
             return self;
         }
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        self.register_grain_functions();
         if let Some(lazy_functions) = self.lazy_functions.take() {
             // Functions registered normally take precedence over functions in manifests
             let functions = self.functions.take();
@@ -143,12 +159,14 @@ impl Module {
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
         self
     }
-    /// Does this [`Module`] (or any sub-module) contain functions in plugin module manifests,
-    /// which are looked up only when called?
+    /// Does this [`Module`] (or any sub-module) contain functions in plugin module manifests, or
+    /// the functions of a Grain program, which are looked up only when called?
     #[inline]
     #[must_use]
     pub fn has_lazy_functions(&self) -> bool {
-        self.lazy_functions.is_some() || self.modules.values().any(|m| m.has_lazy_functions())
+        self.lazy_functions.is_some()
+            || self.has_grain_functions()
+            || self.modules.values().any(|m| m.has_lazy_functions())
     }
     /// Get this [`Module`] with all functions in plugin module manifests registered, cloning it
     /// if necessary.
@@ -177,13 +195,25 @@ impl Module {
             module: &'a Module,
             path: &mut crate::StaticVec<&'a str>,
             hash: u64,
-        ) -> Option<&'static FnManifestEntry> {
+        ) -> Option<RhaiFunc> {
             // Functions in the module take precedence over those in sub-modules
-            let found = module.lazy_functions.as_ref().and_then(|f| {
-                f.find_fn(&mut |f| {
-                    f.calc_hash(path) == hash
-                        || (f.namespace() == FnNamespace::Global && f.calc_hash(&[]) == hash)
+            let found = module
+                .lazy_functions
+                .as_ref()
+                .and_then(|f| {
+                    f.find_fn(&mut |f| {
+                        f.calc_hash(path) == hash
+                            || (f.namespace() == FnNamespace::Global && f.calc_hash(&[]) == hash)
+                    })
                 })
+                .map(|f| RhaiFunc::StaticPlugin { func: f.func() });
+            #[cfg(feature = "grain")]
+            #[cfg(not(feature = "no_function"))]
+            let found = found.or_else(|| {
+                module
+                    .grain_functions
+                    .as_ref()
+                    .and_then(|g| g.get_qualified(path, hash))
             });
 
             found.or_else(|| {
@@ -202,6 +232,6 @@ impl Module {
 
         let path = &mut crate::StaticVec::new();
         path.push("");
-        find_fn(self, path, hash_qualified_fn).map(|f| RhaiFunc::StaticPlugin { func: f.func() })
+        find_fn(self, path, hash_qualified_fn)
     }
 }

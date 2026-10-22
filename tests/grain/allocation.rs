@@ -310,6 +310,33 @@ fn allocation_footprint() {
     // scaling with length.
     assert!(ratios[2] > ratios[1] && ratios[1] > ratios[0], "the saving must grow with the program, got {ratios:?}",);
 
+    // What importing a module costs. Its functions are looked up in the program
+    // when they are called, so until then a module of many functions costs one
+    // empty slot per function more than a module of one.
+    #[cfg(not(feature = "no_module"))]
+    {
+        let module_of = |n: usize| {
+            let source: String = (0..n).map(|i| format!("fn f{i}(a, b) {{ a + b }}\n")).collect();
+            let program = Compiler::new().compile(&engine.compile(&source).expect("must compile")).into_shared();
+            let module = measure(|| rhai::Module::eval_grain_as_new(rhai::Scope::new(), program.clone(), &engine).expect("must eval"));
+            (module.bytes, module.value)
+        };
+        let (one, _one) = module_of(1);
+        let (many, many_module) = module_of(64);
+        println!("\nmodule of 1 function {one:>8} bytes\nmodule of 64         {many:>8} bytes");
+        assert!(many - one <= 63 * 16, "a module must not register its functions up front: {one} bytes for 1, {many} for 64");
+
+        // Calling one makes that one's definition, and only that one's.
+        let mut called = Engine::new();
+        let mut resolver = rhai::module_resolvers::StaticModuleResolver::new();
+        resolver.insert("m", many_module);
+        called.set_module_resolver(resolver);
+        let first = measure(|| called.eval::<rhai::INT>(r#"import "m" as m; m::f3(1, 2)"#).expect("must call"));
+        assert_eq!(first.value, 3);
+        let again = measure(|| called.eval::<rhai::INT>(r#"import "m" as m; m::f3(1, 2)"#).expect("must call"));
+        assert!(again.bytes <= first.bytes, "a second call must not make another definition: {} then {}", first.bytes, again.bytes);
+    }
+
     // The instrument has to be working before anything can lean on it.
     assert!(ast.count > 0 && ast.bytes > 0, "the counters saw nothing; the global allocator is not installed",);
     assert!(ast.peak >= ast.bytes, "peak ({}) below retained ({}) means peak tracking is broken", ast.peak, ast.bytes,);

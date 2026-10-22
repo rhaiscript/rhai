@@ -1,5 +1,11 @@
 //! Module defining external-loaded modules for Rhai.
 
+#[cfg(feature = "grain")]
+#[cfg(not(feature = "no_function"))]
+mod grain;
+#[cfg(feature = "grain")]
+#[cfg(not(feature = "no_function"))]
+pub(crate) use grain::GrainFunctions;
 mod lazy;
 mod namespace;
 /// Module containing all built-in [module resolvers][ModuleResolver].
@@ -667,6 +673,10 @@ pub struct Module {
     flags: ModuleFlags,
     /// Functions in plugin module manifests, looked up only when called. Never empty if [`Some`].
     lazy_functions: Option<lazy::LazyFunctions>,
+    /// Functions in a Grain program, looked up only when called.
+    #[cfg(feature = "grain")]
+    #[cfg(not(feature = "no_function"))]
+    grain_functions: Option<grain::GrainFunctions>,
 }
 
 impl Default for Module {
@@ -799,6 +809,9 @@ impl Module {
             all_type_iterators: BTreeMap::new(),
             flags: ModuleFlags::INDEXED,
             lazy_functions: None,
+            #[cfg(feature = "grain")]
+            #[cfg(not(feature = "no_function"))]
+            grain_functions: None,
         }
     }
 
@@ -934,6 +947,11 @@ impl Module {
         self.type_iterators.clear();
         self.all_type_iterators.clear();
         self.lazy_functions = None;
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        {
+            self.grain_functions = None;
+        }
         self.flags
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
     }
@@ -1121,6 +1139,18 @@ impl Module {
                 .map_or(true, StraightHashMap::is_empty)
             && self.all_type_iterators.is_empty()
             && self.lazy_functions.is_none()
+            && !self.has_grain_functions()
+    }
+
+    /// Does this [`Module`] hold the functions of a Grain program, looked up only when called?
+    #[inline(always)]
+    #[must_use]
+    pub(crate) const fn has_grain_functions(&self) -> bool {
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        return self.grain_functions.is_some();
+        #[cfg(any(not(feature = "grain"), feature = "no_function"))]
+        return false;
     }
 
     /// Is the [`Module`] indexed?
@@ -1388,13 +1418,34 @@ impl Module {
         name: impl AsRef<str>,
         num_params: usize,
     ) -> Option<&Shared<crate::func::ScriptFuncDef>> {
-        self.functions.as_ref().and_then(|lib| {
-            let name = name.as_ref();
+        self.get_script_fn_named(name.as_ref(), Some(num_params))
+    }
 
+    /// Get a shared reference to the first script-defined function in the [`Module`] named
+    /// `name` that takes `num_params` parameters, or any number when that is [`None`].
+    #[cfg(not(feature = "no_function"))]
+    #[must_use]
+    pub(crate) fn get_script_fn_named(
+        &self,
+        name: &str,
+        num_params: Option<usize>,
+    ) -> Option<&Shared<crate::func::ScriptFuncDef>> {
+        let found = self.functions.as_ref().and_then(|lib| {
             lib.values()
-                .find(|(_, f)| f.num_params == num_params && f.name == name)
+                .find(|(f, m)| {
+                    f.is_script()
+                        && num_params.map_or(true, |n| m.num_params == n)
+                        && m.name == name
+                })
                 .and_then(|(f, _)| f.get_script_fn_def())
-        })
+        });
+        #[cfg(feature = "grain")]
+        let found = found.or_else(|| {
+            self.grain_functions
+                .as_ref()
+                .and_then(|g| g.get_named(name, num_params))
+        });
+        found
     }
 
     /// Get a mutable reference to the underlying [`BTreeMap`] of sub-modules,
@@ -2012,6 +2063,13 @@ impl Module {
     /// The other [`Module`] is _consumed_ to merge into this [`Module`].
     #[inline]
     pub fn combine(&mut self, other: Self) -> &mut Self {
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        let other = {
+            let mut other = other;
+            other.register_grain_functions();
+            other
+        };
         if let Some(lazy_functions) = other.lazy_functions {
             self.push_manifests(lazy_functions.manifests.into_vec());
         }
@@ -2046,6 +2104,13 @@ impl Module {
     /// Sub-modules are flattened onto the root [`Module`], with higher level overriding lower level.
     #[inline]
     pub fn combine_flatten(&mut self, other: Self) -> &mut Self {
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        let other = {
+            let mut other = other;
+            other.register_grain_functions();
+            other
+        };
         for m in other.modules.into_values() {
             self.combine_flatten(shared_take_or_clone(m));
         }
@@ -2081,6 +2146,9 @@ impl Module {
     /// Only items not existing in this [`Module`] are added.
     #[inline]
     pub fn fill_with(&mut self, other: &Self) -> &mut Self {
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        let other = &*other.with_grain_registered();
         // Existing manifests take precedence, so these go before them
         if let Some(ref lazy_functions) = other.lazy_functions {
             let existing = self.lazy_functions.take().map(|f| f.manifests.into_vec());
@@ -2142,6 +2210,9 @@ impl Module {
         other: &Self,
         _filter: impl Fn(FnNamespace, FnAccess, bool, &str, usize) -> bool + Copy,
     ) -> &mut Self {
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        let other = &*other.with_grain_registered();
         for (k, v) in &other.modules {
             let mut m = Self::new();
             m.merge_filtered(v, _filter);
@@ -2208,6 +2279,8 @@ impl Module {
         &mut self,
         filter: impl Fn(FnNamespace, FnAccess, &str, usize) -> bool,
     ) -> &mut Self {
+        #[cfg(feature = "grain")]
+        self.register_grain_functions();
         self.functions = std::mem::take(&mut self.functions).map(|m| {
             m.into_iter()
                 .filter(|(.., (f, m))| {
@@ -2236,9 +2309,20 @@ impl Module {
     pub fn count(&self) -> (usize, usize, usize) {
         (
             self.variables.len(),
-            self.functions.as_ref().map_or(0, StraightHashMap::len),
+            self.functions.as_ref().map_or(0, StraightHashMap::len) + self.num_grain_functions(),
             self.type_iterators.len(),
         )
+    }
+
+    /// The number of functions of a Grain program this [`Module`] holds.
+    #[inline(always)]
+    #[must_use]
+    fn num_grain_functions(&self) -> usize {
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        return self.grain_functions.as_ref().map_or(0, |g| g.len());
+        #[cfg(any(not(feature = "grain"), feature = "no_function"))]
+        return 0;
     }
 
     /// Get an iterator to the sub-modules in the [`Module`].
@@ -2303,7 +2387,7 @@ impl Module {
             &Shared<crate::func::ScriptFuncDef>,
         ),
     > + '_ {
-        self.iter_fn().filter(|(f, _)| f.is_script()).map(|(f, m)| {
+        let registered = self.iter_fn().filter(|(f, _)| f.is_script()).map(|(f, m)| {
             (
                 m.namespace,
                 m.access,
@@ -2311,7 +2395,11 @@ impl Module {
                 m.num_params,
                 f.get_script_fn_def().expect("`ScriptFuncDef`"),
             )
-        })
+        });
+        #[cfg(feature = "grain")]
+        return registered.chain(self.grain_functions.iter().flat_map(|g| g.iter_defs()));
+        #[cfg(not(feature = "grain"))]
+        return registered;
     }
 
     /// _(internals)_ Get an iterator over all script-defined functions in the [`Module`].
@@ -2568,12 +2656,22 @@ impl Module {
         #[cfg(not(feature = "no_function"))]
         let orig_constants = std::mem::take(&mut global.constants);
 
+        // The program's functions, looked up only when called: by its own top-level run, by
+        // its functions through the module's environment, and through the module's exports.
+        #[cfg(not(feature = "no_function"))]
+        let functions = grain::GrainFunctions::new(&program);
+        #[cfg(not(feature = "no_function"))]
+        let wrappers: Option<SharedModule> = (!program.functions().is_empty())
+            .then(|| Self::from_grain_functions(functions.clone()).into());
+        #[cfg(feature = "no_function")]
+        let wrappers = None;
+
         // Run the Grain program
         let mut vm = crate::grain::Vm::with_global_state(
             engine,
             std::mem::replace(global, engine.new_global_runtime_state()),
         );
-        let result = vm.eval_with_callbacks(scope, &program);
+        let result = vm.eval_with_wrappers(scope, &program, wrappers.clone());
         *global = vm.into_global_state();
 
         // Create new module
@@ -2611,9 +2709,8 @@ impl Module {
         #[cfg(not(feature = "no_function"))]
         let mut lib: crate::StaticVec<_> = program.lib().cloned().into_iter().collect();
         #[cfg(not(feature = "no_function"))]
-        if !program.functions().is_empty() {
-            let wrappers = crate::grain::callback_wrappers(engine, &program);
-            lib.push(wrappers.into());
+        if let Some(wrappers) = wrappers {
+            lib.push(wrappers);
         }
 
         #[cfg(not(feature = "no_function"))]
@@ -2669,7 +2766,9 @@ impl Module {
         }
 
         #[cfg(not(feature = "no_function"))]
-        crate::grain::export_functions_to_module(&program, &mut module, &env);
+        if !program.functions().is_empty() {
+            module.set_grain_functions(functions.exports(env));
+        }
 
         module.id = program.source().cloned();
 
@@ -2741,6 +2840,16 @@ impl Module {
                         contains_indexed_global_functions = true;
                     }
                 });
+            }
+
+            #[cfg(feature = "grain")]
+            #[cfg(not(feature = "no_function"))]
+            if module
+                .grain_functions
+                .as_ref()
+                .map_or(false, |g| g.has_global())
+            {
+                contains_indexed_global_functions = true;
             }
 
             // Index all functions

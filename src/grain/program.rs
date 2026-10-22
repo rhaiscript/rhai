@@ -816,63 +816,6 @@ impl<'a> Program<'a> {
     }
 }
 
-/// Export non-private functions into a [`Module`].
-#[cfg(not(feature = "no_function"))]
-#[cfg(not(feature = "no_module"))]
-pub fn export_functions_to_module(
-    program: &SharedProgram,
-    module: &mut crate::Module,
-    env: &Shared<crate::func::EncapsulatedEnviron>,
-) {
-    program
-        .functions()
-        .iter()
-        .filter(|&f| match f.access {
-            crate::func::FnAccess::Public => true,
-            crate::func::FnAccess::Private => false,
-        })
-        .for_each(|f| {
-            let fn_name: ImmutableString =
-                program.name(f.name).expect("valid function name").into();
-            let params: crate::FnArgsVec<ImmutableString> = f
-                .params
-                .iter()
-                .map(|&idx| program.name(idx).expect("valid param name").into())
-                .collect();
-
-            let fn_def = crate::func::ScriptFuncDef {
-                name: fn_name,
-                access: f.access,
-                #[cfg(not(feature = "no_object"))]
-                this_type: f
-                    .this_type
-                    .and_then(|index| program.name(index))
-                    .map(Into::into),
-                params,
-                body: crate::func::ScriptFuncPayload::GrainVM {
-                    program: program.clone(),
-                    params: f.params.iter().copied().collect(),
-                    chunk: f.chunk,
-                    span: crate::types::Span::new(
-                        program.position(f.chunk.entry() as usize),
-                        program.position(f.chunk.end() as usize),
-                    ),
-                },
-                #[cfg(feature = "metadata")]
-                comments: <_>::default(),
-            };
-
-            let hash = module.set_script_fn(fn_def);
-
-            if let Some(crate::func::RhaiFunc::Script { env: ref mut e, .. }) =
-                module.get_script_fn_by_hash_mut(hash)
-            {
-                // Encapsulated environment
-                *e = Some(env.clone());
-            }
-        });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -109,16 +109,11 @@ impl Engine {
 
         // Finally, see if it is a script function name and return a function pointer
         #[cfg(not(feature = "no_function"))]
-        if let Some(func) = global
+        if let Some(fn_def) = global
             .lib
             .iter()
-            .flat_map(|m| m.iter_fn())
-            .filter(|(f, _)| f.is_script())
-            .filter(|(_, meta)| meta.name == var_name.as_str())
-            .map(|(f, _)| f)
-            .next()
+            .find_map(|m| m.get_script_fn_named(var_name, None))
         {
-            let fn_def = func.get_script_fn_def().unwrap();
             let val: Dynamic = crate::FnPtr {
                 name: var_name.clone(),
                 curry: <_>::default(),

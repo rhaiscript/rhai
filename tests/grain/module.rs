@@ -206,3 +206,99 @@ fn grain_fn_ptr_callbacks_and_closures() {
     let items: Vec<INT> = res.into_iter().map(|d| d.cast::<INT>()).collect();
     assert_eq!(items, vec![6, 7, 8]);
 }
+
+/// A Grain module looks its functions up in the program when they are called,
+/// so a lookup has to find what registering them would have found: the public
+/// ones under their qualified names, and none of the private ones.
+#[test]
+#[cfg(not(feature = "no_function"))]
+fn functions_are_found_without_being_registered() {
+    let mut engine = corpus::engine();
+    let ast = engine
+        .compile(
+            r#"
+                fn one() { 1 }
+                fn add(a, b) { a + b }
+                private fn hidden() { 2 }
+            "#,
+        )
+        .expect("must compile");
+
+    let program = Compiler::new().compile(&ast);
+    let module = Module::eval_grain_as_new(Scope::new(), program, &engine).expect("must eval grain module");
+    assert_eq!(module.count().1, 2, "the private function is not exported");
+    assert!(!module.is_empty());
+
+    let mut resolver = StaticModuleResolver::new();
+    resolver.insert("m", module);
+    engine.set_module_resolver(resolver);
+
+    assert_eq!(engine.eval::<INT>(r#"import "m" as m; m::one() + m::add(m::one(), 2)"#).unwrap(), 4);
+    // The same call again resolves to the definition the first one made.
+    assert_eq!(engine.eval::<INT>(r#"import "m" as m; let n = 0; for i in 0..3 { n += m::add(i, 1) } n"#).unwrap(), 6);
+    assert!(engine.run(r#"import "m" as m; m::add(1)"#).is_err(), "the parameter count is part of the name");
+    assert!(engine.run(r#"import "m" as m; m::hidden()"#).is_err());
+}
+
+/// A method declared for a receiver type is in the global namespace, so it is
+/// found without the module's name.
+#[test]
+#[cfg(not(feature = "no_function"))]
+#[cfg(not(feature = "no_object"))]
+fn a_typed_method_is_found_globally() {
+    let mut engine = corpus::engine();
+    let ast = engine.compile(r#"fn int.doubled() { this * 2 }"#).expect("must compile");
+
+    let program = Compiler::new().compile(&ast);
+    let module = Module::eval_grain_as_new(Scope::new(), program, &engine).expect("must eval grain module");
+
+    let mut resolver = StaticModuleResolver::new();
+    resolver.insert("m", module);
+    engine.set_module_resolver(resolver);
+
+    assert_eq!(engine.eval::<INT>(r#"import "m" as m; let x = 21; x.doubled()"#).unwrap(), 42);
+}
+
+/// Combining a Grain module into another registers its functions there, where
+/// nothing looks them up in the program any more.
+#[test]
+#[cfg(not(feature = "no_function"))]
+fn a_combined_module_keeps_its_functions() {
+    let mut engine = corpus::engine();
+    let ast = engine.compile(r#"fn seven() { 7 }"#).expect("must compile");
+
+    let program = Compiler::new().compile(&ast);
+    let grain = Module::eval_grain_as_new(Scope::new(), program, &engine).expect("must eval grain module");
+
+    let mut combined = Module::new();
+    combined.set_native_fn("eight", || Ok(8 as INT));
+    combined.combine(grain);
+    combined.build_index();
+    assert_eq!(combined.count().1, 2);
+
+    let mut resolver = StaticModuleResolver::new();
+    resolver.insert("m", combined);
+    engine.set_module_resolver(resolver);
+
+    assert_eq!(engine.eval::<INT>(r#"import "m" as m; m::seven() + m::eight()"#).unwrap(), 15);
+}
+
+/// Metadata lists a Grain module's functions, as it lists those of a plugin
+/// module's manifest.
+#[test]
+#[cfg(feature = "metadata")]
+#[cfg(not(feature = "no_function"))]
+fn metadata_lists_the_functions() {
+    let engine = corpus::engine();
+    let ast = engine.compile(r#"fn greet(name) { name }"#).expect("must compile");
+
+    let program = Compiler::new().compile(&ast);
+    let mut module = Module::eval_grain_as_new(Scope::new(), program, &engine).expect("must eval grain module");
+    assert!(module.has_lazy_functions());
+
+    module.register_lazy_functions();
+    assert!(!module.has_lazy_functions());
+    let signatures: Vec<String> = module.gen_fn_signatures_with_mapper(Into::into).collect();
+    assert_eq!(signatures.len(), 1, "{signatures:?}");
+    assert!(signatures[0].starts_with("greet(name"), "{signatures:?}");
+}

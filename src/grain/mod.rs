@@ -209,6 +209,6 @@ pub use vm::{Fault, Vm};
 #[cfg(feature = "internals")]
 pub use program::Function;
 
-#[cfg(not(feature = "no_module"))]
+#[cfg(not(feature = "internals"))]
 #[cfg(not(feature = "no_function"))]
-pub(crate) use {program::export_functions_to_module, vm::callback_wrappers};
+pub(crate) use program::Function;
