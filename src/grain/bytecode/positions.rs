@@ -15,12 +15,15 @@ use std::prelude::v1::*;
 /// instructions that had one. What it buys is that they can now be removed.
 /// `tests/format.rs` measures how much that removes.
 ///
-/// In memory this is dense, because the lookup is not always cold. A loop
-/// back-edge passes a position to `track_operation` on every iteration, and the
-/// built-in operator path builds a `NativeCallContext` around one — both on the
-/// hot path, both needing it only if something goes wrong. Indexing an array is
-/// what makes that free. The compact delta form in [`pos`](crate::grain::pos)
-/// is the wire form, expanded once at load.
+/// In memory this holds only the instructions that have a position, in
+/// address order. The lookup is not always cold — a loop back-edge passes a
+/// position to `track_operation` on every iteration, and the built-in operator
+/// path builds a `NativeCallContext` around one — so it is a binary search,
+/// a dozen comparisons for a large script. An entry per code byte would make
+/// it an index, at four bytes of heap for every byte of code, for a table that
+/// is mostly empty: that is what a small device cannot spare. The compact
+/// delta form in [`pos`](crate::grain::pos) is the wire form, expanded once at
+/// load.
 ///
 /// [`Positions::Stripped`] is not a degraded mode to apologize for: it is what
 /// a device runs. Errors come back carrying an instruction address instead of a
@@ -30,18 +33,32 @@ pub enum Positions {
     /// The table was never written, or was stripped before shipping.
     #[default]
     Stripped,
-    /// One entry per instruction, so a lookup is an index.
-    Dense(Box<[Position]>),
+    /// The address and position of every instruction that has one, by
+    /// address.
+    Sparse(Box<[(u32, Position)]>),
 }
 
 impl Positions {
-    /// Build from one position per instruction, dropping the table entirely if
-    /// none of them say anything.
+    /// Build from one position per code byte, keeping only those that say
+    /// something, and dropping the table entirely if none of them do.
+    #[cfg(any(test, not(feature = "no_ast")))]
     pub(crate) fn dense(positions: Vec<Position>) -> Self {
-        if positions.iter().all(|pos| pos.is_none()) {
+        Self::sparse(
+            positions
+                .into_iter()
+                .enumerate()
+                .filter(|(_, pos)| !pos.is_none())
+                .map(|(pc, pos)| (pc as u32, pos))
+                .collect(),
+        )
+    }
+
+    /// Build from the instructions that have a position, in address order.
+    fn sparse(entries: Vec<(u32, Position)>) -> Self {
+        if entries.is_empty() {
             return Self::Stripped;
         }
-        Self::Dense(positions.into_boxed_slice())
+        Self::Sparse(entries.into_boxed_slice())
     }
 
     /// The position recorded for `pc`, or `Position::NONE`.
@@ -53,7 +70,10 @@ impl Positions {
     pub fn get(&self, pc: usize) -> Position {
         match self {
             Self::Stripped => Position::NONE,
-            Self::Dense(positions) => positions.get(pc).copied().unwrap_or(Position::NONE),
+            Self::Sparse(entries) => u32::try_from(pc)
+                .ok()
+                .and_then(|pc| entries.binary_search_by_key(&pc, |&(at, _)| at).ok())
+                .map_or(Position::NONE, |i| entries[i].1),
         }
     }
 
@@ -69,14 +89,14 @@ impl Positions {
     /// Instructions with no position are skipped, which is most of them.
     #[must_use]
     pub fn to_table(&self) -> Vec<u8> {
-        let Self::Dense(positions) = self else {
+        let Self::Sparse(entries) = self else {
             return crate::grain::pos::encode(core::iter::empty());
         };
 
-        crate::grain::pos::encode(positions.iter().enumerate().filter_map(|(pc, pos)| {
+        crate::grain::pos::encode(entries.iter().filter_map(|&(pc, pos)| {
             let line = pos.line()?;
             Some((
-                pc as u32,
+                pc,
                 Site {
                     line: line as u32,
                     column: pos.position().unwrap_or(0) as u32,
@@ -85,7 +105,7 @@ impl Positions {
         }))
     }
 
-    /// Expand a compact table back to one entry per code byte.
+    /// Expand a compact table back to an entry per instruction it names.
     ///
     /// Every address has to name the *start* of an instruction in `code`.
     /// Counting how many landed in range is not enough: another program's table
@@ -107,12 +127,15 @@ impl Positions {
         // Walked, not indexed: only an address the walk arrives at begins an
         // instruction. One landing mid-instruction is as wrong as one past the
         // end, and reads as a plausible position.
-        let mut positions = vec![Position::NONE; code.len()];
+        let mut entries = Vec::with_capacity(count as usize);
         let mut matched = 0usize;
         let mut at = 0usize;
         while at < code.len() {
             if let Some(site) = crate::grain::pos::resolve(table, at as u32) {
-                positions[at] = site_to_position(site);
+                let pos = site_to_position(site);
+                if !pos.is_none() {
+                    entries.push((at as u32, pos));
+                }
                 matched += 1;
             }
             match crate::grain::bytecode::code::width(code, at) {
@@ -131,7 +154,7 @@ impl Positions {
             });
         }
 
-        Ok(Self::dense(positions))
+        Ok(Self::sparse(entries))
     }
 }
 

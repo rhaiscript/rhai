@@ -310,6 +310,14 @@ fn allocation_footprint() {
             verified.peak,
         );
 
+        let full = program.write().expect("must be writable");
+        let with_positions = measure(|| rhai::grain::Program::read(&full).expect("must load"));
+        // The position table keeps an entry per instruction that has a
+        // position, not one per code byte: under a byte of heap per byte of
+        // code, where a dense table cost four.
+        let table = (with_positions.bytes - loaded.bytes) as usize;
+        assert!(table < code.len(), "the position table for {} bytes of code retains {table} bytes", code.len());
+
         let ratio = tree.bytes as f64 / loaded.bytes as f64;
         ratios.push(ratio);
         println!("{:>7} {:>9} {:>9} {:>9} {:>8} {:>6.1}x", source.len(), stripped.len(), tree.bytes, loaded.bytes, loaded.count, ratio,);
