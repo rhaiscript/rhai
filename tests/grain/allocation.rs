@@ -299,6 +299,17 @@ fn allocation_footprint() {
             "the loaded chunk must point into the artifact, not into a copy of it",
         );
 
+        // The verifier keeps a state per jump target, not per byte, so even
+        // this loop, a branch every few instructions, peaks at a few bytes
+        // per byte of code.
+        let verified = measure(|| loaded.value.verify().expect("must verify"));
+        assert!(
+            (verified.peak as usize) < code.len() * 32 / 10,
+            "verifying {} bytes of code peaked at {} bytes: a state per byte, 32 bytes each on this host, is back",
+            code.len(),
+            verified.peak,
+        );
+
         let ratio = tree.bytes as f64 / loaded.bytes as f64;
         ratios.push(ratio);
         println!("{:>7} {:>9} {:>9} {:>9} {:>8} {:>6.1}x", source.len(), stripped.len(), tree.bytes, loaded.bytes, loaded.count, ratio,);
