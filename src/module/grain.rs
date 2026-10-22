@@ -6,7 +6,8 @@
 //! [`ScriptFuncDef`], which every later lookup shares. A function nothing
 //! calls costs one empty slot.
 
-use super::{FnNamespace, Module, ModuleFlags};
+use super::lazy::LazySource;
+use super::{FnNamespace, Module};
 use crate::func::{EncapsulatedEnviron, RhaiFunc, ScriptFuncDef, ScriptFuncPayload};
 use crate::grain::{Function, SharedProgram};
 use crate::types::Span;
@@ -194,8 +195,8 @@ impl GrainFunctions {
     }
 
     /// Register every function into `module` as [`Module::set_script_fn`]
-    /// does, leaving any it already has.
-    fn register_into(&self, module: &mut Module) {
+    /// does, in place of any it already has.
+    pub(super) fn register_into(&self, module: &mut Module) {
         for (i, _) in self.iter() {
             let hash = module.set_script_fn(self.def(i).clone());
             if let Some(RhaiFunc::Script { env, .. }) = module.get_script_fn_by_hash_mut(hash) {
@@ -206,6 +207,25 @@ impl GrainFunctions {
 }
 
 impl Module {
+    /// The functions of Grain programs this [`Module`] holds, looked up only
+    /// when called, from the lowest precedence to the highest.
+    pub(super) fn grain_functions(&self) -> impl DoubleEndedIterator<Item = &GrainFunctions> {
+        self.lazy_functions.iter().flat_map(|f| f.grain())
+    }
+
+    /// Does this [`Module`] hold the functions of a Grain program, looked up
+    /// only when called?
+    #[must_use]
+    fn has_grain_functions(&self) -> bool {
+        self.grain_functions().next().is_some()
+    }
+
+    /// The number of functions of Grain programs this [`Module`] holds.
+    #[must_use]
+    pub(super) fn num_grain_functions(&self) -> usize {
+        self.grain_functions().map(GrainFunctions::len).sum()
+    }
+
     /// A [`Module`] whose functions are `functions`, looked up only when
     /// called.
     #[must_use]
@@ -214,40 +234,45 @@ impl Module {
         if let Some(source) = functions.program.source() {
             module.set_id(source.clone());
         }
-        module.set_grain_functions(functions);
+        module.add_grain_functions(functions);
         module.build_index();
         module
     }
 
-    /// Hold `functions`, looked up only when called, in place of any Grain
-    /// functions held before.
-    pub(crate) fn set_grain_functions(&mut self, functions: GrainFunctions) {
-        self.grain_functions = Some(functions);
-        self.flags
-            .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
+    /// Hold `functions`, looked up only when called, taking precedence over
+    /// any functions looked up only when called held before.
+    pub(crate) fn add_grain_functions(&mut self, functions: GrainFunctions) {
+        self.push_lazy_sources([LazySource::Grain(functions)]);
     }
 
     /// Register the Grain functions this holds as ordinary script functions.
     /// Functions already registered take precedence.
     pub(super) fn register_grain_functions(&mut self) {
-        if let Some(grain) = self.grain_functions.take() {
-            let functions = self.functions.take();
-            grain.register_into(self);
-            if let Some(functions) = functions {
-                self.functions
-                    .get_or_insert_with(|| super::new_hash_map(functions.len()))
-                    .extend(functions);
-            }
-            self.flags
-                .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
+        if !self.has_grain_functions() {
+            return;
         }
+        let sources = self.lazy_functions.take().map(|f| f.sources.into_vec());
+        let functions = self.functions.take();
+        let mut rest = Vec::new();
+        for source in sources.into_iter().flatten() {
+            match source {
+                LazySource::Grain(grain) => grain.register_into(self),
+                LazySource::Manifest(..) => rest.push(source),
+            }
+        }
+        if let Some(functions) = functions {
+            self.functions
+                .get_or_insert_with(|| super::new_hash_map(functions.len()))
+                .extend(functions);
+        }
+        self.push_lazy_sources(rest);
     }
 
     /// This [`Module`] with its Grain functions registered, cloning it if it
     /// holds any.
     #[must_use]
     pub(super) fn with_grain_registered(&self) -> std::borrow::Cow<'_, Self> {
-        if self.grain_functions.is_some() {
+        if self.has_grain_functions() {
             let mut module = self.clone();
             module.register_grain_functions();
             std::borrow::Cow::Owned(module)

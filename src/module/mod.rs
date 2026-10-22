@@ -671,12 +671,8 @@ pub struct Module {
     all_type_iterators: BTreeMap<TypeId, Shared<FnIterator>>,
     /// Flags.
     flags: ModuleFlags,
-    /// Functions in plugin module manifests, looked up only when called. Never empty if [`Some`].
+    /// Functions in plugin module manifests and Grain programs, looked up only when called.
     lazy_functions: Option<lazy::LazyFunctions>,
-    /// Functions in a Grain program, looked up only when called.
-    #[cfg(feature = "grain")]
-    #[cfg(not(feature = "no_function"))]
-    grain_functions: Option<grain::GrainFunctions>,
 }
 
 impl Default for Module {
@@ -809,9 +805,6 @@ impl Module {
             all_type_iterators: BTreeMap::new(),
             flags: ModuleFlags::INDEXED,
             lazy_functions: None,
-            #[cfg(feature = "grain")]
-            #[cfg(not(feature = "no_function"))]
-            grain_functions: None,
         }
     }
 
@@ -947,11 +940,6 @@ impl Module {
         self.type_iterators.clear();
         self.all_type_iterators.clear();
         self.lazy_functions = None;
-        #[cfg(feature = "grain")]
-        #[cfg(not(feature = "no_function"))]
-        {
-            self.grain_functions = None;
-        }
         self.flags
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
     }
@@ -1139,18 +1127,6 @@ impl Module {
                 .map_or(true, StraightHashMap::is_empty)
             && self.all_type_iterators.is_empty()
             && self.lazy_functions.is_none()
-            && !self.has_grain_functions()
-    }
-
-    /// Does this [`Module`] hold the functions of a Grain program, looked up only when called?
-    #[inline(always)]
-    #[must_use]
-    pub(crate) const fn has_grain_functions(&self) -> bool {
-        #[cfg(feature = "grain")]
-        #[cfg(not(feature = "no_function"))]
-        return self.grain_functions.is_some();
-        #[cfg(any(not(feature = "grain"), feature = "no_function"))]
-        return false;
     }
 
     /// Is the [`Module`] indexed?
@@ -1441,9 +1417,9 @@ impl Module {
         });
         #[cfg(feature = "grain")]
         let found = found.or_else(|| {
-            self.grain_functions
-                .as_ref()
-                .and_then(|g| g.get_named(name, num_params))
+            self.grain_functions()
+                .rev()
+                .find_map(|g| g.get_named(name, num_params))
         });
         found
     }
@@ -2071,7 +2047,7 @@ impl Module {
             other
         };
         if let Some(lazy_functions) = other.lazy_functions {
-            self.push_manifests(lazy_functions.manifests.into_vec());
+            self.push_lazy_sources(lazy_functions.sources.into_vec());
         }
         self.modules.extend(other.modules);
         self.variables.extend(other.variables);
@@ -2115,7 +2091,7 @@ impl Module {
             self.combine_flatten(shared_take_or_clone(m));
         }
         if let Some(lazy_functions) = other.lazy_functions {
-            self.push_manifests(lazy_functions.manifests.into_vec());
+            self.push_lazy_sources(lazy_functions.sources.into_vec());
         }
         self.variables.extend(other.variables);
         match self.functions {
@@ -2151,9 +2127,9 @@ impl Module {
         let other = &*other.with_grain_registered();
         // Existing manifests take precedence, so these go before them
         if let Some(ref lazy_functions) = other.lazy_functions {
-            let existing = self.lazy_functions.take().map(|f| f.manifests.into_vec());
-            self.push_manifests(lazy_functions.manifests.iter().copied());
-            self.push_manifests(existing.into_iter().flatten());
+            let existing = self.lazy_functions.take().map(|f| f.sources.into_vec());
+            self.push_lazy_sources(lazy_functions.sources.iter().cloned());
+            self.push_lazy_sources(existing.into_iter().flatten());
         }
         for (k, v) in &other.modules {
             if !self.modules.contains_key(k) {
@@ -2307,22 +2283,16 @@ impl Module {
     #[inline(always)]
     #[must_use]
     pub fn count(&self) -> (usize, usize, usize) {
-        (
-            self.variables.len(),
-            self.functions.as_ref().map_or(0, StraightHashMap::len) + self.num_grain_functions(),
-            self.type_iterators.len(),
-        )
-    }
-
-    /// The number of functions of a Grain program this [`Module`] holds.
-    #[inline(always)]
-    #[must_use]
-    fn num_grain_functions(&self) -> usize {
+        let num_functions = self.functions.as_ref().map_or(0, StraightHashMap::len);
         #[cfg(feature = "grain")]
         #[cfg(not(feature = "no_function"))]
-        return self.grain_functions.as_ref().map_or(0, |g| g.len());
-        #[cfg(any(not(feature = "grain"), feature = "no_function"))]
-        return 0;
+        let num_functions = num_functions + self.num_grain_functions();
+
+        (
+            self.variables.len(),
+            num_functions,
+            self.type_iterators.len(),
+        )
     }
 
     /// Get an iterator to the sub-modules in the [`Module`].
@@ -2397,7 +2367,7 @@ impl Module {
             )
         });
         #[cfg(feature = "grain")]
-        return registered.chain(self.grain_functions.iter().flat_map(|g| g.iter_defs()));
+        return registered.chain(self.grain_functions().flat_map(|g| g.iter_defs()));
         #[cfg(not(feature = "grain"))]
         return registered;
     }
@@ -2767,7 +2737,7 @@ impl Module {
 
         #[cfg(not(feature = "no_function"))]
         if !program.functions().is_empty() {
-            module.set_grain_functions(functions.exports(env));
+            module.add_grain_functions(functions.exports(env));
         }
 
         module.id = program.source().cloned();
@@ -2833,21 +2803,12 @@ impl Module {
                 type_iterators.insert(type_id, func.clone());
             }
 
-            // Functions in manifests are indexed on first lookup, but may be in the global namespace
-            if let Some(ref lazy_functions) = module.lazy_functions {
-                lazy_functions.for_each_fn(&mut |f| {
-                    if f.namespace() == FnNamespace::Global {
-                        contains_indexed_global_functions = true;
-                    }
-                });
-            }
-
-            #[cfg(feature = "grain")]
-            #[cfg(not(feature = "no_function"))]
+            // Functions looked up only when called are indexed on first lookup, but may be in the
+            // global namespace
             if module
-                .grain_functions
+                .lazy_functions
                 .as_ref()
-                .map_or(false, |g| g.has_global())
+                .map_or(false, lazy::LazyFunctions::has_global)
             {
                 contains_indexed_global_functions = true;
             }
