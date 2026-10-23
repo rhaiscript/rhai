@@ -2041,11 +2041,7 @@ impl Module {
     pub fn combine(&mut self, other: Self) -> &mut Self {
         #[cfg(feature = "grain")]
         #[cfg(not(feature = "no_function"))]
-        let other = {
-            let mut other = other;
-            other.register_grain_functions();
-            other
-        };
+        self.remove_fns_hidden_by_grain(&other);
         if let Some(lazy_functions) = other.lazy_functions {
             self.push_lazy_sources(lazy_functions.sources.into_vec());
         }
@@ -2079,17 +2075,13 @@ impl Module {
     /// The other [`Module`] is _consumed_ to merge into this [`Module`].
     /// Sub-modules are flattened onto the root [`Module`], with higher level overriding lower level.
     #[inline]
-    pub fn combine_flatten(&mut self, other: Self) -> &mut Self {
-        #[cfg(feature = "grain")]
-        #[cfg(not(feature = "no_function"))]
-        let other = {
-            let mut other = other;
-            other.register_grain_functions();
-            other
-        };
-        for m in other.modules.into_values() {
+    pub fn combine_flatten(&mut self, mut other: Self) -> &mut Self {
+        for m in std::mem::take(&mut other.modules).into_values() {
             self.combine_flatten(shared_take_or_clone(m));
         }
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        self.remove_fns_hidden_by_grain(&other);
         if let Some(lazy_functions) = other.lazy_functions {
             self.push_lazy_sources(lazy_functions.sources.into_vec());
         }
@@ -2122,15 +2114,6 @@ impl Module {
     /// Only items not existing in this [`Module`] are added.
     #[inline]
     pub fn fill_with(&mut self, other: &Self) -> &mut Self {
-        #[cfg(feature = "grain")]
-        #[cfg(not(feature = "no_function"))]
-        let other = &*other.with_grain_registered();
-        // Existing manifests take precedence, so these go before them
-        if let Some(ref lazy_functions) = other.lazy_functions {
-            let existing = self.lazy_functions.take().map(|f| f.sources.into_vec());
-            self.push_lazy_sources(lazy_functions.sources.iter().cloned());
-            self.push_lazy_sources(existing.into_iter().flatten());
-        }
         for (k, v) in &other.modules {
             if !self.modules.contains_key(k) {
                 self.modules.insert(k.clone(), v.clone());
@@ -2145,12 +2128,23 @@ impl Module {
             let others_len = functions.len();
 
             for (&k, f) in functions {
+                #[cfg(feature = "grain")]
+                #[cfg(not(feature = "no_function"))]
+                if self.has_grain_fn(k) {
+                    continue;
+                }
                 let map = self
                     .functions
                     .get_or_insert_with(|| new_hash_map(FN_MAP_SIZE));
                 map.reserve(others_len);
                 map.entry(k).or_insert_with(|| f.clone());
             }
+        }
+        // Existing sources take precedence, so these go before them
+        if let Some(ref lazy_functions) = other.lazy_functions {
+            let existing = self.lazy_functions.take().map(|f| f.sources.into_vec());
+            self.push_lazy_sources(lazy_functions.sources.iter().cloned());
+            self.push_lazy_sources(existing.into_iter().flatten());
         }
         self.dynamic_functions_filter += &other.dynamic_functions_filter;
         for (&k, v) in &other.type_iterators {

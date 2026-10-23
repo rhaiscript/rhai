@@ -259,8 +259,8 @@ fn a_typed_method_is_found_globally() {
     assert_eq!(engine.eval::<INT>(r#"import "m" as m; let x = 21; x.doubled()"#).unwrap(), 42);
 }
 
-/// Combining a Grain module into another registers its functions there, where
-/// nothing looks them up in the program any more.
+/// Combining a Grain module into another keeps its functions looked up only
+/// when called, taking precedence over functions already there.
 #[test]
 #[cfg(not(feature = "no_function"))]
 fn a_combined_module_keeps_its_functions() {
@@ -270,17 +270,44 @@ fn a_combined_module_keeps_its_functions() {
     let program = Compiler::new().compile(&ast);
     let grain = Module::eval_grain_as_new(Scope::new(), program, &engine).expect("must eval grain module");
 
-    let mut combined = Module::new();
+    let walker = engine.compile(r#"fn seven() { 0 } fn six() { 6 }"#).expect("must compile");
+    let mut combined = Module::eval_ast_as_new(Scope::new(), &walker, &engine).expect("must eval module");
     combined.set_native_fn("eight", || Ok(8 as INT));
     combined.combine(grain);
+    assert!(combined.has_lazy_functions());
     combined.build_index();
-    assert_eq!(combined.count().1, 2);
+    assert_eq!(combined.count().1, 3);
 
     let mut resolver = StaticModuleResolver::new();
     resolver.insert("m", combined);
     engine.set_module_resolver(resolver);
 
     assert_eq!(engine.eval::<INT>(r#"import "m" as m; m::seven() + m::eight()"#).unwrap(), 15);
+    assert_eq!(engine.eval::<INT>(r#"import "m" as m; m::six()"#).unwrap(), 6);
+}
+
+/// Filling a module with a Grain module adds only the functions it does not
+/// have, whether registered or looked up only when called.
+#[test]
+#[cfg(not(feature = "no_function"))]
+fn a_filled_module_keeps_its_own_functions() {
+    let mut engine = corpus::engine();
+    let program = |engine: &rhai::Engine, script: &str| Compiler::new().compile(&engine.compile(script).expect("must compile"));
+
+    let mut filled = Module::eval_grain_as_new(Scope::new(), program(&engine, r#"fn seven() { 7 }"#), &engine).expect("must eval grain module");
+    let other = engine.compile(r#"fn seven() { 0 } fn six() { 0 }"#).expect("must compile");
+    filled.fill_with(&Module::eval_ast_as_new(Scope::new(), &other, &engine).expect("must eval module"));
+    let other = Module::eval_grain_as_new(Scope::new(), program(&engine, r#"fn six() { 6 } fn five() { 5 }"#), &engine).expect("must eval grain module");
+    filled.fill_with(&other);
+    filled.build_index();
+
+    let mut resolver = StaticModuleResolver::new();
+    resolver.insert("m", filled);
+    engine.set_module_resolver(resolver);
+
+    assert_eq!(engine.eval::<INT>(r#"import "m" as m; m::seven()"#).unwrap(), 7);
+    assert_eq!(engine.eval::<INT>(r#"import "m" as m; m::six()"#).unwrap(), 0);
+    assert_eq!(engine.eval::<INT>(r#"import "m" as m; m::five()"#).unwrap(), 5);
 }
 
 /// Metadata lists a Grain module's functions, as it lists those of a plugin

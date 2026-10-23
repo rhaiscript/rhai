@@ -137,6 +137,11 @@ impl GrainFunctions {
         }
     }
 
+    /// The hashes [`Module::set_script_fn`] gives the functions.
+    pub(super) fn hashes(&self) -> impl Iterator<Item = u64> + '_ {
+        self.iter().map(|(_, f)| self.hash(f, None))
+    }
+
     /// The function [`Module::set_script_fn`] would have put under `hash`.
     #[must_use]
     pub(super) fn get(&self, hash: u64) -> Option<RhaiFunc> {
@@ -224,6 +229,26 @@ impl Module {
     #[must_use]
     pub(super) fn num_grain_functions(&self) -> usize {
         self.grain_functions().map(GrainFunctions::len).sum()
+    }
+
+    /// Does this [`Module`] hold a Grain function under `hash`, looked up
+    /// only when called?
+    #[must_use]
+    pub(super) fn has_grain_fn(&self, hash: u64) -> bool {
+        self.grain_functions()
+            .any(|g| g.hashes().any(|h| h == hash))
+    }
+
+    /// Remove the functions registered in this [`Module`] that the Grain
+    /// functions `other` holds would take precedence over once combined
+    /// into it, so that lookups fall through to them.
+    pub(super) fn remove_fns_hidden_by_grain(&mut self, other: &Self) {
+        let Some(ref mut functions) = self.functions else {
+            return;
+        };
+        for hash in other.grain_functions().flat_map(GrainFunctions::hashes) {
+            functions.remove(&hash);
+        }
     }
 
     /// A [`Module`] whose functions are `functions`, looked up only when
