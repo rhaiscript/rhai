@@ -18,6 +18,7 @@ Bug fixes
 * Assigning a constant into a container variable (array, map etc.) now works properly without making the value read-only (thanks [`@cuervolu`](https://github.com/cuervolu) [`#1187`](https://github.com/rhaiscript/rhai/pull/1187)).
 * Under `sync`, a method call on a shared variable with a closure argument that captures the same variable now raises `ErrorDataRace`, as it does without `sync`, instead of panicking while resolving the function. `Dynamic::is_locked` now returns `true` under `sync` when the value cannot be read, which includes being locked for write by the current thread (thanks [`@yuvalrakavy`](https://github.com/yuvalrakavy) [`#1190`](https://github.com/rhaiscript/rhai/pull/1190)).
 * A panic inside a native Rust function that takes its first argument by value, called with a variable first argument, now unwinds normally and can be caught by `catch_unwind`. Previously the copied first argument was restored only on the normal-return path, so the unwind tripped an internal assertion and the process aborted (thanks [`@yuvalrakavy`](https://github.com/yuvalrakavy) [`#1189`](https://github.com/rhaiscript/rhai/pull/1189)).
+* `AST::clone_functions_only_filtered` now applies its filter, as does `AST::merge_filtered` when the first `AST` has no functions. Previously every function was kept (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1192`](https://github.com/rhaiscript/rhai/pull/1192)).
 
 Rhai Grain is now at feature parity with the AST interpreter
 ------------------------------------------------------------

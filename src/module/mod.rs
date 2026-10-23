@@ -2209,17 +2209,16 @@ impl Module {
         }
 
         if let Some(ref functions) = other.functions {
-            match self.functions {
-                Some(ref mut m) => m.extend(
+            self.functions
+                .get_or_insert_with(|| new_hash_map(functions.len()))
+                .extend(
                     functions
                         .iter()
                         .filter(|(.., (f, m))| {
                             _filter(m.namespace, m.access, f.is_script(), &m.name, m.num_params)
                         })
                         .map(|(&k, f)| (k, f.clone())),
-                ),
-                None => self.functions.clone_from(&other.functions),
-            }
+                );
         }
         self.dynamic_functions_filter += &other.dynamic_functions_filter;
 
