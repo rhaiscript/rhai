@@ -1370,7 +1370,7 @@ impl Module {
     }
 
     /// Get a mutable reference to a scripted function in the [`Module`] based on its hash.
-    /// Exported under the `internals` feature only.
+    #[cfg(feature = "grain")]
     #[cfg(not(feature = "no_function"))]
     #[inline(always)]
     #[must_use]
