@@ -31,6 +31,9 @@ pub(crate) struct GrainFunctions {
     /// every [`GrainFunctions`] made from the same one, so a module's library
     /// and its exports make each definition once between them.
     defs: Shared<[OnceBox<Shared<ScriptFuncDef>>]>,
+    /// Each function's hash under no namespace, made on the first lookup and
+    /// shared as `defs` is.
+    hashes: Shared<OnceBox<Vec<u64>>>,
 }
 
 impl GrainFunctions {
@@ -43,6 +46,7 @@ impl GrainFunctions {
             env: None,
             public_only: false,
             defs: defs.into(),
+            hashes: Shared::new(OnceBox::new()),
         }
     }
 
@@ -55,6 +59,7 @@ impl GrainFunctions {
             env: Some(env),
             public_only: true,
             defs: self.defs.clone(),
+            hashes: self.hashes.clone(),
         }
     }
 
@@ -100,6 +105,14 @@ impl GrainFunctions {
         hash
     }
 
+    /// Function `i`'s hash under no namespace, as [`hash`](Self::hash) gives it.
+    fn unqualified_hash(&self, i: usize) -> u64 {
+        self.hashes.get_or_init(|| {
+            let functions = self.program.functions();
+            Box::new(functions.iter().map(|f| self.hash(f, None)).collect())
+        })[i]
+    }
+
     /// Function `i`'s definition, made on the first call.
     fn def(&self, i: usize) -> &Shared<ScriptFuncDef> {
         self.defs[i].get_or_init(|| {
@@ -139,15 +152,27 @@ impl GrainFunctions {
 
     /// The hashes [`Module::set_script_fn`] gives the functions.
     pub(super) fn hashes(&self) -> impl Iterator<Item = u64> + '_ {
-        self.iter().map(|(_, f)| self.hash(f, None))
+        self.iter().map(|(i, _)| self.unqualified_hash(i))
     }
 
     /// The function [`Module::set_script_fn`] would have put under `hash`.
     #[must_use]
     pub(super) fn get(&self, hash: u64) -> Option<RhaiFunc> {
         self.iter()
-            .find(|(_, f)| self.hash(f, None) == hash)
+            .find(|&(i, _)| self.unqualified_hash(i) == hash)
             .map(|(i, _)| self.func(i))
+    }
+
+    /// The definition of the function [`Module::set_script_fn`] would have
+    /// put under `hash`, and the environment it runs in.
+    #[must_use]
+    pub(super) fn get_script(
+        &self,
+        hash: u64,
+    ) -> Option<(&Shared<ScriptFuncDef>, Option<&Shared<EncapsulatedEnviron>>)> {
+        self.iter()
+            .find(|&(i, _)| self.unqualified_hash(i) == hash)
+            .map(|(i, _)| (self.def(i), self.env.as_ref()))
     }
 
     /// The function [`Module::build_index`] would have put under `hash`, for
@@ -155,9 +180,10 @@ impl GrainFunctions {
     #[must_use]
     pub(super) fn get_qualified(&self, path: &[&str], hash: u64) -> Option<RhaiFunc> {
         self.iter()
-            .find(|(_, f)| {
+            .find(|&(i, f)| {
                 self.hash(f, path.iter().copied()) == hash
-                    || (Self::namespace(f) == FnNamespace::Global && self.hash(f, None) == hash)
+                    || (Self::namespace(f) == FnNamespace::Global
+                        && self.unqualified_hash(i) == hash)
             })
             .map(|(i, _)| self.func(i))
     }

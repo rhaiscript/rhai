@@ -1357,16 +1357,33 @@ impl Module {
         hash_script
     }
 
-    /// Get a reference to a scripted function in the [`Module`] based on its hash.
-    /// Exported under the `internals` feature only.
+    /// Get a reference to a scripted function in the [`Module`], and the environment it runs in,
+    /// based on its hash.
     #[cfg(not(feature = "no_function"))]
-    #[inline(always)]
+    #[inline]
     #[must_use]
-    pub(crate) fn get_script_fn_by_hash(&self, hash: u64) -> Option<&crate::func::RhaiFunc> {
-        self.functions
+    pub(crate) fn get_script_fn_by_hash(
+        &self,
+        hash: u64,
+    ) -> Option<(
+        &Shared<crate::func::ScriptFuncDef>,
+        Option<&Shared<crate::func::EncapsulatedEnviron>>,
+    )> {
+        let found = self
+            .functions
             .as_ref()
             .and_then(|f| f.get(&hash))
-            .map(|(f, _)| f)
+            .and_then(|(f, _)| match f {
+                RhaiFunc::Script { fn_def, env } => Some((fn_def, env.as_ref())),
+                _ => None,
+            });
+        #[cfg(feature = "grain")]
+        let found = found.or_else(|| {
+            self.grain_functions()
+                .rev()
+                .find_map(|g| g.get_script(hash))
+        });
+        found
     }
 
     /// Get a mutable reference to a scripted function in the [`Module`] based on its hash.

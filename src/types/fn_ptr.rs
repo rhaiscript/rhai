@@ -70,13 +70,7 @@ impl FnPtrType {
             Self::Script { num_params, hash }
                 if *num_params == num_args && !global.lib.is_empty() =>
             {
-                global.lib[0].get_script_fn_by_hash(*hash).map(|f| match f {
-                    crate::func::RhaiFunc::Script {
-                        ref fn_def,
-                        ref env,
-                    } => (fn_def, env.as_ref()),
-                    _ => unreachable!(),
-                })
+                global.lib[0].get_script_fn_by_hash(*hash)
             }
             _ => None,
         }
