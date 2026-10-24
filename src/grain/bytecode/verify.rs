@@ -259,10 +259,11 @@ pub fn verify(
     //
     // Over the whole buffer at once, because every chunk shares it and an
     // instruction boundary is a property of the bytes, not of who runs them.
-    let mut starts = vec![false; code.len() + 1];
+    // One bit per byte.
+    let mut starts = vec![0u64; code.len() / 64 + 1];
     let mut at = 0usize;
     while at < code.len() {
-        starts[at] = true;
+        starts[at / 64] |= 1 << (at % 64);
         let width = code::width(code, at).ok_or(VerifyError::Undecodable { at })?;
         check_indices(at, code, pools)?;
         at += width;
@@ -303,13 +304,52 @@ struct State {
     handlers: usize,
 }
 
+/// Whether an instruction starts at `at`, by pass one's bits.
+fn starts_at(starts: &[u64], at: usize) -> bool {
+    starts
+        .get(at / 64)
+        .map_or(false, |bits| bits & (1 << (at % 64)) != 0)
+}
+
+/// Every offset `op` can jump to, onto `out`.
+fn jump_targets(op: &Op, pools: &Pools, out: &mut Vec<u32>) {
+    match *op {
+        Op::Jump(target)
+        | Op::JumpIfFalse { target }
+        | Op::JumpIfTrue { target }
+        | Op::SkipIfNotUnit { target }
+        | Op::PushHandler { target, .. }
+        | Op::IterNext { exit: target, .. } => out.push(target),
+        Op::Switch(index) => {
+            if let Some(table) = pools.switches.get(index as usize) {
+                out.extend(
+                    table
+                        .cases
+                        .iter()
+                        .flat_map(|cases| cases.values())
+                        .map(|&(target, _)| target)
+                        .chain(table.ranges.iter().map(|range| range.target))
+                        .chain(core::iter::once(table.default)),
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Walk one chunk's reachable instructions, checking that every path into an
 /// instruction agrees on the stack depth.
+///
+/// Only an instruction something jumps to can be reached from more than one
+/// place: any other is reached only by falling through from the one before
+/// it, so its state follows from that one's. Recording the state at the entry
+/// and at every jump target is therefore enough to see every merge, and it
+/// costs memory in the chunk's branches rather than its length.
 fn verify_chunk(
     caps: Caps,
     code: &[u8],
     chunk: &Chunk,
-    starts: &[bool],
+    starts: &[u64],
     pools: &Pools,
 ) -> Result<u16, VerifyError> {
     let (entry, end) = (chunk.entry() as usize, chunk.end() as usize);
@@ -321,7 +361,18 @@ fn verify_chunk(
         });
     }
 
-    let mut depth_at: Vec<Option<State>> = vec![None; code.len()];
+    let mut targets = vec![entry as u32];
+    let mut at = entry;
+    while at < end {
+        let op = code::decode(code, at).ok_or(VerifyError::Undecodable { at })?;
+        jump_targets(&op, pools, &mut targets);
+        at += code::width(code, at).ok_or(VerifyError::Undecodable { at })?;
+    }
+    targets.sort_unstable();
+    targets.dedup();
+
+    // The state every path into each of `targets` arrives in, once one has.
+    let mut seen: Vec<Option<State>> = vec![None; targets.len()];
     let mut work_list = vec![(entry, State::default())];
     let mut high_water = 0usize;
 
@@ -332,16 +383,18 @@ fn verify_chunk(
 
         // Merge point: either this is the first visit, or every earlier path
         // has to have arrived in the same state.
-        match depth_at[at] {
-            Some(seen) if seen == state => continue,
-            Some(seen) => {
-                return Err(VerifyError::DepthConflict {
-                    at,
-                    expected: seen.operands,
-                    found: state.operands,
-                })
+        if let Ok(slot) = targets.binary_search(&(at as u32)) {
+            match seen[slot] {
+                Some(seen) if seen == state => continue,
+                Some(seen) => {
+                    return Err(VerifyError::DepthConflict {
+                        at,
+                        expected: seen.operands,
+                        found: state.operands,
+                    })
+                }
+                None => seen[slot] = Some(state),
             }
-            None => depth_at[at] = Some(state),
         }
 
         let depth = state.operands;
@@ -411,11 +464,18 @@ fn verify_chunk(
                     target: target as u32,
                 });
             }
-            if !starts[target] {
+            if !starts_at(starts, target) {
                 return Err(VerifyError::JumpIntoAnInstruction {
                     at,
                     target: target as u32,
                 });
+            }
+            // Every edge followed here has to be one `jump_targets` found, or
+            // the instruction it lands on would go unchecked as a merge point.
+            // Refused rather than trusted, so a disagreement between the two
+            // can only reject a chunk, never pass one.
+            if targets.binary_search(&(target as u32)).is_err() {
+                return Err(VerifyError::Undecodable { at });
             }
             work_list.push((target, state));
             Ok(())

@@ -32,10 +32,6 @@ use crate::{types::dynamic::Variant, CallFnOptions};
 
 mod callback;
 
-#[cfg(not(feature = "no_function"))]
-#[cfg(not(feature = "no_module"))]
-pub(crate) use callback::wrappers as callback_wrappers;
-
 use crate::grain::bytecode::{
     code, names, AssignOp, Chain, Chunk, Receiver, Root, Step, StepFlags, Tail,
 };
@@ -875,11 +871,23 @@ impl<'e> Vm<'e> {
         return if program.functions().is_empty() {
             self.run_with(program, scope, None)
         } else {
-            let wrappers = callback::wrappers(self.engine, program).into();
+            let wrappers = callback::wrappers(program).into();
             self.run_with(program, scope, Some(wrappers))
         };
         #[cfg(feature = "no_function")]
         return self.run_with(program, scope, None);
+    }
+
+    /// Like [`eval_with_callbacks`](Self::eval_with_callbacks), with a module of the
+    /// [`Program`]'s functions the caller made, so the caller can keep it after the run.
+    #[cfg(not(feature = "no_module"))]
+    pub(crate) fn eval_with_wrappers(
+        &mut self,
+        scope: &mut Scope,
+        program: &SharedProgram,
+        wrappers: Option<SharedModule>,
+    ) -> RhaiResult {
+        self.run_with(program, scope, wrappers)
     }
 
     fn run_with(

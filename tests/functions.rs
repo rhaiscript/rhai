@@ -838,3 +838,21 @@ fn test_functions_resolution_in_loop() {
 
     assert_eq!(engine.eval::<INT>("let t = 0; for i in 0..10 { t += calc(i); } t").unwrap(), 55);
 }
+
+#[test]
+fn test_functions_clone_filtered() {
+    let engine = Engine::new();
+    let ast = engine.compile("fn keep(x) { x } fn drop(x) { x } fn keep() { 0 }").unwrap();
+
+    let names = |ast: &rhai::AST| {
+        let mut names: Vec<_> = ast.iter_functions().map(|f| format!("{}/{}", f.name, f.params.len())).collect();
+        names.sort();
+        names
+    };
+
+    let filtered = ast.clone_functions_only_filtered(|_, _, _, name, _| name == "keep");
+    assert_eq!(names(&filtered), ["keep/0", "keep/1"]);
+
+    let merged = engine.compile("1").unwrap().merge_filtered(&ast, |_, _, _, _, params| params == 1);
+    assert_eq!(names(&merged), ["drop/1", "keep/1"]);
+}

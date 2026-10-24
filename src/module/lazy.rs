@@ -1,5 +1,9 @@
-//! Functions in plugin modules, looked up from their manifests only when called.
+//! Functions looked up only when called: those in plugin module manifests, and those of Grain
+//! programs.
 
+#[cfg(feature = "grain")]
+#[cfg(not(feature = "no_function"))]
+use super::GrainFunctions;
 use super::{new_hash_map, FnNamespace, Module, ModuleFlags};
 use crate::func::RhaiFunc;
 use crate::plugin::{FnManifestEntry, ModuleManifest};
@@ -7,11 +11,22 @@ use std::borrow::Cow;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
-/// Plugin module manifests whose functions are looked up only when called.
-#[derive(Debug, Clone)]
+/// A source of functions looked up only when called.
+#[derive(Clone)]
+pub(super) enum LazySource {
+    /// A plugin module manifest, and whether its sub-modules are flattened.
+    Manifest(&'static ModuleManifest, bool),
+    /// The functions of a Grain program.
+    #[cfg(feature = "grain")]
+    #[cfg(not(feature = "no_function"))]
+    Grain(GrainFunctions),
+}
+
+/// Sources of functions looked up only when called.
+#[derive(Clone)]
 pub(super) struct LazyFunctions {
-    /// Manifests, and whether their sub-modules are flattened. Later manifests take precedence.
-    pub(super) manifests: Box<[(&'static ModuleManifest, bool)]>,
+    /// Later sources take precedence. Never empty.
+    pub(super) sources: Box<[LazySource]>,
 }
 
 impl LazyFunctions {
@@ -20,31 +35,82 @@ impl LazyFunctions {
     ///
     /// Registering each function in turn leaves the one with the highest precedence in place.
     pub(super) fn for_each_fn(&self, f: &mut dyn FnMut(&'static FnManifestEntry)) {
-        for &(manifest, flatten) in &*self.manifests {
-            manifest.for_each_fn(flatten, f);
+        for source in &*self.sources {
+            match *source {
+                LazySource::Manifest(manifest, flatten) => manifest.for_each_fn(flatten, f),
+                #[cfg(feature = "grain")]
+                #[cfg(not(feature = "no_function"))]
+                LazySource::Grain(..) => (),
+            }
         }
     }
-    /// Find the function in the manifests with the highest precedence that matches a predicate.
+    /// The Grain functions, from the lowest precedence to the highest.
+    #[cfg(feature = "grain")]
+    #[cfg(not(feature = "no_function"))]
+    pub(super) fn grain(&self) -> impl DoubleEndedIterator<Item = &GrainFunctions> {
+        self.sources.iter().filter_map(|source| match source {
+            LazySource::Grain(functions) => Some(functions),
+            LazySource::Manifest(..) => None,
+        })
+    }
+    /// Find the function with the highest precedence that matches.
+    ///
+    /// `manifest` matches a function in a manifest; `grain` looks up a function of a Grain program.
     fn find_fn(
         &self,
-        f: &mut dyn FnMut(&FnManifestEntry) -> bool,
-    ) -> Option<&'static FnManifestEntry> {
-        self.manifests
-            .iter()
-            .rev()
-            .find_map(|&(manifest, flatten)| manifest.find_fn(flatten, f))
+        manifest: &mut dyn FnMut(&FnManifestEntry) -> bool,
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        grain: &mut dyn FnMut(&GrainFunctions) -> Option<RhaiFunc>,
+    ) -> Option<RhaiFunc> {
+        self.sources.iter().rev().find_map(|source| match *source {
+            LazySource::Manifest(m, flatten) => m
+                .find_fn(flatten, manifest)
+                .map(|f| RhaiFunc::StaticPlugin { func: f.func() }),
+            #[cfg(feature = "grain")]
+            #[cfg(not(feature = "no_function"))]
+            LazySource::Grain(ref functions) => grain(functions),
+        })
+    }
+    /// Is any function in the global namespace?
+    pub(super) fn has_global(&self) -> bool {
+        self.sources.iter().any(|source| match *source {
+            LazySource::Manifest(manifest, flatten) => manifest
+                .find_fn(flatten, &mut |f| f.namespace() == FnNamespace::Global)
+                .is_some(),
+            #[cfg(feature = "grain")]
+            #[cfg(not(feature = "no_function"))]
+            LazySource::Grain(ref functions) => functions.has_global(),
+        })
+    }
+    /// Register every function into `module`, from the lowest precedence to the highest.
+    fn register_into(&self, module: &mut Module) {
+        for source in &*self.sources {
+            match *source {
+                LazySource::Manifest(manifest, flatten) => {
+                    manifest.for_each_fn(flatten, &mut |f| f.register_into(module));
+                }
+                #[cfg(feature = "grain")]
+                #[cfg(not(feature = "no_function"))]
+                LazySource::Grain(ref functions) => functions.register_into(module),
+            }
+        }
     }
 }
 
 impl Module {
-    /// Look up a function in plugin module manifests by hash, calculating the hash of each
-    /// function in turn.
+    /// Look up a function in plugin module manifests, or among the functions of a Grain program,
+    /// by hash, calculating the hash of each function in turn.
     #[must_use]
     pub(super) fn get_lazy_fn(&self, hash_native: u64) -> Option<RhaiFunc> {
-        self.lazy_functions
-            .as_ref()?
-            .find_fn(&mut |f| f.calc_hash(&[]) == hash_native)
-            .map(|f| RhaiFunc::StaticPlugin { func: f.func() })
+        self.lazy_functions.as_ref().and_then(|f| {
+            f.find_fn(
+                &mut |f| f.calc_hash(&[]) == hash_native,
+                #[cfg(feature = "grain")]
+                #[cfg(not(feature = "no_function"))]
+                &mut |g| g.get(hash_native),
+            )
+        })
     }
     /// Create a new [`Module`] from a plugin module's [manifest][crate::plugin::ModuleManifest].
     ///
@@ -96,21 +162,18 @@ impl Module {
                 self.dynamic_functions_filter.mark(hash_script);
             }
         });
-        self.push_manifests([(manifest, flatten)]);
+        self.push_lazy_sources([LazySource::Manifest(manifest, flatten)]);
     }
-    /// Add manifests whose functions are looked up only when called, taking precedence over
-    /// existing ones, without updating the filter on functions with [`Dynamic`][crate::Dynamic] parameters.
-    pub(super) fn push_manifests(
-        &mut self,
-        manifests: impl IntoIterator<Item = (&'static ModuleManifest, bool)>,
-    ) {
+    /// Add sources of functions looked up only when called, taking precedence over existing ones,
+    /// without updating the filter on functions with [`Dynamic`][crate::Dynamic] parameters.
+    pub(super) fn push_lazy_sources(&mut self, sources: impl IntoIterator<Item = LazySource>) {
         let existing = self
             .lazy_functions
             .take()
-            .map_or_else(Vec::new, |f| f.manifests.into_vec());
-        let manifests: Box<[_]> = existing.into_iter().chain(manifests).collect();
-        if !manifests.is_empty() {
-            self.lazy_functions = Some(LazyFunctions { manifests });
+            .map_or_else(Vec::new, |f| f.sources.into_vec());
+        let sources: Box<[_]> = existing.into_iter().chain(sources).collect();
+        if !sources.is_empty() {
+            self.lazy_functions = Some(LazyFunctions { sources });
         }
 
         self.flags
@@ -118,14 +181,16 @@ impl Module {
     }
     /// Register all functions in plugin module manifests (including sub-modules), with full
     /// metadata, so that they are no longer looked up only when called.
+    ///
+    /// The functions of a Grain program this [`Module`] holds are registered too.
     pub fn register_lazy_functions(&mut self) -> &mut Self {
         if !self.has_lazy_functions() {
             return self;
         }
         if let Some(lazy_functions) = self.lazy_functions.take() {
-            // Functions registered normally take precedence over functions in manifests
+            // Functions registered normally take precedence over functions looked up only when called
             let functions = self.functions.take();
-            lazy_functions.for_each_fn(&mut |f| f.register_into(self));
+            lazy_functions.register_into(self);
             if let Some(functions) = functions {
                 self.functions
                     .get_or_insert_with(|| new_hash_map(functions.len()))
@@ -143,8 +208,8 @@ impl Module {
             .remove(ModuleFlags::INDEXED | ModuleFlags::INDEXED_GLOBAL_FUNCTIONS);
         self
     }
-    /// Does this [`Module`] (or any sub-module) contain functions in plugin module manifests,
-    /// which are looked up only when called?
+    /// Does this [`Module`] (or any sub-module) contain functions in plugin module manifests, or
+    /// the functions of a Grain program, which are looked up only when called?
     #[inline]
     #[must_use]
     pub fn has_lazy_functions(&self) -> bool {
@@ -177,13 +242,18 @@ impl Module {
             module: &'a Module,
             path: &mut crate::StaticVec<&'a str>,
             hash: u64,
-        ) -> Option<&'static FnManifestEntry> {
+        ) -> Option<RhaiFunc> {
             // Functions in the module take precedence over those in sub-modules
             let found = module.lazy_functions.as_ref().and_then(|f| {
-                f.find_fn(&mut |f| {
-                    f.calc_hash(path) == hash
-                        || (f.namespace() == FnNamespace::Global && f.calc_hash(&[]) == hash)
-                })
+                f.find_fn(
+                    &mut |f| {
+                        f.calc_hash(path) == hash
+                            || (f.namespace() == FnNamespace::Global && f.calc_hash(&[]) == hash)
+                    },
+                    #[cfg(feature = "grain")]
+                    #[cfg(not(feature = "no_function"))]
+                    &mut |g| g.get_qualified(path, hash),
+                )
             });
 
             found.or_else(|| {
@@ -202,6 +272,6 @@ impl Module {
 
         let path = &mut crate::StaticVec::new();
         path.push("");
-        find_fn(self, path, hash_qualified_fn).map(|f| RhaiFunc::StaticPlugin { func: f.func() })
+        find_fn(self, path, hash_qualified_fn)
     }
 }

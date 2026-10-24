@@ -1,5 +1,11 @@
 //! Module defining external-loaded modules for Rhai.
 
+#[cfg(feature = "grain")]
+#[cfg(not(feature = "no_function"))]
+mod grain;
+#[cfg(feature = "grain")]
+#[cfg(not(feature = "no_function"))]
+pub(crate) use grain::GrainFunctions;
 mod lazy;
 mod namespace;
 /// Module containing all built-in [module resolvers][ModuleResolver].
@@ -665,7 +671,7 @@ pub struct Module {
     all_type_iterators: BTreeMap<TypeId, Shared<FnIterator>>,
     /// Flags.
     flags: ModuleFlags,
-    /// Functions in plugin module manifests, looked up only when called. Never empty if [`Some`].
+    /// Functions in plugin module manifests and Grain programs, looked up only when called.
     lazy_functions: Option<lazy::LazyFunctions>,
 }
 
@@ -1351,20 +1357,37 @@ impl Module {
         hash_script
     }
 
-    /// Get a reference to a scripted function in the [`Module`] based on its hash.
-    /// Exported under the `internals` feature only.
+    /// Get a reference to a scripted function in the [`Module`], and the environment it runs in,
+    /// based on its hash.
     #[cfg(not(feature = "no_function"))]
-    #[inline(always)]
+    #[inline]
     #[must_use]
-    pub(crate) fn get_script_fn_by_hash(&self, hash: u64) -> Option<&crate::func::RhaiFunc> {
-        self.functions
+    pub(crate) fn get_script_fn_by_hash(
+        &self,
+        hash: u64,
+    ) -> Option<(
+        &Shared<crate::func::ScriptFuncDef>,
+        Option<&Shared<crate::func::EncapsulatedEnviron>>,
+    )> {
+        let found = self
+            .functions
             .as_ref()
             .and_then(|f| f.get(&hash))
-            .map(|(f, _)| f)
+            .and_then(|(f, _)| match f {
+                RhaiFunc::Script { fn_def, env } => Some((fn_def, env.as_ref())),
+                _ => None,
+            });
+        #[cfg(feature = "grain")]
+        let found = found.or_else(|| {
+            self.grain_functions()
+                .rev()
+                .find_map(|g| g.get_script(hash))
+        });
+        found
     }
 
     /// Get a mutable reference to a scripted function in the [`Module`] based on its hash.
-    /// Exported under the `internals` feature only.
+    #[cfg(feature = "grain")]
     #[cfg(not(feature = "no_function"))]
     #[inline(always)]
     #[must_use]
@@ -1388,13 +1411,34 @@ impl Module {
         name: impl AsRef<str>,
         num_params: usize,
     ) -> Option<&Shared<crate::func::ScriptFuncDef>> {
-        self.functions.as_ref().and_then(|lib| {
-            let name = name.as_ref();
+        self.get_script_fn_named(name.as_ref(), Some(num_params))
+    }
 
+    /// Get a shared reference to the first script-defined function in the [`Module`] named
+    /// `name` that takes `num_params` parameters, or any number when that is [`None`].
+    #[cfg(not(feature = "no_function"))]
+    #[must_use]
+    pub(crate) fn get_script_fn_named(
+        &self,
+        name: &str,
+        num_params: Option<usize>,
+    ) -> Option<&Shared<crate::func::ScriptFuncDef>> {
+        let found = self.functions.as_ref().and_then(|lib| {
             lib.values()
-                .find(|(_, f)| f.num_params == num_params && f.name == name)
+                .find(|(f, m)| {
+                    f.is_script()
+                        && num_params.map_or(true, |n| m.num_params == n)
+                        && m.name == name
+                })
                 .and_then(|(f, _)| f.get_script_fn_def())
-        })
+        });
+        #[cfg(feature = "grain")]
+        let found = found.or_else(|| {
+            self.grain_functions()
+                .rev()
+                .find_map(|g| g.get_named(name, num_params))
+        });
+        found
     }
 
     /// Get a mutable reference to the underlying [`BTreeMap`] of sub-modules,
@@ -2012,8 +2056,11 @@ impl Module {
     /// The other [`Module`] is _consumed_ to merge into this [`Module`].
     #[inline]
     pub fn combine(&mut self, other: Self) -> &mut Self {
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        self.remove_fns_hidden_by_grain(&other);
         if let Some(lazy_functions) = other.lazy_functions {
-            self.push_manifests(lazy_functions.manifests.into_vec());
+            self.push_lazy_sources(lazy_functions.sources.into_vec());
         }
         self.modules.extend(other.modules);
         self.variables.extend(other.variables);
@@ -2045,12 +2092,15 @@ impl Module {
     /// The other [`Module`] is _consumed_ to merge into this [`Module`].
     /// Sub-modules are flattened onto the root [`Module`], with higher level overriding lower level.
     #[inline]
-    pub fn combine_flatten(&mut self, other: Self) -> &mut Self {
-        for m in other.modules.into_values() {
+    pub fn combine_flatten(&mut self, mut other: Self) -> &mut Self {
+        for m in std::mem::take(&mut other.modules).into_values() {
             self.combine_flatten(shared_take_or_clone(m));
         }
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        self.remove_fns_hidden_by_grain(&other);
         if let Some(lazy_functions) = other.lazy_functions {
-            self.push_manifests(lazy_functions.manifests.into_vec());
+            self.push_lazy_sources(lazy_functions.sources.into_vec());
         }
         self.variables.extend(other.variables);
         match self.functions {
@@ -2081,12 +2131,6 @@ impl Module {
     /// Only items not existing in this [`Module`] are added.
     #[inline]
     pub fn fill_with(&mut self, other: &Self) -> &mut Self {
-        // Existing manifests take precedence, so these go before them
-        if let Some(ref lazy_functions) = other.lazy_functions {
-            let existing = self.lazy_functions.take().map(|f| f.manifests.into_vec());
-            self.push_manifests(lazy_functions.manifests.iter().copied());
-            self.push_manifests(existing.into_iter().flatten());
-        }
         for (k, v) in &other.modules {
             if !self.modules.contains_key(k) {
                 self.modules.insert(k.clone(), v.clone());
@@ -2101,12 +2145,23 @@ impl Module {
             let others_len = functions.len();
 
             for (&k, f) in functions {
+                #[cfg(feature = "grain")]
+                #[cfg(not(feature = "no_function"))]
+                if self.has_grain_fn(k) {
+                    continue;
+                }
                 let map = self
                     .functions
                     .get_or_insert_with(|| new_hash_map(FN_MAP_SIZE));
                 map.reserve(others_len);
                 map.entry(k).or_insert_with(|| f.clone());
             }
+        }
+        // Existing sources take precedence, so these go before them
+        if let Some(ref lazy_functions) = other.lazy_functions {
+            let existing = self.lazy_functions.take().map(|f| f.sources.into_vec());
+            self.push_lazy_sources(lazy_functions.sources.iter().cloned());
+            self.push_lazy_sources(existing.into_iter().flatten());
         }
         self.dynamic_functions_filter += &other.dynamic_functions_filter;
         for (&k, v) in &other.type_iterators {
@@ -2142,6 +2197,9 @@ impl Module {
         other: &Self,
         _filter: impl Fn(FnNamespace, FnAccess, bool, &str, usize) -> bool + Copy,
     ) -> &mut Self {
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        let other = &*other.with_grain_registered();
         for (k, v) in &other.modules {
             let mut m = Self::new();
             m.merge_filtered(v, _filter);
@@ -2168,17 +2226,16 @@ impl Module {
         }
 
         if let Some(ref functions) = other.functions {
-            match self.functions {
-                Some(ref mut m) => m.extend(
+            self.functions
+                .get_or_insert_with(|| new_hash_map(functions.len()))
+                .extend(
                     functions
                         .iter()
                         .filter(|(.., (f, m))| {
                             _filter(m.namespace, m.access, f.is_script(), &m.name, m.num_params)
                         })
                         .map(|(&k, f)| (k, f.clone())),
-                ),
-                None => self.functions.clone_from(&other.functions),
-            }
+                );
         }
         self.dynamic_functions_filter += &other.dynamic_functions_filter;
 
@@ -2208,6 +2265,8 @@ impl Module {
         &mut self,
         filter: impl Fn(FnNamespace, FnAccess, &str, usize) -> bool,
     ) -> &mut Self {
+        #[cfg(feature = "grain")]
+        self.register_grain_functions();
         self.functions = std::mem::take(&mut self.functions).map(|m| {
             m.into_iter()
                 .filter(|(.., (f, m))| {
@@ -2234,9 +2293,14 @@ impl Module {
     #[inline(always)]
     #[must_use]
     pub fn count(&self) -> (usize, usize, usize) {
+        let num_functions = self.functions.as_ref().map_or(0, StraightHashMap::len);
+        #[cfg(feature = "grain")]
+        #[cfg(not(feature = "no_function"))]
+        let num_functions = num_functions + self.num_grain_functions();
+
         (
             self.variables.len(),
-            self.functions.as_ref().map_or(0, StraightHashMap::len),
+            num_functions,
             self.type_iterators.len(),
         )
     }
@@ -2303,7 +2367,7 @@ impl Module {
             &Shared<crate::func::ScriptFuncDef>,
         ),
     > + '_ {
-        self.iter_fn().filter(|(f, _)| f.is_script()).map(|(f, m)| {
+        let registered = self.iter_fn().filter(|(f, _)| f.is_script()).map(|(f, m)| {
             (
                 m.namespace,
                 m.access,
@@ -2311,7 +2375,11 @@ impl Module {
                 m.num_params,
                 f.get_script_fn_def().expect("`ScriptFuncDef`"),
             )
-        })
+        });
+        #[cfg(feature = "grain")]
+        return registered.chain(self.grain_functions().flat_map(|g| g.iter_defs()));
+        #[cfg(not(feature = "grain"))]
+        return registered;
     }
 
     /// _(internals)_ Get an iterator over all script-defined functions in the [`Module`].
@@ -2568,12 +2636,22 @@ impl Module {
         #[cfg(not(feature = "no_function"))]
         let orig_constants = std::mem::take(&mut global.constants);
 
+        // The program's functions, looked up only when called: by its own top-level run, by
+        // its functions through the module's environment, and through the module's exports.
+        #[cfg(not(feature = "no_function"))]
+        let functions = grain::GrainFunctions::new(&program);
+        #[cfg(not(feature = "no_function"))]
+        let wrappers: Option<SharedModule> = (!program.functions().is_empty())
+            .then(|| Self::from_grain_functions(functions.clone()).into());
+        #[cfg(feature = "no_function")]
+        let wrappers = None;
+
         // Run the Grain program
         let mut vm = crate::grain::Vm::with_global_state(
             engine,
             std::mem::replace(global, engine.new_global_runtime_state()),
         );
-        let result = vm.eval_with_callbacks(scope, &program);
+        let result = vm.eval_with_wrappers(scope, &program, wrappers.clone());
         *global = vm.into_global_state();
 
         // Create new module
@@ -2611,9 +2689,8 @@ impl Module {
         #[cfg(not(feature = "no_function"))]
         let mut lib: crate::StaticVec<_> = program.lib().cloned().into_iter().collect();
         #[cfg(not(feature = "no_function"))]
-        if !program.functions().is_empty() {
-            let wrappers = crate::grain::callback_wrappers(engine, &program);
-            lib.push(wrappers.into());
+        if let Some(wrappers) = wrappers {
+            lib.push(wrappers);
         }
 
         #[cfg(not(feature = "no_function"))]
@@ -2669,7 +2746,9 @@ impl Module {
         }
 
         #[cfg(not(feature = "no_function"))]
-        crate::grain::export_functions_to_module(&program, &mut module, &env);
+        if !program.functions().is_empty() {
+            module.add_grain_functions(functions.exports(env));
+        }
 
         module.id = program.source().cloned();
 
@@ -2734,13 +2813,14 @@ impl Module {
                 type_iterators.insert(type_id, func.clone());
             }
 
-            // Functions in manifests are indexed on first lookup, but may be in the global namespace
-            if let Some(ref lazy_functions) = module.lazy_functions {
-                lazy_functions.for_each_fn(&mut |f| {
-                    if f.namespace() == FnNamespace::Global {
-                        contains_indexed_global_functions = true;
-                    }
-                });
+            // Functions looked up only when called are indexed on first lookup, but may be in the
+            // global namespace
+            if module
+                .lazy_functions
+                .as_ref()
+                .map_or(false, lazy::LazyFunctions::has_global)
+            {
+                contains_indexed_global_functions = true;
             }
 
             // Index all functions

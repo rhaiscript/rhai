@@ -299,6 +299,27 @@ fn allocation_footprint() {
             "the loaded chunk must point into the artifact, not into a copy of it",
         );
 
+        // The verifier keeps a state per jump target, not per byte, so even
+        // this loop, a branch every few instructions, peaks at a few bytes
+        // per byte of code.
+        let verified = measure(|| loaded.value.verify().expect("must verify"));
+        assert!(
+            (verified.peak as usize) < code.len() * 32 / 10,
+            "verifying {} bytes of code peaked at {} bytes: a state per byte, 32 bytes each on this host, is back",
+            code.len(),
+            verified.peak,
+        );
+
+        let full = program.write().expect("must be writable");
+        let with_positions = measure(|| rhai::grain::Program::read(&full).expect("must load"));
+        // The position table keeps an entry per instruction that has a
+        // position, not one per code byte: under a byte of heap per byte of
+        // code, where a dense table cost four. Under `debugging` every
+        // statement also emits a positioned marker, so allow two.
+        let table = (with_positions.bytes - loaded.bytes) as usize;
+        let bytes_per_code_byte = if cfg!(feature = "debugging") { 2 } else { 1 };
+        assert!(table < code.len() * bytes_per_code_byte, "the position table for {} bytes of code retains {table} bytes", code.len());
+
         let ratio = tree.bytes as f64 / loaded.bytes as f64;
         ratios.push(ratio);
         println!("{:>7} {:>9} {:>9} {:>9} {:>8} {:>6.1}x", source.len(), stripped.len(), tree.bytes, loaded.bytes, loaded.count, ratio,);
@@ -309,6 +330,33 @@ fn allocation_footprint() {
     // that stopped climbing would mean something in the loader had started
     // scaling with length.
     assert!(ratios[2] > ratios[1] && ratios[1] > ratios[0], "the saving must grow with the program, got {ratios:?}",);
+
+    // What importing a module costs. Its functions are looked up in the program
+    // when they are called, so until then a module of many functions costs one
+    // empty slot per function more than a module of one.
+    #[cfg(not(feature = "no_module"))]
+    {
+        let module_of = |n: usize| {
+            let source: String = (0..n).map(|i| format!("fn f{i}(a, b) {{ a + b }}\n")).collect();
+            let program = Compiler::new().compile(&engine.compile(&source).expect("must compile")).into_shared();
+            let module = measure(|| rhai::Module::eval_grain_as_new(rhai::Scope::new(), program.clone(), &engine).expect("must eval"));
+            (module.bytes, module.value)
+        };
+        let (one, _one) = module_of(1);
+        let (many, many_module) = module_of(64);
+        println!("\nmodule of 1 function {one:>8} bytes\nmodule of 64         {many:>8} bytes");
+        assert!(many - one <= 63 * 16, "a module must not register its functions up front: {one} bytes for 1, {many} for 64");
+
+        // Calling one makes that one's definition, and only that one's.
+        let mut called = Engine::new();
+        let mut resolver = rhai::module_resolvers::StaticModuleResolver::new();
+        resolver.insert("m", many_module);
+        called.set_module_resolver(resolver);
+        let first = measure(|| called.eval::<rhai::INT>(r#"import "m" as m; m::f3(1, 2)"#).expect("must call"));
+        assert_eq!(first.value, 3);
+        let again = measure(|| called.eval::<rhai::INT>(r#"import "m" as m; m::f3(1, 2)"#).expect("must call"));
+        assert!(again.bytes <= first.bytes, "a second call must not make another definition: {} then {}", first.bytes, again.bytes);
+    }
 
     // The instrument has to be working before anything can lean on it.
     assert!(ast.count > 0 && ast.bytes > 0, "the counters saw nothing; the global allocator is not installed",);
