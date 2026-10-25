@@ -211,6 +211,15 @@ impl Engine {
             return Err(ERR::ErrorTooManyOperations(pos).into());
         }
 
+        #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+        if let Some((meter, callback)) = self.operation_meter.as_ref() {
+            let count = num_operations();
+            meter.set_count(count);
+            if count >= meter.deadline() {
+                Self::on_operation_deadline_reached(callback, count, pos)?;
+            }
+        }
+
         if let Some(progress) = self.progress.as_ref() {
             return progress(num_operations())
                 .map(|token| Err(ERR::ErrorTerminated(token, pos).into()))
@@ -218,5 +227,17 @@ impl Engine {
         }
 
         Ok(())
+    }
+
+    /// Call the operations meter's callback, out of line as it is called only at its deadline.
+    #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+    #[cold]
+    #[inline(never)]
+    fn on_operation_deadline_reached(
+        callback: &crate::func::native::OnProgressCallback,
+        count: u64,
+        pos: Position,
+    ) -> RhaiResultOf<()> {
+        callback(count).map_or(Ok(()), |token| Err(ERR::ErrorTerminated(token, pos).into()))
     }
 }

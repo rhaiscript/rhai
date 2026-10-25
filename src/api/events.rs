@@ -248,6 +248,54 @@ impl Engine {
         self.progress = Some(Box::new(callback));
         self
     }
+    /// Register an [`OperationMeter`][crate::OperationMeter] and a callback that is called only
+    /// when the number of operations reaches the meter's deadline.
+    ///
+    /// This is a cheaper alternative to [`on_progress`][Engine::on_progress], whose callback is
+    /// called on every single operation.
+    ///
+    /// The meter keeps the number of operations so far, and the host can move its deadline at any
+    /// time, including from inside a native function that wants its own work to count.
+    ///
+    /// When the number of operations reaches the deadline, the callback is called with it. Return
+    /// `Some(token)` to terminate the script with
+    /// [`ErrorTerminated`][crate::EvalAltResult::ErrorTerminated], or `None` to continue. A
+    /// callback that returns `None` should move the deadline forward, otherwise it is called again
+    /// on the next operation.
+    ///
+    /// Not available under `unchecked`, or under `sync` on targets without 64-bit atomics.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<rhai::EvalAltResult>> {
+    /// use rhai::{Dynamic, Engine, OperationMeter, Shared};
+    ///
+    /// let meter = Shared::new(OperationMeter::new());
+    /// meter.set_deadline(1000);
+    ///
+    /// let mut engine = Engine::new();
+    ///
+    /// // Called only once, when the 1000th operation is reached
+    /// engine.on_operation_deadline(meter.clone(), |count| Some(Dynamic::from(count)));
+    ///
+    /// let err = engine.run("let s = 0; for x in 0..5000 { s += x; }").expect_err("should be terminated");
+    ///
+    /// assert_eq!(meter.count(), 1000);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(not(feature = "unchecked"))]
+    #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+    #[inline(always)]
+    pub fn on_operation_deadline(
+        &mut self,
+        meter: crate::Shared<crate::OperationMeter>,
+        callback: impl Fn(u64) -> Option<Dynamic> + SendSync + 'static,
+    ) -> &mut Self {
+        self.operation_meter = Some((meter, Box::new(callback)));
+        self
+    }
     /// Override default action of `print` (print to stdout using [`println!`])
     ///
     /// # Example

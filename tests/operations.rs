@@ -140,3 +140,82 @@ fn test_max_operations_progress() {
         *engine.run("for x in 0..500 {}").unwrap_err(),
         EvalAltResult::ErrorTerminated(x, ..) if x.as_int().unwrap() == 42));
 }
+
+#[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+mod operation_deadline {
+    use rhai::{Dynamic, Engine, EvalAltResult, OperationMeter, Shared, INT};
+
+    #[test]
+    fn the_callback_is_called_only_at_the_deadline() {
+        let meter = Shared::new(OperationMeter::new());
+        let calls = Shared::new(std::sync::atomic::AtomicU64::new(0));
+        let mut engine = Engine::new();
+        let (m, c) = (meter.clone(), calls.clone());
+        engine.on_operation_deadline(meter.clone(), move |count| {
+            c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            m.set_deadline(count + 100);
+            None
+        });
+        meter.set_deadline(100);
+
+        engine.run("let s = 0; for x in 0..300 { s += x; }").unwrap();
+
+        let count = meter.count();
+        assert!(count >= 300, "{count}");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), count / 100);
+    }
+
+    #[test]
+    fn the_callback_terminates_at_the_same_operation_as_on_progress() {
+        let script = "let x = 0; while x < 1000 { x += 1; }";
+
+        let mut progress = Engine::new();
+        progress.on_progress(|count| (count >= 250).then(|| Dynamic::from(count as INT)));
+        let expected = progress.run(script).unwrap_err();
+
+        let meter = Shared::new(OperationMeter::new());
+        meter.set_deadline(250);
+        let mut deadline = Engine::new();
+        deadline.on_operation_deadline(meter.clone(), |count| Some(Dynamic::from(count as INT)));
+        let got = deadline.run(script).unwrap_err();
+
+        match (*expected, *got) {
+            (EvalAltResult::ErrorTerminated(a, ..), EvalAltResult::ErrorTerminated(b, ..)) => {
+                assert_eq!(a.as_int().unwrap(), 250);
+                assert_eq!(b.as_int().unwrap(), 250);
+            }
+            (a, b) => panic!("{a:?} {b:?}"),
+        }
+        assert_eq!(meter.count(), 250);
+    }
+
+    #[test]
+    fn a_native_function_can_bring_the_deadline_nearer() {
+        let meter = Shared::new(OperationMeter::new());
+        meter.set_deadline(1000);
+        let mut engine = Engine::new();
+        engine.on_operation_deadline(meter.clone(), |_| Some(Dynamic::UNIT));
+        let m = meter.clone();
+        engine.register_fn("work", move |steps: INT| m.bring_deadline_nearer(steps as u64));
+
+        // Without the work the script runs well under 1000 operations.
+        let err = engine.run("work(990); let x = 1; x + 1; x + 2; x + 3;").unwrap_err();
+
+        assert!(matches!(*err, EvalAltResult::ErrorTerminated(..)), "{err:?}");
+        assert!(meter.count() <= 10, "{}", meter.count());
+    }
+
+    #[test]
+    fn the_count_is_kept_after_an_evaluation() {
+        let meter = Shared::new(OperationMeter::new());
+        let mut engine = Engine::new();
+        engine.on_operation_deadline(meter.clone(), |_| None);
+
+        engine.run("let x = 1;").unwrap();
+        let short = meter.count();
+        engine.run("let x = 1; let y = 2; let z = x + y;").unwrap();
+
+        assert!(short > 0);
+        assert!(meter.count() > short);
+    }
+}

@@ -9,6 +9,7 @@ pub mod fn_ptr;
 pub mod ident;
 pub mod immutable_string;
 pub mod interner;
+pub mod operation_meter;
 pub mod parse_error;
 pub mod position;
 pub mod position_none;
@@ -29,6 +30,9 @@ pub use fn_ptr::FnPtr;
 pub use ident::Ident;
 pub use immutable_string::ImmutableString;
 pub use interner::StringsInterner;
+#[cfg(not(feature = "unchecked"))]
+#[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+pub use operation_meter::OperationMeter;
 pub use parse_error::{LexError, ParseError, ParseErrorType};
 pub use token::Token;
 pub use var_def::VarDefInfo;

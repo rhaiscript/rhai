@@ -10,6 +10,11 @@ Bug fixes
 * Fixes regression with missing encapsulated environment in function pointers (thanks [`@luispedro`](https://github.com/luispedro) [`#1193`](https://github.com/rhaiscript/rhai/pull/1193)).
 * Fixes bug in `pad` method for strings that hangs when the padding string is empty (thanks [`@b84330808`](https://github.com/b84330808) [`#1195`](https://github.com/rhaiscript/rhai/pull/1195)).
 
+New features
+------------
+
+* `Engine::on_operation_deadline` registers an `OperationMeter` and a callback that is called only when the number of operations reaches the meter's deadline, a cheaper alternative to `Engine::on_progress`, which is called on every operation. The host can move the deadline at any time, including from native functions.
+
 Enhancements
 ------------
 
