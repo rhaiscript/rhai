@@ -141,7 +141,7 @@ fn test_max_operations_progress() {
         EvalAltResult::ErrorTerminated(x, ..) if x.as_int().unwrap() == 42));
 }
 
-#[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+#[cfg(operation_meter)]
 mod operation_deadline {
     use rhai::{Dynamic, Engine, EvalAltResult, OperationMeter, Shared, INT};
 

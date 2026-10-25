@@ -1,6 +1,5 @@
 //! Module defining the operations meter used by [`Engine::on_operation_deadline`][crate::Engine::on_operation_deadline].
-#![cfg(not(feature = "unchecked"))]
-#![cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+#![cfg(operation_meter)]
 
 #[cfg(not(feature = "sync"))]
 type Counter = std::cell::Cell<u64>;

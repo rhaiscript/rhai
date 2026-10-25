@@ -258,8 +258,7 @@ pub use types::{
     Scope, VarDefInfo,
 };
 
-#[cfg(not(feature = "unchecked"))]
-#[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+#[cfg(operation_meter)]
 pub use types::OperationMeter;
 
 /// _(debugging)_ Module containing types for debugging.

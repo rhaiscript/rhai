@@ -142,8 +142,7 @@ pub struct Engine {
     #[cfg(not(feature = "unchecked"))]
     pub(crate) progress: Option<Box<crate::func::native::OnProgressCallback>>,
     /// Operations meter, and the callback closure called when it reaches its deadline.
-    #[cfg(not(feature = "unchecked"))]
-    #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+    #[cfg(operation_meter)]
     pub(crate) operation_meter: Option<(
         crate::Shared<crate::OperationMeter>,
         Box<crate::func::native::OnProgressCallback>,
@@ -207,8 +206,7 @@ impl fmt::Debug for Engine {
 
         #[cfg(not(feature = "unchecked"))]
         f.field("progress", &self.progress.is_some());
-        #[cfg(not(feature = "unchecked"))]
-        #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+        #[cfg(operation_meter)]
         f.field(
             "operation_meter",
             &self.operation_meter.as_ref().map(|(m, _)| m),
@@ -297,8 +295,7 @@ impl Engine {
 
         #[cfg(not(feature = "unchecked"))]
         progress: None,
-        #[cfg(not(feature = "unchecked"))]
-        #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+        #[cfg(operation_meter)]
         operation_meter: None,
 
         options: LangOptions::new(),

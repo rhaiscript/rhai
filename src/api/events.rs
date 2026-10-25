@@ -287,8 +287,7 @@ impl Engine {
     /// # Ok(())
     /// # }
     /// ```
-    #[cfg(not(feature = "unchecked"))]
-    #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+    #[cfg(operation_meter)]
     #[inline(always)]
     pub fn on_operation_deadline(
         &mut self,

@@ -21,6 +21,15 @@ fn main() {
         println!("cargo:rustc-cfg=atomic_ops_count");
     }
 
+    // The operations meter counts in a `Cell` without `sync`, and in an `AtomicU64` with it,
+    // which needs 64-bit atomics; it does not exist under `unchecked`.
+    println!("cargo:rustc-check-cfg=cfg(operation_meter)");
+    let sync = env::var_os("CARGO_FEATURE_SYNC").is_some();
+    let unchecked = env::var_os("CARGO_FEATURE_UNCHECKED").is_some();
+    if !unchecked && (!sync || has_atomic64) {
+        println!("cargo:rustc-cfg=operation_meter");
+    }
+
     let mut contents = String::new();
 
     File::open("build.template")

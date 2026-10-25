@@ -30,8 +30,7 @@ pub use fn_ptr::FnPtr;
 pub use ident::Ident;
 pub use immutable_string::ImmutableString;
 pub use interner::StringsInterner;
-#[cfg(not(feature = "unchecked"))]
-#[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+#[cfg(operation_meter)]
 pub use operation_meter::OperationMeter;
 pub use parse_error::{LexError, ParseError, ParseErrorType};
 pub use token::Token;

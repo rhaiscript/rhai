@@ -211,7 +211,7 @@ impl Engine {
             return Err(ERR::ErrorTooManyOperations(pos).into());
         }
 
-        #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+        #[cfg(operation_meter)]
         if let Some((meter, callback)) = self.operation_meter.as_ref() {
             let count = num_operations();
             meter.set_count(count);
@@ -230,7 +230,7 @@ impl Engine {
     }
 
     /// Call the operations meter's callback, out of line as it is called only at its deadline.
-    #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+    #[cfg(operation_meter)]
     #[cold]
     #[inline(never)]
     fn on_operation_deadline_reached(

@@ -90,8 +90,7 @@ impl Engine {
     #[must_use]
     fn new_global_runtime_state(&self) -> GlobalRuntimeState {
         // Every evaluation starts here, so the meter counts this one's operations, from none.
-        #[cfg(not(feature = "unchecked"))]
-        #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+        #[cfg(operation_meter)]
         if let Some((meter, _)) = self.operation_meter.as_ref() {
             meter.set_count(0);
         }
