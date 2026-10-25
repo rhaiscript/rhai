@@ -190,13 +190,13 @@ mod operation_deadline {
     }
 
     #[test]
-    fn a_native_function_can_bring_the_deadline_nearer() {
+    fn a_native_function_can_charge_its_own_work() {
         let meter = Shared::new(OperationMeter::new());
         meter.set_deadline(1000);
         let mut engine = Engine::new();
         engine.on_operation_deadline(meter.clone(), |_| Some(Dynamic::UNIT));
         let m = meter.clone();
-        engine.register_fn("work", move |steps: INT| m.bring_deadline_nearer(steps as u64));
+        engine.register_fn("work", move |steps: INT| m.charge(steps as u64));
 
         // Without the work the script runs well under 1000 operations.
         let err = engine.run("work(990); let x = 1; x + 1; x + 2; x + 3;").unwrap_err();
@@ -217,5 +217,21 @@ mod operation_deadline {
 
         assert!(short > 0);
         assert!(meter.count() > short);
+
+        // A call of an empty function counts its own operations, not the last evaluation's, as
+        // `on_progress` reports them.
+        let last = Shared::new(std::sync::atomic::AtomicU64::new(0));
+        let mut progress = Engine::new();
+        let l = last.clone();
+        progress.on_progress(move |count| {
+            l.store(count, std::sync::atomic::Ordering::Relaxed);
+            None
+        });
+        let ast = engine.compile("fn nothing() {}").unwrap();
+        engine.call_fn::<()>(&mut rhai::Scope::new(), &ast, "nothing", ()).unwrap();
+        progress.call_fn::<()>(&mut rhai::Scope::new(), &ast, "nothing", ()).unwrap();
+
+        assert!(meter.count() < short);
+        assert_eq!(meter.count(), last.load(std::sync::atomic::Ordering::Relaxed));
     }
 }

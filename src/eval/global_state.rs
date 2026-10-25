@@ -89,6 +89,13 @@ impl Engine {
     #[inline(always)]
     #[must_use]
     fn new_global_runtime_state(&self) -> GlobalRuntimeState {
+        // Every evaluation starts here, so the meter counts this one's operations, from none.
+        #[cfg(not(feature = "unchecked"))]
+        #[cfg(any(not(feature = "sync"), target_has_atomic = "64"))]
+        if let Some((meter, _)) = self.operation_meter.as_ref() {
+            meter.set_count(0);
+        }
+
         GlobalRuntimeState {
             #[cfg(not(feature = "no_module"))]
             imports: crate::ThinVec::new(),

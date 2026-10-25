@@ -7,18 +7,34 @@ type Counter = std::cell::Cell<u64>;
 #[cfg(feature = "sync")]
 type Counter = std::sync::atomic::AtomicU64;
 
-/// The number of operations performed so far, and the deadline at which the [`Engine`][crate::Engine]
-/// calls the callback registered with [`Engine::on_operation_deadline`][crate::Engine::on_operation_deadline].
+#[inline(always)]
+fn load(counter: &Counter) -> u64 {
+    #[cfg(not(feature = "sync"))]
+    return counter.get();
+    #[cfg(feature = "sync")]
+    return counter.load(std::sync::atomic::Ordering::Relaxed);
+}
+
+#[inline(always)]
+fn store(counter: &Counter, value: u64) {
+    #[cfg(not(feature = "sync"))]
+    counter.set(value);
+    #[cfg(feature = "sync")]
+    counter.store(value, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The number of operations of an evaluation, and the deadline at which the
+/// [`Engine`][crate::Engine] calls the callback registered with
+/// [`Engine::on_operation_deadline`][crate::Engine::on_operation_deadline].
 ///
 /// The meter is shared between the [`Engine`][crate::Engine] and the host, which can read the
 /// number of operations and move the deadline at any time, including from inside a native
 /// function while a script runs.
 ///
-/// A meter is meant to be used by one evaluation at a time: under `sync`, moving the deadline
-/// with [`bring_deadline_nearer`][OperationMeter::bring_deadline_nearer] from another thread
-/// while a script runs is not atomic.
+/// A meter is meant to be used by one evaluation at a time: under `sync`, [`charge`][OperationMeter::charge]
+/// from another thread while a script runs is not atomic.
 ///
-/// Not available under `unchecked`.
+/// Not available under `unchecked`, or under `sync` on targets without 64-bit atomics.
 #[derive(Debug)]
 pub struct OperationMeter {
     count: Counter,
@@ -46,28 +62,18 @@ impl OperationMeter {
     #[inline(always)]
     #[must_use]
     pub fn count(&self) -> u64 {
-        #[cfg(not(feature = "sync"))]
-        return self.count.get();
-        #[cfg(feature = "sync")]
-        return self.count.load(std::sync::atomic::Ordering::Relaxed);
+        load(&self.count)
     }
     /// Set the number of operations.
     #[inline(always)]
     pub(crate) fn set_count(&self, count: u64) {
-        #[cfg(not(feature = "sync"))]
-        self.count.set(count);
-        #[cfg(feature = "sync")]
-        self.count
-            .store(count, std::sync::atomic::Ordering::Relaxed);
+        store(&self.count, count);
     }
     /// Get the number of operations at which the callback is called next.
     #[inline(always)]
     #[must_use]
     pub fn deadline(&self) -> u64 {
-        #[cfg(not(feature = "sync"))]
-        return self.deadline.get();
-        #[cfg(feature = "sync")]
-        return self.deadline.load(std::sync::atomic::Ordering::Relaxed);
+        load(&self.deadline)
     }
     /// Set the number of operations at which the callback is called next.
     ///
@@ -75,16 +81,13 @@ impl OperationMeter {
     /// operation.
     #[inline(always)]
     pub fn set_deadline(&self, operations: u64) {
-        #[cfg(not(feature = "sync"))]
-        self.deadline.set(operations);
-        #[cfg(feature = "sync")]
-        self.deadline
-            .store(operations, std::sync::atomic::Ordering::Relaxed);
+        store(&self.deadline, operations);
     }
-    /// Bring the deadline `operations` nearer (but not below zero), as when a native function
-    /// does work that it wants to count as operations.
+    /// Count `operations` of the host's own work, as from a native function, against the
+    /// deadline: the deadline comes that many operations nearer (but not below zero).
+    /// [`count`][OperationMeter::count] stays the engine's own count.
     #[inline(always)]
-    pub fn bring_deadline_nearer(&self, operations: u64) {
+    pub fn charge(&self, operations: u64) {
         self.set_deadline(self.deadline().saturating_sub(operations));
     }
 }

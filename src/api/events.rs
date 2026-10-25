@@ -254,8 +254,9 @@ impl Engine {
     /// This is a cheaper alternative to [`on_progress`][Engine::on_progress], whose callback is
     /// called on every single operation.
     ///
-    /// The meter keeps the number of operations so far, and the host can move its deadline at any
-    /// time, including from inside a native function that wants its own work to count.
+    /// The meter keeps the number of operations of the running evaluation, and the host can move
+    /// its deadline at any time, including from inside a native function that wants its own work
+    /// to count ([`OperationMeter::charge`][crate::OperationMeter::charge]).
     ///
     /// When the number of operations reaches the deadline, the callback is called with it. Return
     /// `Some(token)` to terminate the script with
@@ -279,8 +280,9 @@ impl Engine {
     /// // Called only once, when the 1000th operation is reached
     /// engine.on_operation_deadline(meter.clone(), |count| Some(Dynamic::from(count)));
     ///
-    /// let err = engine.run("let s = 0; for x in 0..5000 { s += x; }").expect_err("should be terminated");
+    /// let err = engine.run("let s = 0; for x in 0..5000 { s += x; }").unwrap_err();
     ///
+    /// assert!(matches!(*err, rhai::EvalAltResult::ErrorTerminated(..)));
     /// assert_eq!(meter.count(), 1000);
     /// # Ok(())
     /// # }
