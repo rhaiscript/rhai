@@ -50,6 +50,7 @@ Lazy loading of plugin module functions
 * Lazy-load plugin's are supported by both the `AST` interpreter and Rhai Grain.
 * Use the new `Module::from_manifest` (the lazy `exported_module!`) or `Module::combine_manifest` (the lazy `combine_with_exported_module!`) API to create a lazy-loaded module or add the manifest of lazy-loaded functions to a module.
 * `Module::register_lazy_functions` registers all lazy-loaded functions up-front instead, for the same speed as before.
+* A `Module` created by `Module::eval_grain_as_new` now looks up the functions of the Rhai Grain program only when called. The new `Vm::eval_with_lazy_callbacks` does the same for functions called back from native Rust functions, while `Vm::eval_with_callbacks` still registers every function up-front ([`#1192`](https://github.com/rhaiscript/rhai/pull/1192)).
 
 Feature flag to replace `smartstring` with `compact_str`
 --------------------------------------------------------

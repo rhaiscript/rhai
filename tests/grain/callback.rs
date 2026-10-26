@@ -15,12 +15,17 @@ use rhai::{Dynamic, Engine, Scope};
 
 /// Run a source through the VM with the callback wrappers installed.
 fn run(engine: &Engine, source: &str) -> Result<String, String> {
+    run_with(engine, source, false)
+}
+
+/// Run a source through the VM with the callback wrappers installed, looked
+/// up only when called if `lazy`.
+fn run_with(engine: &Engine, source: &str, lazy: bool) -> Result<String, String> {
     let ast = engine.compile(source).map_err(|err| format!("{err:?}"))?;
     let program = Compiler::new().compile(&ast).into_shared();
-    Vm::new(engine)
-        .eval_with_callbacks(&mut Scope::new(), &program)
-        .map(|value| format!("{value:?}"))
-        .map_err(|err| format!("{err:?}"))
+    let mut vm = Vm::new(engine);
+    let result = if lazy { vm.eval_with_lazy_callbacks(&mut Scope::new(), &program) } else { vm.eval_with_callbacks(&mut Scope::new(), &program) };
+    result.map(|value| format!("{value:?}")).map_err(|err| format!("{err:?}"))
 }
 
 /// The same source through the walker, which is what the answer has to be.
@@ -31,7 +36,9 @@ fn walk(engine: &Engine, source: &str) -> Result<String, String> {
 
 fn agree(source: &str) {
     let engine = corpus::engine();
-    assert_eq!(walk(&engine, source), run(&engine, source), "{source}");
+    let expected = walk(&engine, source);
+    assert_eq!(expected, run_with(&engine, source, false), "{source}");
+    assert_eq!(expected, run_with(&engine, source, true), "lazy: {source}");
 }
 
 /// The array is bound to a variable in every case here, and that is not

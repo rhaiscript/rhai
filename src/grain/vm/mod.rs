@@ -858,6 +858,10 @@ impl<'e> Vm<'e> {
     /// the [function pointer][crate::FnPtr] simply fails to resolve, as
     /// [`EvalAltResult::ErrorFunctionNotFound`], at the point the native tries
     /// to call it.
+    ///
+    /// Every compiled function is registered up front, for the run.
+    /// [`eval_with_lazy_callbacks`](Self::eval_with_lazy_callbacks) registers
+    /// none, and looks one up only when it is called.
     //
     // Named `eval_` rather than `run_` because it yields the [`Program`]'s value;
     // Rhai has no `Engine` method to mirror here, so the crate's own rule is
@@ -871,7 +875,33 @@ impl<'e> Vm<'e> {
         return if program.functions().is_empty() {
             self.run_with(program, scope, None)
         } else {
-            let wrappers = callback::wrappers(program).into();
+            let wrappers = callback::wrappers(program, false).into();
+            self.run_with(program, scope, Some(wrappers))
+        };
+        #[cfg(feature = "no_function")]
+        return self.run_with(program, scope, None);
+    }
+
+    /// Same as [`eval_with_callbacks`](Self::eval_with_callbacks), except that no
+    /// compiled function is registered up front: each one is looked up in the
+    /// [`Program`] only when it is called back.
+    ///
+    /// ### Cost
+    ///
+    /// This saves registering every function on each run, which matters for a
+    /// [`Program`] with many functions that calls back few of them. Each
+    /// function resolution that misses the [`Program`]'s functions, such as an
+    /// operator inside a callback, scans them instead of looking up one hash.
+    pub fn eval_with_lazy_callbacks(
+        &mut self,
+        scope: &mut Scope,
+        program: &SharedProgram,
+    ) -> RhaiResult {
+        #[cfg(not(feature = "no_function"))]
+        return if program.functions().is_empty() {
+            self.run_with(program, scope, None)
+        } else {
+            let wrappers = callback::wrappers(program, true).into();
             self.run_with(program, scope, Some(wrappers))
         };
         #[cfg(feature = "no_function")]
