@@ -217,6 +217,17 @@ mod operation_deadline {
 
         assert!(short > 0);
         assert!(meter.count() > short);
+    }
+
+    #[cfg(not(feature = "no_function"))]
+    #[test]
+    fn a_call_counts_its_own_operations() {
+        let meter = Shared::new(OperationMeter::new());
+        let mut engine = Engine::new();
+        engine.on_operation_deadline(meter.clone(), |_| None);
+
+        engine.run("let x = 1;").unwrap();
+        let short = meter.count();
 
         // A call of an empty function counts its own operations, not the last evaluation's, as
         // `on_progress` reports them.
