@@ -248,5 +248,5 @@ fn custom_type_states_stay_apart() {
         |_context, _inputs, state| Ok(Dynamic::from(state.clone_cast::<Tag>().0)),
     );
 
-    agree_with(&engine, r#"[tag 1, tag 2]"#, |_| {}, true);
+    agree_with(&engine, r#"let a = tag 1; let b = tag 2; a * 10 + b"#, |_| {}, true);
 }
