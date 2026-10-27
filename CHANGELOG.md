@@ -13,6 +13,7 @@ Bug fixes
 * `sleep` no longer panics when called with a float number that is too large (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1205`](https://github.com/rhaiscript/rhai/pull/1205)).
 * Fixes string indexing bug with a single-character inclusive range (e.g. `s[1..=1]`) returning an empty string (thanks [`@youdie006`](https://github.com/youdie006) [`#1204`](https://github.com/rhaiscript/rhai/pull/1204)).
 * `tan` no longer panics on a decimal number when the result overflows - e.g. `tan(π/2)` (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1203`](https://github.com/rhaiscript/rhai/pull/1203)).
+* Rhai Grain no longer merges distinct constants of a custom type (such as two custom syntax states) in the constant pool because they print the same.
 
 Enhancements
 ------------
@@ -22,6 +23,7 @@ Enhancements
 * Function call dispatches now run faster due to optimization inlining a fast path (thanks [`@xorza`](https://github.com/xorza) [`#1199`](https://github.com/rhaiscript/rhai/pull/1199)).
 * Operations counting is optimized to run fast by avoiding atomics when not building under `sync` (thanks [`@xorza`](https://github.com/xorza) [`#1198`](https://github.com/rhaiscript/rhai/pull/1198)).
 * Large object map literals now run faster by storing constant property values in their templates, only computed properties are evaluated at runtime.
+* Rhai Grain compiles scripts with many constants, such as large object map literals, in linear instead of quadratic time, by indexing the constant pool by hash ([`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
 
 
 Version 1.27.0

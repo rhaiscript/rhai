@@ -226,3 +226,27 @@ fn block_custom_syntax_survives_a_write_read_round_trip() {
     let value = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &loaded).expect("loaded custom syntax should run");
     assert_eq!(value.cast::<INT>(), 21);
 }
+
+/// Two custom-syntax states of a custom type render the same (as the type's
+/// name) but differ: each site keeps its own state rather than sharing one.
+#[test]
+fn custom_type_states_stay_apart() {
+    #[derive(Clone)]
+    struct Tag(INT);
+
+    let mut engine = corpus::engine();
+    engine.register_custom_syntax_with_state_raw(
+        "tag",
+        |stream, _look_ahead, state| match stream.len() {
+            1 => Ok(Some("$int$".into())),
+            _ => {
+                *state = Dynamic::from(Tag(stream[1].parse().unwrap()));
+                Ok(None)
+            }
+        },
+        false,
+        |_context, _inputs, state| Ok(Dynamic::from(state.clone_cast::<Tag>().0)),
+    );
+
+    agree_with(&engine, r#"[tag 1, tag 2]"#, |_| {}, true);
+}
