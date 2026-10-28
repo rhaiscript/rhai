@@ -976,7 +976,10 @@ fn optimize_expr(expr: &mut Expr, state: &mut OptimizerState, _chaining: bool) {
                 // All other items can be thrown away.
                 state.set_dirty();
                 *expr = mem::take(&mut m.0).into_iter().find(|(x, ..)| x.name == p.2)
-                            .map_or_else(|| Expr::Unit(*pos), |(.., mut expr)| { expr.set_position(*pos); expr });
+                            .map(|(.., mut expr)| { expr.set_position(*pos); expr })
+                            // A constant value is in the template.
+                            .or_else(|| m.1.get(p.2.as_str()).map(|v| Expr::from_dynamic(v.clone(), *pos)))
+                            .unwrap_or(Expr::Unit(*pos));
             }
             // var.property where var is a constant map
             (Expr::Variable(v, _, pos) , Expr::Property(p, ..))  if state.propagate_constants && state.find_literal_constant(&v.1).map_or(false,Dynamic::is_map) => {
@@ -1043,7 +1046,10 @@ fn optimize_expr(expr: &mut Expr, state: &mut OptimizerState, _chaining: bool) {
                 // All other items can be thrown away.
                 state.set_dirty();
                 *expr = mem::take(&mut m.0).into_iter().find(|(x, ..)| x.name == s)
-                            .map_or_else(|| Expr::Unit(*pos), |(.., mut expr)| { expr.set_position(*pos); expr });
+                            .map(|(.., mut expr)| { expr.set_position(*pos); expr })
+                            // A constant value is in the template.
+                            .or_else(|| m.1.get(s.as_str()).map(|v| Expr::from_dynamic(v.clone(), *pos)))
+                            .unwrap_or(Expr::Unit(*pos));
             }
             #[cfg(not(feature = "no_object"))]
             (Expr::DynamicConstant(cst, pos ), Expr::StringConstant(s, ..)) if cst.is_map() => {
@@ -1143,7 +1149,13 @@ fn optimize_expr(expr: &mut Expr, state: &mut OptimizerState, _chaining: bool) {
         }
         // #{ key:value, .. }
         #[cfg(not(feature = "no_object"))]
-        Expr::Map(x, ..) => x.0.iter_mut().for_each(|(.., expr)| optimize_expr(expr, state, false)),
+        Expr::Map(x, ..) => {
+            x.0.iter_mut().for_each(|(.., expr)| optimize_expr(expr, state, false));
+            // Values that have become constant join the template.
+            if Expr::lift_map_constants(x) {
+                state.set_dirty();
+            }
+        }
         // lhs && rhs
         Expr::And(x, ..) => {
             let mut is_false = None;

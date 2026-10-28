@@ -3516,7 +3516,21 @@ impl<'e> Vm<'e> {
                 .last()
                 .ok_or_else(|| malformed("size check with no element".to_string()))?;
 
-            let delta = calc_data_sizes(value, true);
+            let mut delta = calc_data_sizes(value, true);
+
+            // A map literal's template, under the first entry's key and value,
+            // holds the constant values and a `()` for each computed one, so it
+            // counts every entry once, as Rhai does.
+            if map && index == 0 {
+                let template = self
+                    .stack
+                    .len()
+                    .checked_sub(3)
+                    .and_then(|at| self.stack.get(at))
+                    .ok_or_else(|| malformed("map size check without a template".to_string()))?;
+                let sizes = calc_data_sizes(template, true);
+                delta = (delta.0 + sizes.0, delta.1 + sizes.1, delta.2 + sizes.2);
+            }
 
             let total = self
                 .sizes
@@ -3525,7 +3539,7 @@ impl<'e> Vm<'e> {
 
             *total = (
                 total.0 + delta.0 + usize::from(!map),
-                total.1 + delta.1 + usize::from(map),
+                total.1 + delta.1,
                 total.2 + delta.2,
             );
 

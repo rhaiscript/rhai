@@ -285,3 +285,16 @@ fn test_map_missing_property_callback() {
         143
     );
 }
+
+/// A map literal's constant values move into its template, which the optimizer
+/// still reads when it promotes the property taken from the literal.
+#[test]
+fn test_map_constants_in_template() {
+    let engine = Engine::new();
+
+    assert_eq!(engine.eval::<INT>("#{a: 1, b: 2 + 3}.a").unwrap(), 1);
+    assert_eq!(engine.eval::<INT>("#{a: 1, b: 2 + 3}.b").unwrap(), 5);
+    #[cfg(not(feature = "no_index"))]
+    assert_eq!(engine.eval::<INT>(r#"#{a: 1, b: 2 + 3}["a"]"#).unwrap(), 1);
+    assert_eq!(engine.eval::<INT>("let x = 4; let m = #{a: 1, b: x, c: 3}; m.a + m.b + m.c").unwrap(), 8);
+}

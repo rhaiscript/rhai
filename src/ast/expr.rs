@@ -261,9 +261,17 @@ impl fmt::Debug for Expr {
             }
             Self::Map(x, ..) => {
                 f.write_str("Map")?;
-                f.debug_map()
-                    .entries(x.0.iter().map(|(k, v)| (k, v)))
-                    .finish()
+                // The entries are the computed values; the template holds the constant ones.
+                let computed: BTreeMap<_, _> =
+                    x.0.iter().map(|(k, v)| (k.as_str(), (k, v))).collect();
+                let mut map = f.debug_map();
+                for (key, value) in &x.1 {
+                    match computed.get(key.as_str()) {
+                        Some((k, v)) => map.entry(k, v),
+                        None => map.entry(key, value),
+                    };
+                }
+                map.finish()
             }
             Self::ThisPtr(..) => f.debug_struct("ThisPtr").finish(),
             Self::Variable(x, i, ..) => {
@@ -460,6 +468,48 @@ impl Expr {
 
             _ => return None,
         })
+    }
+    /// Move the constant values of a map literal's entries into its template, which holds `()`
+    /// for each until then, so they are not evaluated again each time the literal is.
+    ///
+    /// Returns `true` if any entry moved.
+    ///
+    /// A function pointer stays an entry: evaluating it gives it the environment it is
+    /// evaluated in. So does a shared value, which is flattened as it is evaluated.
+    #[cfg(not(feature = "no_object"))]
+    #[cfg(not(feature = "no_optimize"))]
+    pub(crate) fn lift_map_constants(
+        map: &mut (StaticVec<(Ident, Self)>, BTreeMap<Identifier, Dynamic>),
+    ) -> bool {
+        fn is_template_value(value: &Dynamic) -> bool {
+            match value.0 {
+                Union::FnPtr(..) => false,
+                #[cfg(not(feature = "no_closure"))]
+                Union::Shared(..) => false,
+                #[cfg(not(feature = "no_index"))]
+                Union::Array(ref a, ..) => a.iter().all(is_template_value),
+                Union::Map(ref m, ..) => m.values().all(is_template_value),
+                _ => true,
+            }
+        }
+
+        let (entries, template) = map;
+        let len = entries.len();
+
+        entries.retain(|(key, expr)| {
+            if !expr.is_constant() {
+                return true;
+            }
+            match (expr.get_literal_value(None), template.get_mut(key.as_str())) {
+                (Some(value), Some(slot)) if is_template_value(&value) => {
+                    *slot = value;
+                    false
+                }
+                _ => true,
+            }
+        });
+
+        entries.len() < len
     }
     /// Create an [`Expr`] from a [`Dynamic`] value.
     #[inline]

@@ -20,6 +20,7 @@ Enhancements
 * A `Module` created by `Module::eval_grain_as_new` now looks up the functions of the Rhai Grain program only when called. The new `Vm::eval_with_lazy_callbacks` does the same for functions called back from native Rust functions, while `Vm::eval_with_callbacks` still registers every function up-front (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1192`](https://github.com/rhaiscript/rhai/pull/1192)).
 * Function call dispatches now run faster due to optimization inlining a fast path (thanks [`@xorza`](https://github.com/xorza) [`#1199`](https://github.com/rhaiscript/rhai/pull/1199)).
 * Operations counting is optimized to run fast by avoiding atomics when not building under `sync` (thanks [`@xorza`](https://github.com/xorza) [`#1198`](https://github.com/rhaiscript/rhai/pull/1198)).
+* Object map literals with mostly constant values evaluate faster: the optimizer moves the constant values into the literal's template, so only the computed values are evaluated each time ([`#1196`](https://github.com/rhaiscript/rhai/issues/1196)). As for a map literal that is all constant, its constant values no longer count as operations. Under `internals`, the entries of an optimized `Expr::Map` hold only the computed values.
 
 
 Version 1.27.0

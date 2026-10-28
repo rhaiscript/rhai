@@ -309,8 +309,14 @@ impl Engine {
             Expr::Map(x, ..) => {
                 let mut map = x.1.clone();
 
+                // The template holds the constant values, and a `()` for each computed one, so
+                // it counts every entry once.
                 #[cfg(not(feature = "unchecked"))]
-                let mut total_data_sizes = (0, 0, 0);
+                let mut total_data_sizes = if self.has_data_size_limit() && !x.0.is_empty() {
+                    crate::eval::calc_map_sizes(&x.1)
+                } else {
+                    (0, 0, 0)
+                };
 
                 for (key, value_expr) in &x.0 {
                     let value = self
@@ -322,7 +328,7 @@ impl Engine {
                         let delta = crate::eval::calc_data_sizes(&value, true);
                         total_data_sizes = (
                             total_data_sizes.0 + delta.0,
-                            total_data_sizes.1 + delta.1 + 1,
+                            total_data_sizes.1 + delta.1,
                             total_data_sizes.2 + delta.2,
                         );
                         self.throw_on_size(total_data_sizes)

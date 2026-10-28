@@ -105,6 +105,37 @@ fn interpolation_respects_the_string_limit() {
     assert_eq!(format!("{vm:?}"), format!("{walker:?}"), "including the position of the segment that went over",);
 }
 
+/// A map literal's constant values are in its template rather than evaluated,
+/// but they still count towards the literal's total: the VM must refuse what
+/// the walker refuses, against the same entry.
+#[test]
+#[cfg(not(feature = "no_object"))]
+fn map_constants_count_towards_the_limits() {
+    let mut engine = Engine::new();
+    engine.set_max_string_size(10);
+    engine.set_max_map_size(10);
+
+    for source in [r#"let x = "abc"; #{a: "abcdef", b: "ghijk", c: x}"#, r#"let x = 1; #{a: #{b:1,c:2,d:3,e:4,f:5}, g: #{h:1,i:2,j:3,k:4}, l: x}"#] {
+        let ast = engine.compile(source).expect("must compile");
+        let program = Compiler::new().compile(&ast);
+        assert_eq!(program.residual_count(), 0, "{source:?} must be lowered, not walked");
+
+        let walker = engine.eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast).expect_err("the walker must refuse it");
+        let vm = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).expect_err("and so must the VM");
+
+        assert!(matches!(*vm, EvalAltResult::ErrorDataTooLarge(..)), "{source:?}: got {vm:?}");
+        assert_eq!(format!("{vm:?}"), format!("{walker:?}"), "{source:?}");
+    }
+
+    // Under the limits, they agree on the value.
+    let source = r#"let x = "abc"; #{a: "ab", b: #{c: 1}, d: x}"#;
+    let ast = engine.compile(source).expect("must compile");
+    let program = Compiler::new().compile(&ast);
+    let walker = engine.eval_ast_with_scope::<Dynamic>(&mut Scope::new(), &ast).unwrap();
+    let vm = Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program).unwrap();
+    assert_eq!(format!("{vm:?}"), format!("{walker:?}"));
+}
+
 /// A loop that does terminate must not be killed by the tick itself, and must
 /// still produce the value Rhai produces.
 #[test]

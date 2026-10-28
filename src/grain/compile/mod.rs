@@ -1711,8 +1711,8 @@ impl Lowering {
 
             // The other half of the same shape. Rhai keeps a map literal as a
             // template holding every key — the constant values already in
-            // place, the computed ones as placeholders — plus the list of
-            // entries still to evaluate.
+            // place once optimized, the others as `()` placeholders — plus the
+            // list of entries still to evaluate.
             //
             // An all-constant map is folded into a `DynamicConstant` and never
             // arrives here; one with a single computed value does.

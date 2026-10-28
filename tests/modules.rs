@@ -588,6 +588,26 @@ fn test_module_closure_keeps_imports() {
 }
 
 #[cfg(not(feature = "no_function"))]
+#[cfg(not(feature = "no_object"))]
+#[test]
+fn test_module_closure_in_map_keeps_imports() {
+    let mut engine = Engine::new();
+
+    let ast = engine.compile(r#"fn who() { "from m" }"#).unwrap();
+    let mut resolver = StaticModuleResolver::new();
+    resolver.insert("m", Module::eval_ast_as_new(Scope::new(), &ast, &engine).unwrap());
+    engine.set_module_resolver(resolver);
+
+    // A closure is a constant value of the map literal, but it takes its environment as the
+    // literal is evaluated, so it is not moved into the literal's template.
+    let ast = engine.compile(r#"import "m" as m; let x = 1; #{ f: || m::who(), x: x }"#).unwrap();
+    let map = engine.eval_ast::<rhai::Map>(&ast).unwrap();
+    let f = map["f"].clone_cast::<rhai::FnPtr>();
+
+    assert_eq!(f.call::<String>(&engine, &ast, ()).unwrap(), "from m");
+}
+
+#[cfg(not(feature = "no_function"))]
 #[test]
 fn text_module_constant_store() {
     let mut engine = Engine::new();

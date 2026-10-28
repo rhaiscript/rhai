@@ -1036,7 +1036,7 @@ impl Engine {
                     return Err(PERR::PropertyExpected.into_err(pos))
                 }
                 (Token::Identifier(s) | Token::StringConstant(s), pos) => {
-                    if map.iter().any(|(p, ..)| p.as_str() == s.as_str()) {
+                    if template.contains_key(s.as_str()) {
                         return Err(PERR::DuplicatedProperty(s.to_string()).into_err(pos));
                     }
                     (*s, pos)

@@ -33,6 +33,20 @@ fn test_max_string_size() {
         EvalAltResult::ErrorDataTooLarge(..)
     ));
 
+    // The constant values of a map literal count towards its total, too.
+    #[cfg(not(feature = "no_object"))]
+    assert!(matches!(
+        *engine
+            .run(
+                r#"
+                    let x = "abc";
+                    #{a: "abcdef", b: "ghijk", c: x}
+                "#
+            )
+            .unwrap_err(),
+        EvalAltResult::ErrorDataTooLarge(..)
+    ));
+
     #[cfg(not(feature = "no_object"))]
     assert!(matches!(
         *engine
@@ -276,6 +290,19 @@ fn test_max_map_size() {
                     let x = #{a:1,b:2,c:3,d:4,e:5,f:6};
                     let y = #{g:7,h:8,i:9,j:10,k:11,l:12};
                     x + y
+                "
+            )
+            .unwrap_err(),
+        EvalAltResult::ErrorDataTooLarge(..)
+    ));
+
+    // The constant values of a map literal count towards its total, too.
+    assert!(matches!(
+        *engine
+            .run(
+                "
+                    let x = 1;
+                    #{a: #{b:1,c:2,d:3,e:4,f:5}, g: #{h:1,i:2,j:3,k:4}, l: x}
                 "
             )
             .unwrap_err(),
