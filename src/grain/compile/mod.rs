@@ -310,9 +310,9 @@ struct Lowering {
     positions: Vec<Position>,
     residuals: Vec<Expr>,
     consts: Vec<Dynamic>,
-    /// Indices into `consts` by the hash of the constant, to find a duplicate
+    /// Index into `consts` by the hash of the constant, to find a duplicate
     /// without comparing with every constant already pooled.
-    const_index: crate::func::StraightHashMap<crate::StaticVec<u32>>,
+    const_index: crate::func::StraightHashMap<u32>,
     names: Vec<ImmutableString>,
     tokens: Vec<Token>,
     assign_ops: Vec<AssignOp>,
@@ -2464,17 +2464,14 @@ impl Lowering {
         };
         self.caps.insert(required_caps);
 
+        // The hash covers the type of the value, and Rhai treats it as unique,
+        // so a matching hash is the same constant.
         let hash = crate::func::calc_switch_value_hash(&value);
-        let candidates = self.const_index.entry(hash).or_default();
-        if let Some(&index) = candidates
-            .iter()
-            .find(|&&index| same_constant(&self.consts[index as usize], &value))
-        {
-            return index;
+        let next = self.consts.len() as u32;
+        let index = *self.const_index.entry(hash).or_insert(next);
+        if index == next {
+            self.consts.push(value);
         }
-        let index = self.consts.len() as u32;
-        candidates.push(index);
-        self.consts.push(value);
         index
     }
 
@@ -2760,18 +2757,6 @@ fn declaration_order(def: &ScriptFuncDef) -> (&str, usize, Option<&str>) {
     let this_type = None;
 
     (&def.name, def.params.len(), this_type)
-}
-
-/// Whether two poolable constants with the same hash are the same constant.
-fn same_constant(a: &Dynamic, b: &Dynamic) -> bool {
-    if a.type_id() != b.type_id() {
-        return false;
-    }
-    // Most of the pool is strings: compare those directly.
-    if let (Ok(a), Ok(b)) = (a.as_immutable_string_ref(), b.as_immutable_string_ref()) {
-        return *a == *b;
-    }
-    format!("{a:?}") == format!("{b:?}")
 }
 
 /// Check whether a statement block or statement contains a `break` with an
