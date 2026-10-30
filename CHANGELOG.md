@@ -7,23 +7,25 @@ Version 1.27.1
 Bug fixes
 ---------
 
-* Fixes regression with missing encapsulated environment in function pointers (thanks [`@luispedro`](https://github.com/luispedro) [`#1193`](https://github.com/rhaiscript/rhai/pull/1193)).
-* Fixes bug in `pad` method for strings that hangs when the padding string is empty (thanks [`@b84330808`](https://github.com/b84330808) [`#1195`](https://github.com/rhaiscript/rhai/pull/1195)).
-* `AST::clone_functions_only_filtered` now applies its filter, as does `AST::merge_filtered` when the first `AST` has no functions. Previously every function was kept (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1192`](https://github.com/rhaiscript/rhai/pull/1192)).
+* Fixed regression with missing encapsulated environment in function pointers (thanks [`@luispedro`](https://github.com/luispedro) [`#1193`](https://github.com/rhaiscript/rhai/pull/1193)).
+* Fixed bug in `pad` method for strings that hangs when the padding string is empty (thanks [`@b84330808`](https://github.com/b84330808) [`#1195`](https://github.com/rhaiscript/rhai/pull/1195)).
+* Fixed string indexing bug with a single-character inclusive range (e.g. `s[1..=1]`) returning an empty string (thanks [`@youdie006`](https://github.com/youdie006) [`#1204`](https://github.com/rhaiscript/rhai/pull/1204)).
 * `sleep` no longer panics when called with a float number that is too large (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1205`](https://github.com/rhaiscript/rhai/pull/1205)).
-* Fixes string indexing bug with a single-character inclusive range (e.g. `s[1..=1]`) returning an empty string (thanks [`@youdie006`](https://github.com/youdie006) [`#1204`](https://github.com/rhaiscript/rhai/pull/1204)).
 * `tan` no longer panics on a decimal number when the result overflows - e.g. `tan(π/2)` (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1203`](https://github.com/rhaiscript/rhai/pull/1203)).
-* Rhai Grain no longer merges distinct constants of a custom type (such as two custom syntax states) in the constant pool because they print the same.
+* Native functions that call back into the engine (e.g. `==` or `to_string` on arrays) now count towards `max_call_levels`, so comparing or printing a deeply-nested array returns an error instead of overflowing the stack (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1208`](https://github.com/rhaiscript/rhai/pull/1208)).
+* `AST::clone_functions_only_filtered` now applies its filter, as does `AST::merge_filtered` when the first `AST` has no functions. Previously every function was kept (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1192`](https://github.com/rhaiscript/rhai/pull/1192)).
+* Rhai Grain no longer merges distinct constants of a custom type (such as two custom syntax states) in the constant pool because they print the same (thanks [`@luispedro`](https://github.com/luispedro) [`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
 
 Enhancements
 ------------
 
 * Some parse errors now point to more reasonable positions (thanks [`@ksjdragon`](https://github.com/ksjdragofn) for the suggestion [`#1197`](https://github.com/rhaiscript/rhai/pull/1197))
-* A `Module` created by `Module::eval_grain_as_new` now looks up the functions of the Rhai Grain program only when called. The new `Vm::eval_with_lazy_callbacks` does the same for functions called back from native Rust functions, while `Vm::eval_with_callbacks` still registers every function up-front (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1192`](https://github.com/rhaiscript/rhai/pull/1192)).
+* Lazy-loading for Grain callbacks: a `Module` created by `Module::eval_grain_as_new` now looks up the functions of the Rhai Grain program only when called. The new `Vm::eval_with_lazy_callbacks` does the same for functions called back from native Rust functions, while `Vm::eval_with_callbacks` still registers every function up-front (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1192`](https://github.com/rhaiscript/rhai/pull/1192)).
 * Function call dispatches now run faster due to optimization inlining a fast path (thanks [`@xorza`](https://github.com/xorza) [`#1199`](https://github.com/rhaiscript/rhai/pull/1199)).
 * Operations counting is optimized to run fast by avoiding atomics when not building under `sync` (thanks [`@xorza`](https://github.com/xorza) [`#1198`](https://github.com/rhaiscript/rhai/pull/1198)).
-* Large object map literals now run faster by storing constant property values in their templates, only computed properties are evaluated at runtime.
-* Rhai Grain compiles scripts with many constants, such as large object map literals, in linear instead of quadratic time, by indexing the constant pool by hash ([`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
+* `Engine::set_max_call_levels` and `Engine::max_call_levels` are now available under `no_function`, since native functions calling back into the engine are also bound by this limit (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1208`](https://github.com/rhaiscript/rhai/pull/1208)).
+* Large object map literals now run faster by storing constant property values in their templates, only computed properties are evaluated at runtime ([`#1207`](https://github.com/rhaiscript/rhai/pull/1207)).
+* Rhai Grain now compiles scripts with many constants, such as large object map literals, in linear instead of quadratic time, by indexing the constant pool by hash (thanks [`@luispedro`](https://github.com/luispedro) [`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
 
 
 Version 1.27.0

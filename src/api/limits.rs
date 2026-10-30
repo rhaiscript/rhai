@@ -9,9 +9,6 @@ use std::prelude::v1::*;
 #[cfg(debug_assertions)]
 pub mod default_limits {
     /// Maximum levels of function calls.
-    ///
-    /// Not available under `no_function`.
-    #[cfg(not(feature = "no_function"))]
     pub const MAX_CALL_STACK_DEPTH: usize = 8;
     /// Maximum levels of expressions.
     pub const MAX_EXPR_DEPTH: usize = 32;
@@ -24,9 +21,6 @@ pub mod default_limits {
 #[cfg(not(debug_assertions))]
 pub mod default_limits {
     /// Maximum levels of function calls.
-    ///
-    /// Not available under `no_function`.
-    #[cfg(not(feature = "no_function"))]
     pub const MAX_CALL_STACK_DEPTH: usize = 64;
     /// Maximum levels of expressions.
     pub const MAX_EXPR_DEPTH: usize = 64;
@@ -45,9 +39,6 @@ pub struct Limits {
     /// Maximum levels of call-stack to prevent infinite recursion.
     ///
     /// Set to zero to effectively disable function calls.
-    ///
-    /// Not available under `no_function`.
-    #[cfg(not(feature = "no_function"))]
     pub call_stack_depth: usize,
     /// Maximum depth of statements/expressions at global level.
     pub expr_depth: Option<NonZeroUsize>,
@@ -97,7 +88,6 @@ impl Limits {
     #[inline]
     pub const fn new() -> Self {
         Self {
-            #[cfg(not(feature = "no_function"))]
             call_stack_depth: default_limits::MAX_CALL_STACK_DEPTH,
             expr_depth: NonZeroUsize::new(default_limits::MAX_EXPR_DEPTH),
             #[cfg(not(feature = "no_function"))]
@@ -149,8 +139,7 @@ impl Engine {
     /// Set the maximum levels of function calls allowed for a script in order to avoid
     /// infinite recursion and stack overflows.
     ///
-    /// Not available under `unchecked` or `no_function`.
-    #[cfg(not(feature = "no_function"))]
+    /// Not available under `unchecked`.
     #[inline(always)]
     pub fn set_max_call_levels(&mut self, levels: usize) -> &mut Self {
         self.limits.call_stack_depth = levels;
@@ -158,8 +147,7 @@ impl Engine {
     }
     /// The maximum levels of function calls allowed for a script.
     ///
-    /// Not available under `unchecked` or `no_function`.
-    #[cfg(not(feature = "no_function"))]
+    /// Not available under `unchecked`.
     #[inline(always)]
     #[must_use]
     pub const fn max_call_levels(&self) -> usize {

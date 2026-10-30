@@ -169,3 +169,33 @@ fn test_stack_overflow_ref_loop() {
 
     println!("{x:?}");
 }
+
+#[test]
+#[cfg(not(feature = "no_index"))]
+fn test_stack_overflow_nested_native_calls() {
+    let engine = Engine::new();
+
+    // `==` on arrays calls `==` on each element through the native call context.
+    assert!(matches!(
+        *engine
+            .run(
+                "
+                    let a = [];
+                    for i in 0..500 { a = [a]; }
+                    a == a
+                "
+            )
+            .unwrap_err(),
+        EvalAltResult::ErrorStackOverflow(..)
+    ));
+
+    assert!(engine
+        .eval::<bool>(
+            "
+                let a = [];
+                for i in 0..5 { a = [a]; }
+                a == a
+            "
+        )
+        .unwrap());
+}

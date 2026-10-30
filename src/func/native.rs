@@ -519,6 +519,15 @@ impl<'a> NativeCallContext<'a> {
         let new_global = &mut self.global.clone();
         new_global.level += 1;
 
+        let pos = self.call_position();
+
+        // Native functions calling back into the engine (e.g. `==` or `to_string` on nested arrays)
+        // recurse on the Rust stack, so they are bound by the same limit as script function calls.
+        #[cfg(not(feature = "unchecked"))]
+        if new_global.level > self.engine().max_call_levels() {
+            return Err(ERR::ErrorStackOverflow(pos).into());
+        }
+
         // Empty caches -- cost to pay for indirect script function call from native
         let caches = &mut Caches::new();
 
@@ -526,7 +535,6 @@ impl<'a> NativeCallContext<'a> {
         let op_token = Token::lookup_symbol_from_syntax(fn_name);
         let op_token = op_token.as_ref();
         let args_len = args.len();
-        let pos = self.call_position();
 
         let result = if native_only {
             // Native only
