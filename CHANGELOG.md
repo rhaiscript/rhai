@@ -14,6 +14,7 @@ Bug fixes
 * `tan` no longer panics on a decimal number when the result overflows - e.g. `tan(π/2)` (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1203`](https://github.com/rhaiscript/rhai/pull/1203)).
 * Native functions that call back into the engine (e.g. `==` or `to_string` on arrays) now count towards `max_call_levels`, so comparing or printing a deeply-nested array returns an error instead of overflowing the stack (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1208`](https://github.com/rhaiscript/rhai/pull/1208)).
 * `AST::clone_functions_only_filtered` now applies its filter, as does `AST::merge_filtered` when the first `AST` has no functions. Previously every function was kept (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1192`](https://github.com/rhaiscript/rhai/pull/1192)).
+* Rhai Grain no longer merges distinct constants of a custom type (such as two custom syntax states) in the constant pool because they print the same (thanks [`@luispedro`](https://github.com/luispedro) [`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
 
 Enhancements
 ------------
@@ -24,6 +25,7 @@ Enhancements
 * Operations counting is optimized to run fast by avoiding atomics when not building under `sync` (thanks [`@xorza`](https://github.com/xorza) [`#1198`](https://github.com/rhaiscript/rhai/pull/1198)).
 * `Engine::set_max_call_levels` and `Engine::max_call_levels` are now available under `no_function`, since native functions calling back into the engine are also bound by this limit (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1208`](https://github.com/rhaiscript/rhai/pull/1208)).
 * Large object map literals now run faster by storing constant property values in their templates, only computed properties are evaluated at runtime ([`#1207`](https://github.com/rhaiscript/rhai/pull/1207)).
+* Rhai Grain now compiles scripts with many constants, such as large object map literals, in linear instead of quadratic time, by indexing the constant pool by hash (thanks [`@luispedro`](https://github.com/luispedro) [`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
 
 
 Version 1.27.0

@@ -310,6 +310,9 @@ struct Lowering {
     positions: Vec<Position>,
     residuals: Vec<Expr>,
     consts: Vec<Dynamic>,
+    /// Index into `consts` by the hash of the constant, to find a duplicate
+    /// without comparing with every constant already pooled.
+    const_index: crate::func::StraightHashMap<u32>,
     names: Vec<ImmutableString>,
     tokens: Vec<Token>,
     assign_ops: Vec<AssignOp>,
@@ -2451,25 +2454,25 @@ impl Lowering {
     }
 
     fn push_const(&mut self, value: Dynamic) -> u32 {
-        if let Some(required_caps) = constant_caps(&value) {
-            self.caps.insert(required_caps);
-        }
-        // Programs at this scale make a linear scan cheaper than a hash map,
-        // and it keeps the pool in emission order for readable disassembly.
-        let rendered = format!("{value:?}");
-        // Use a buffer to avoid allocating a new string for every comparison.
-        let mut buf = String::new();
-        if let Some(index) = self.consts.iter().position(|existing| {
-            use std::fmt::Write;
+        // Only a constant that can be pooled is shared: anything else (a custom
+        // type, a shared cell) need not be hashable, and two of them can render
+        // the same yet differ. The pool stays in emission order, for readable
+        // disassembly.
+        let Some(required_caps) = constant_caps(&value) else {
+            self.consts.push(value);
+            return (self.consts.len() - 1) as u32;
+        };
+        self.caps.insert(required_caps);
 
-            buf.clear();
-            write!(&mut buf, "{existing:?}").expect("writing to a string cannot fail");
-            buf == rendered
-        }) {
-            return index as u32;
+        // The hash covers the type of the value, and Rhai treats it as unique,
+        // so a matching hash is the same constant.
+        let hash = crate::func::calc_switch_value_hash(&value);
+        let next = self.consts.len() as u32;
+        let index = *self.const_index.entry(hash).or_insert(next);
+        if index == next {
+            self.consts.push(value);
         }
-        self.consts.push(value);
-        (self.consts.len() - 1) as u32
+        index
     }
 
     fn push_name(&mut self, name: ImmutableString) -> u32 {
