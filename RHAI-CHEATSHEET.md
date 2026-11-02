@@ -1,272 +1,129 @@
 # Rhai Language Cheat Sheet
 
-Quick reference for AI agents writing or reviewing Rhai scripts.
+For AI agents writing or reviewing Rhai scripts. **Start from JavaScript, then apply the
+deltas below.** Full reference: [_The Rhai Book_](https://rhai.rs/book/ref).
 
-Rhai looks familiar to JavaScript, Rust, and C-family languages, but similar syntax does not always
-mean similar semantics.
+## JS → Rhai deltas (read first)
 
-This page focuses on script language behavior; [_The Rhai Book_](https://rhai.rs/book/ref) is the
-full language reference.
+| JavaScript habit | Rhai reality |
+|---|---|
+| `{a: 1}` object literal | `#{a: 1}` (object map) |
+| `null` / `undefined` | single value `()`; absent map key reads as `()` |
+| truthiness (`if (x)`) | conditions must be `bool` |
+| `===` / `==` coercion | only `==`; no coercion; `1` (i64) and `1.0` (f64) are distinct types |
+| objects/arrays are references | **no references exist**: values are cloned on assign and on call; mutate via the variable path |
+| `function f(){}` sees globals/outer scope | `fn` cannot see outer variables; closures `\|x\| ...` capture (shared) |
+| `arr.length`, `.forEach`, `.includes` | `arr.len()`, `for` loop, `.contains()` |
+| `console.log` | `print(x)` / `debug(x)` |
+| `Math.floor(x)` | `x.floor()`; `PI()`; `x.sin()` etc. |
+| `for (let i=0;i<n;i++)` | `for i in 0..n` (exclusive) / `0..=n` (inclusive) |
+| `if (c) stmt` | `if c { ... }` braces mandatory, no parentheses |
+| `return` required | last expression is the value; trailing `;` gives `()` |
+| `throw`/`try`/`catch (e)` | same; `throw` takes any value |
+| `class`, `async`, `await`, `new` | none; use maps + closures, or host-registered types |
+| `import x from` | `import "name" as x; x::f()` |
+| `'a'` is a string | `'a'` is a `char`; strings use `"..."` or `` `...${x}...` `` |
+| `s.length`, UTF-16 indexing | `s.len()` counts chars; `s[i]` is a `char` |
 
-## Values and variables
+When unsure whether a method exists, check the host's registered functions instead of guessing JS names.
 
-```rhai
-let count = 0;                 // variables are dynamically typed and mutable
-count = "now a string";
-const LIMIT = 10;              // constants cannot be reassigned
-let uninitialized;             // defaults to ()
-let nothing = ();
-let values = [1, "two", true]; // arrays can mix value types
-let record = #{name: "Ada", score: 42};
-```
-
-- Variables are block-local; a nested `let` can shadow an outer variable.
-- `()` is Rhai's single unit/no-value value; do not assume JavaScript's separate `null` and
-  `undefined` semantics or coercions.
-- Rhai values are dynamically typed, but operations are still type-specific. An unsupported
-  operation is an evaluation error; do not assume JavaScript coercions.
-- The default system integer is `i64`. Numeric types are distinct and are not generally implicitly
-  converted, as in Rust. `42` and `42.0` are different types even though some comparisons support
-  integer/float interoperability.
-- Integer literals support decimal, binary (`0b`), octal (`0o`), hex (`0x`), and `_` separators.
-- A block always has a value.  Its final statement supplies its value whether or not it ends in `;`.
-  If the final statement has no value (such as an assignment or declaration), it evaluates to `()`.
+## Values
 
 ```rhai
-let result = {
-    let x = 20;
-    x + 22;                    // block result is 42, semicolon or not
-};
+let count = 0;                  // mutable, dynamically typed
+const LIMIT = 10;
+let u;                          // ()
+let items = [10, 20, 30,];      // trailing comma ok; items[-1] == 30
+let opts = #{mode: "fast", "odd-key": true};
+opts.mode = "safe";
+opts["odd-key"];                // brackets for non-identifier keys
+"mode" in opts;                 // key test
+opts.timeout ?? 30;             // ?? defaults when left is ()
+opts?.a?.b;                     // ?. short-circuits on ()
 ```
 
-## IMPORTANT: Assignment, cloning, and mutation
+- Integer literals: decimal, `0b`, `0o`, `0x`, `_` separators. Default int is `i64`.
+- Out-of-range array reads are errors. Unsupported operations are errors, not coercions.
+- Blocks, `if`, `switch`, `while`, `loop`, `for` are expressions; `break value` yields from a loop.
+- Mismatched non-numeric `==` is `false`; mixed numeric types may fail: convert with `to_int()`/`to_float()`.
+- `&&`/`||` short-circuit; single `&`/`|` on booleans evaluate both sides.
 
-**Assume value semantics, not JavaScript object identity.**
-
-Assigning a value **clones** it, including arrays, maps, and function arguments.
-
-Mutating a scripted function's parameter does **not** mutate the caller's value.
+## IMPORTANT: value semantics
 
 ```rhai
-let original = [1, 2];
-let copy = original;           // clone
-copy[0] = 99;
-original[0] == 1;              // still unchanged
+let a = [1, 2];
+let b = a;                      // clone
+b[0] = 99;                      // a unchanged
+fn f(x) { x[0] = 99; }
+f(a);                           // a unchanged
 
-fn change_local(items) {
-    items[0] = 99;             // edits only the function's value-copy
-}
-change_local(original);
-original[0] == 1;
+a[0] = 7;                       // edits a
+let user = #{s: #{theme: "light"}};
+user.s.theme = "dark";          // edits nested property in place
+let s = user.s;                 // clones
 ```
 
-**Mutate a collection through its variable-rooted index/property path** when the intent is to change
-that collection:
-
-```rhai
-original[0] = 7;               // edits original
-let user = #{settings: #{theme: "light"}};
-user.settings.theme = "dark";  // edits the nested map property
-```
-
-Object-map properties have special reference-based access: traversing `map.a.b` or assigning through
-`map.a.b = value` does not first copy each property.
-
-This is not general aliasing: assigning `let settings = user.settings` still clones the assigned value.
-Do not assume custom-type property getters or arbitrary function results have the same reference behavior.
-This behavior exists only for built-in types: arrays, BLOB's and maps.
-
-Use `take(value)` when a large value should be moved rather than cloned; the source variable becomes
-`()`. `take` is supplied by the standard language package and may be absent with a raw `Engine`.
-
-## Arrays and maps
-
-```rhai
-let items = [10, 20, 30,];     // trailing comma is allowed
-items[0] == 10;                // zero-based
-items[-1] == 30;               // negative index counts from the end
-items.push(40);
-items[1] = 25;
-
-let options = #{mode: "fast", "not-an-identifier": true};
-options.mode = "safe";
-options["not-an-identifier"] == true;
-options.missing == ();         // absent map property reads as ()
-"mode" in options;             // test map-key existence
-```
-
-- Reading an out-of-range array index is an error (unless the host customizes that behavior).
-- Dot notation on maps requires an identifier-like key; bracket notation handles arbitrary string keys.
-- `?.` and `?[...]` is Elvis access/call: it short-circuits when the receiver is `()`.
-- `??` returns the left value unless it is `()`, otherwise evaluates and returns the right value.
-- `get` returns a copy of an array element; do not confuse it with writing through an indexed
-  assignment path.
-
-## Strings and literals
-
-```rhai
-let name = "Rhai";             // escaped, single-line string
-let path = #"C:\scripts\main"#; // raw string: backslashes are literal
-let text = `Hello, ${name}!`;  // interpolated backtick string
-let letter = 'R';              // Unicode character, not a one-character string
-```
-
-Normal strings use double quotes and escapes.
-
-Backtick strings interpolate `${expression}` but do not process normal escape sequences.
-
-Raw strings use matching `#` delimiters and do not interpret escapes.
-
-Strings are immutable; string-producing operations return values rather than mutating a
-string in place.
-
-## Operators and conditions
-
-```rhai
-let is_ready = count > 0 && options.mode == "safe";
-let selected = options.timeout ?? 30;
-let remainder = 17 % 5;
-```
-
-- `&&` and `||` short-circuit.
-- Single `&` and `|` on booleans evaluate both sides.
-- There is no JavaScript-style truthiness: use a boolean condition, not a number/string/container
-  as a truthy/falsy value.
-- Comparing different non-numeric types generally defaults to `false` (`!=` to `true`) if no
-  comparison is defined. Comparing distinct numeric types can instead fail; never rely on implicit
-  numeric conversion.
-- `if` conditions omit parentheses, but braces around every branch are mandatory. `if` can be an
-  expression; an omitted `else` yields `()`.
-
-```rhai
-let label = if is_ready { "go" } else { "wait" };
-```
+- Rhai has no reference type: scripts cannot hold, pass, or return a reference to a value. The only
+  in-place mutation is through a variable-rooted path or a method call on a receiver (`this`).
+  To refer to data indirectly, pass an index, key, or ID and resolve it at the point of mutation.
+- Property/index paths rooted at a variable mutate in place (built-in arrays, BLOBs, maps only).
+  Custom-type getters and function results do not.
+- **Prefer built-in types in scripts.** Arrays, maps and BLOBs edit in place; custom types are
+  cloned and set back through getters/setters. Keep script data in arrays/maps and convert
+  to/from custom types at the edge (host functions or `serde`).
+- `take(x)` moves a value out (source becomes `()`); needs the standard package.
+- Strings are immutable values; string operations return new strings.
 
 ## Control flow
 
 ```rhai
-for item in items {
-    if item == 20 { continue; }
-    if item > 30 { break; }
-}
-
-let sum = 0;
-while sum < 3 {
-    sum += 1;
-}
+for item in items { if item == 20 { continue; } if item > 30 { break; } }
+for (item, i) in items { }      // with index
+let r = if ok { "go" } else { "wait" };   // omitted else yields ()
+let n = 0; while n < 3 { n += 1; }
+loop { break; }
 ```
 
-- `for x in range` and `for x in array` are common iteration forms. `for (item, index) in array`
-  also provides a zero-based counter.
-- `break` and `continue` work in loops. Loop expressions evaluate to `()` unless `break value`
-  supplies a result.
-- Rhai also has `loop` and `switch`; see the reference for their exact forms.
-- `while`, `loop`, `for` and `switch` can all be used as expressions, returning a value, just
-  like `if`.
+`switch` exists (`switch x { 1 => ..., 2 | 3 => ..., _ => ... }`); see the reference for ranges and guards.
 
-## Functions, closures, and function pointers
+## Functions, closures, pointers
 
 ```rhai
-fn add(a, b) {
-    a + b                      // final statement is the result
-}
-
+fn add(a, b) { a + b }                  // global-level only, no nesting, no capture
 let offset = 2;
-let add_offset = |n| n + offset; // anonymous closure captures offset
-
-fn double(n) { n * 2 }
-let operation = double;          // same as Fn("double"), a function pointer
-
-add(1, 2) == 3;
-add_offset.call(3) == 5;
-operation.call(3) == 6;
-offset = 10;
-add_offset.call(3) == 13;        // closure sees the updated shared capture
+let f = |n| n + offset;                 // closure: captures SHARED variables
+f.call(3);                              // call closures/pointers with .call()
+let g = add;                            // fn pointer (same as Fn("add"))
+g.call(1, 2);
 ```
 
-**Do not conflate a function pointer with a capturing closure:**
+- Function pointers store only a name; they cannot name functions inside modules.
+- Loop closures all see the same shared captured variable.
+- Do not use a captured variable as both capture and `this` receiver (data-race error; deadlock under `sync`).
 
-- A named script function is declared with `fn`. Script functions are global-level definitions,
-  cannot be nested, do not capture local variables, and receive arguments by value.
-- A function pointer (`Fn("double")`, or the `double` shorthand for a script function in the same
-  script) stores a function name for later dispatch. It is not a first-class function body or a
-  captured environment; the named function must be resolvable when called. Function pointers
-  cannot name functions inside imported modules.
-- A closure (`|x| expression`, `|| expression`, or a braced body) is an anonymous function that can
-  capture variables from where it is created. Captures are shared values: later changes to a
-  captured variable are visible to the closure, and closures can outlive the scope that created
-  them.
-- Because captures are genuinely shared, closures created in a loop can all see the same final
-  loop-variable value. Avoid using a shared captured value as both a closure capture and that
-  closure's `this` receiver; Rhai can report a data-race error (and `sync` builds can deadlock).
-- Script functions and closures return the final statement of their body. `return value;` is also
-  available.
-
-## `this` and method-style calls
-
-Rhai script functions can be called as methods: `receiver.function(arguments)`.
-
-In that form, `this` is bound to the receiver and can be reassigned or mutated. This is Rhai's
-explicit method-call mechanism, not JavaScript's general `this`/dynamic-binding rules.
+## `this` and methods
 
 ```rhai
-fn increase(amount) {
-    this += amount;
-}
-
+fn increase(amount) { this += amount; }
 let score = 10;
-score.increase(5);
-score == 15;
+score.increase(5);                      // score == 15; plain increase(5) errors
+fn int.double() { this * 2 }            // restrict receiver type (match type_of())
+let c = #{v: 0, inc: || this.v += 1};   // closures in map props get `this`
+c.inc();
 ```
 
-- A function that reads or writes `this` must be called with a receiver (`score.increase(5)`).
-  Calling `increase(5)` leaves `this` unbound and errors.
-- `fn int.increase(amount) { ... }` restricts a script method to an integer receiver; the type name
-  must match `type_of()` (with `int`/`float` aliases for portable system numeric types).
-- Closures stored as object-map properties can also use method-call syntax and `this`:
+## Strings
 
-```rhai
-let counter = #{
-    value: 0,
-    increment: || this.value += 1
-};
-counter.increment();
-counter.value == 1;
-```
+`"escaped"`, `` `interpolated ${x}, no escapes` ``, `#"raw \ string"#`, `'c'` (char).
 
-The function body may be a closure, but using `this` does not itself make it a capturing closure:
-lexical capture of surrounding variables is a separate behavior.
+## Modules and host dependence
 
-## Modules and host-dependent behavior
+`import "m" as m; m::f();` `export` marks items from a module script.
 
-```rhai
-import "math_tools" as math;
-let value = math::double(21);
-```
+Built-ins depend on the host's registered packages and features (`no_index`, `no_object`,
+`no_function`, `no_closure`, `no_module`, ...). If a built-in seems missing, check the embedding.
 
-`import` and `export` organize script functions and constants; imported names use `::`.
+## Performance style
 
-Some functions and types are supplied by the host application rather than by Rhai syntax itself.
-
-Available operations also depend on engine configuration and compile-time features (for example,
-`no_index`, `no_object`, `no_function`, `no_closure`, and `no_module`).
-
-When a script example seems to lack a built-in, check the embedding's registered packages and
-feature configuration.
-
-## Coding style
-
-Scripting languages are different from compiled languages.  Function calls do not get inlined,
-and module trees do not get flattened. Functions and modules are expensive.
-
-Therefore, avoid deep module structures or trivial functions.  Always inline simple
-functions at call sites to avoid the overhead of a function call.
-
-## Full reference
-
-- [Rhai Language Reference](https://rhai.rs/book/ref)
-- [Values and types](https://rhai.rs/book/language/values-and-types.html)
-- [Assignments and cloning](https://rhai.rs/book/language/assignment.html)
-- [Arrays](https://rhai.rs/book/language/arrays.html) and [object maps](https://rhai.rs/book/language/object-maps.html)
-- [Functions](https://rhai.rs/book/language/functions.html), [method-style `this`](https://rhai.rs/book/language/fn-method.html), [closures](https://rhai.rs/book/language/fn-closure.html), and [function pointers](https://rhai.rs/book/language/fn-ptr.html)
-- [Operators and logic](https://rhai.rs/book/language/logic.html), [strings and characters](https://rhai.rs/book/language/strings-chars.html), and [modules](https://rhai.rs/book/language/modules/)
+Calls and module lookups are not inlined or flattened: avoid deep module trees and trivial
+wrapper functions; inline simple logic.
