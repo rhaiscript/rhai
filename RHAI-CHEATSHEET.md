@@ -1,7 +1,8 @@
 # Rhai Language Cheat Sheet
 
-For AI agents writing or reviewing Rhai scripts. **Start from JavaScript, then apply the
-deltas below.** Full reference: [_The Rhai Book_](https://rhai.rs/book/ref).
+For AI agents writing or reviewing Rhai scripts. Rhai is JavaScript-like plus certain Rust-inspired syntax.
+**Start from JavaScript, then apply the deltas below.**
+Full reference: [_The Rhai Book_](https://rhai.rs/book/ref).
 
 ## JS → Rhai deltas (read first)
 
@@ -10,7 +11,7 @@ deltas below.** Full reference: [_The Rhai Book_](https://rhai.rs/book/ref).
 | `{a: 1}` object literal | `#{a: 1}` (object map) |
 | `null` / `undefined` | single value `()`; absent map key reads as `()` |
 | truthiness (`if (x)`) | conditions must be `bool` |
-| `===` / `==` coercion | only `==`; no coercion; `1` (i64) and `1.0` (f64) are distinct types |
+| `===` / `==` coercion | only `==`; no coercion; `1` (`i64`) and `1.0` (`f64`) are distinct types |
 | objects/arrays are references | **no references exist**: values are cloned on assign and on call; mutate via the variable path |
 | `function f(){}` sees globals/outer scope | `fn` cannot see outer variables; closures `\|x\| ...` capture (shared) |
 | `arr.length`, `.forEach`, `.includes` | `arr.len()`, `for` loop, `.contains()` |
@@ -18,12 +19,14 @@ deltas below.** Full reference: [_The Rhai Book_](https://rhai.rs/book/ref).
 | `Math.floor(x)` | `x.floor()`; `PI()`; `x.sin()` etc. |
 | `for (let i=0;i<n;i++)` | `for i in 0..n` (exclusive) / `0..=n` (inclusive) |
 | `if (c) stmt` | `if c { ... }` braces mandatory, no parentheses |
-| `return` required | last expression is the value; trailing `;` gives `()` |
+| `return` required | last statement is always the value of the block (not just functions), with or without trailing `;` (different from Rust) |
+| Blocks <> expressions | every block is an expression (the last statement is the value) |
 | `throw`/`try`/`catch (e)` | same; `throw` takes any value |
 | `class`, `async`, `await`, `new` | none; use maps + closures, or host-registered types |
 | `import x from` | `import "name" as x; x::f()` |
 | `'a'` is a string | `'a'` is a `char`; strings use `"..."` or `` `...${x}...` `` |
-| `s.length`, UTF-16 indexing | `s.len()` counts chars; `s[i]` is a `char` |
+| `s.length`, UTF-16 indexing | `s.len()` counts chars; `s[i]` is a `char` (different from Rust where strings are UTF-8 encoded bytes) |
+| `x = a ? b : c` | `x = if a { b } else { c }` |
 
 When unsure whether a method exists, check the host's registered functions instead of guessing JS names.
 
@@ -40,6 +43,7 @@ opts["odd-key"];                // brackets for non-identifier keys
 "mode" in opts;                 // key test
 opts.timeout ?? 30;             // ?? defaults when left is ()
 opts?.a?.b;                     // ?. short-circuits on ()
+x = if a { b } else { c };      // if statement used as expression, similar to x = a ? b : c;
 ```
 
 - Integer literals: decimal, `0b`, `0o`, `0x`, `_` separators. Default int is `i64`.
