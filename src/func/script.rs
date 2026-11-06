@@ -362,6 +362,13 @@ impl Engine {
         // Merge in encapsulated environment, if any
         let orig_fn_resolution_caches_len = caches.fn_resolution_caches_len();
 
+        // A function resolution cache holds answers for one set of functions. Entering an
+        // encapsulated environment changes that set, so the call needs a cache of its own.
+        #[cfg(not(feature = "no_module"))]
+        if _env.is_some() {
+            caches.push_fn_resolution_cache();
+        }
+
         #[cfg(not(feature = "no_module"))]
         let orig_constants = _env.map(
             |EncapsulatedEnviron {
