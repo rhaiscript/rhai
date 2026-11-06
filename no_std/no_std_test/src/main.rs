@@ -33,12 +33,12 @@ pub extern "C" fn main(_argc: isize, _argv: *const *const u8) -> isize {
 
 #[alloc_error_handler]
 fn foo(_: core::alloc::Layout) -> ! {
-    core::process::abort_immediate()
+    core::process::crash()
 }
 
 #[panic_handler]
 fn rust_begin_panic(_: &core::panic::PanicInfo) -> ! {
-    core::process::abort_immediate()
+    core::process::crash()
 }
 
 #[no_mangle]
@@ -57,7 +57,7 @@ extern "C" fn rust_eh_personality(
     _exception_object: *mut (),
     _context: *mut (),
 ) -> i32 {
-    core::process::abort_immediate()
+    core::process::crash()
 }
 
 #[no_mangle]
