@@ -849,3 +849,117 @@ fn test_module_grain_vm_export_and_import() {
     assert_eq!(module.get_var_value::<INT>("b").unwrap(), 200);
     assert_eq!(module.get_var_value::<INT>("exported_a").unwrap(), 100);
 }
+
+/// A bare call inside a module function resolves against that module's functions, however many
+/// modules define the same name and whatever the evaluation has resolved before it.
+///
+/// The function resolution cache is keyed by name and arguments, with nothing naming the module
+/// the look-up came from. Calling into a module therefore needs a cache of its own, or a name
+/// resolved in one module answers the same bare call in another, silently.
+///
+/// Each row is one evaluation, because a stale entry only shows on a look-up that follows the one
+/// that made it. Digits read left to right as the order of the calls.
+#[cfg(not(feature = "no_function"))]
+#[test]
+fn test_module_bare_call_resolves_in_own_module() {
+    fn module(engine: &Engine, script: &str) -> Module {
+        let ast = engine.compile(script).unwrap();
+        Module::eval_ast_as_new(Scope::new(), &ast, engine).unwrap()
+    }
+
+    let mut engine = Engine::new();
+
+    let a = module(
+        &engine,
+        r#"
+            fn who() { 1 }
+            fn bare() { who() }
+            fn who_who_b() { who() * 100 + who() * 10 + B::bare() }
+            fn who_b_who() { who() * 100 + B::bare() * 10 + who() }
+            fn who_who_b_qualified() { who() * 100 + who() * 10 + B::qualified() }
+            fn abs(x) { 5 }
+            fn call_abs() { abs(1) }
+            fn has_who() { if is_def_fn("who", 0) { 1 } else { 0 } }
+            fn with_closure() {
+                let f = |x| who();
+                call(f, 0) * 1000 + call(f, 0) * 100 + B::bare() * 10 + call(f, 0)
+            }
+            fn rec(n) { if n == 0 { who() } else { who() * 10 * pow10(n - 1) + B::rec(n - 1) } }
+            fn pow10(n) { if n == 0 { 1 } else { 10 * pow10(n - 1) } }
+            fn boom() { who(); throw 7; }
+        "#,
+    );
+    let b = module(
+        &engine,
+        r#"
+            fn who() { 2 }
+            fn bare() { who() }
+            fn qualified() { B::who() }
+            fn call_abs() { abs(1) }
+            fn rec(n) { if n == 0 { who() } else { who() * 10 * A::pow10(n - 1) + A::rec(n - 1) } }
+            fn safe() { try { A::boom() } catch { } who() * 100 + who() * 10 + who() }
+            fn helper() { 2 }
+            fn through_d() { D::f() }
+        "#,
+    );
+    // Has `helper` too, to call `D` from.
+    let c = module(
+        &engine,
+        r#"
+            fn helper() { 3 }
+            fn through_d() { D::f() }
+        "#,
+    );
+    // Has no `helper`, so a bare call to it finds the one of whichever module called `D`.
+    let d = module(&engine, "fn f() { helper() }");
+    // Has no `who`.
+    let n = module(&engine, r#"fn has_who() { if is_def_fn("who", 0) { 1 } else { 0 } }"#);
+
+    engine.register_static_module("A", a.into());
+    engine.register_static_module("B", b.into());
+    engine.register_static_module("C", c.into());
+    engine.register_static_module("D", d.into());
+    engine.register_static_module("N", n.into());
+
+    let rows: &[(&str, &str, INT)] = &[
+        ("across modules", "A::bare() * 1000 + A::bare() * 100 + B::bare() * 10 + A::bare()", 1121),
+        ("inside a module", "A::who_who_b()", 112),
+        ("inside a module, coming back", "A::who_b_who()", 121),
+        ("then a qualified call", "A::who_who_b_qualified()", 112),
+        ("after a native call", "let x = 1; let p = abs(x); let q = abs(x); A::bare() * 1000 + A::bare() * 100 + B::bare() * 10 + A::bare()", 1121),
+        ("against the script's own function", "fn who() { 7 } who() * 10000 + who() * 1000 + B::bare() * 100 + who() * 10 + A::bare()", 77271),
+        ("a function found in the caller", "B::through_d() * 10000 + B::through_d() * 1000 + C::through_d() * 100 + C::through_d() * 10 + B::through_d()", 22332),
+        ("a function shadowing a native", "B::call_abs() * 100000 + B::call_abs() * 10000 + B::call_abs() * 1000 + A::call_abs() * 100 + A::call_abs() * 10 + B::call_abs()", 111551),
+        ("is_def_fn", "N::has_who() * 100000 + N::has_who() * 10000 + N::has_who() * 1000 + A::has_who() * 100 + A::has_who() * 10 + N::has_who()", 110),
+        ("a closure", "A::with_closure()", 1121),
+        ("recursion across modules", "A::rec(3) * 10000 + B::rec(3)", 12122121),
+        ("after a thrown error", "B::safe() * 10 + A::bare()", 2221),
+    ];
+
+    for (name, script, expected) in rows {
+        assert_eq!(engine.eval::<INT>(script).unwrap(), *expected, "{}", name);
+    }
+}
+
+/// The method-call forms of `test_module_bare_call_resolves_in_own_module`.
+#[cfg(not(feature = "no_function"))]
+#[cfg(not(feature = "no_object"))]
+#[test]
+fn test_module_method_call_resolves_in_own_module() {
+    fn module(engine: &Engine, script: &str) -> Module {
+        let ast = engine.compile(script).unwrap();
+        Module::eval_ast_as_new(Scope::new(), &ast, engine).unwrap()
+    }
+
+    let mut engine = Engine::new();
+
+    let a = module(&engine, "fn who() { 1 } fn call_who() { let x = 0; x.who() }");
+    let b = module(&engine, "fn who() { 2 } fn call_who() { let x = 0; x.who() }");
+
+    engine.register_static_module("A", a.into());
+    engine.register_static_module("B", b.into());
+
+    let script = "A::call_who() * 1000 + A::call_who() * 100 + B::call_who() * 10 + A::call_who()";
+
+    assert_eq!(engine.eval::<INT>(script).unwrap(), 1121);
+}
