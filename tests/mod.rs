@@ -29,6 +29,8 @@ mod grain {
     mod custom_syntax;
     mod differential;
     mod format;
+    #[cfg(not(feature = "no_function"))]
+    mod functions;
     mod lazy;
     // Both are about execution staying inside a bound, which `unchecked`
     // removes outright — and the artifact fuzzer needs `max_operations` to stop

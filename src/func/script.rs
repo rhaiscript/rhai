@@ -144,6 +144,8 @@ impl fmt::Display for ScriptFuncDef {
 /// Not available under `no_function`.
 ///
 /// Created by [`AST::iter_functions`][crate::AST::iter_functions].
+///
+/// With the `grain` feature, also created by [`Program::iter_functions`][crate::grain::Program::iter_functions] for compiled functions.
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Hash)]
 #[cfg_attr(
     feature = "serde",
