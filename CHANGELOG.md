@@ -29,6 +29,8 @@ Enhancements
 * `Engine::set_max_call_levels` and `Engine::max_call_levels` are now available under `no_function`, since native functions calling back into the engine are also bound by this limit (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1208`](https://github.com/rhaiscript/rhai/pull/1208)).
 * Large object map literals now run faster by storing constant property values in their templates, only computed properties are evaluated at runtime ([`#1207`](https://github.com/rhaiscript/rhai/pull/1207)).
 * Rhai Grain now compiles scripts with many constants, such as large object map literals, in linear instead of quadratic time, by indexing the constant pool by hash (thanks [`@luispedro`](https://github.com/luispedro) [`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
+* Rhai Grain `Program::iter_functions` now exposes metadata for compiled functions, similar to `AST::iter_functions` ([`#1212`](https://github.com/rhaiscript/rhai/pull/1212)).
+* Rhai Grain `Program::has_functions` checks whether a program contains compiled functions ([`#1212`](https://github.com/rhaiscript/rhai/pull/1212)).
 
 
 Version 1.27.0
