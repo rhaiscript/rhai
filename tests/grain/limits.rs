@@ -21,6 +21,73 @@ use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
 #[test]
 #[cfg(not(feature = "no_object"))]
+fn chain_mutations_check_root_map_size() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let cases = [
+        ("let m = #{a:1,b:2,c:3};", "m.d = 4;", false),
+        ("let m = #{a:1,b:2,c:3,d:4};", "m.a = 42;", false),
+        ("let m = #{a:1,b:2,c:3,d:4};", "m.extra = 42;", true),
+        ("let m = #{child: #{a:1,b:2,c:3}};", "m.child.extra = 42;", true),
+        ("let m = #{child: #{a:1,b:2,c:3}};", "m.child += #{extra:42};", true),
+        ("let m = #{child: #{a:1,b:2,c:3}};", "m.child.grow_map().type_of();", true),
+        ("", "(#{a:1,b:2,c:3,d:4}).grow_map().type_of();", true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{a:1,b:2,c:3,d:4};", r#"m["extra"] = 42;"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{a:1,b:2,c:3,d:4};", r#"m["a"] = #{x:42};"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{child: #{a:1,b:2,c:3}};", r#"m["child"]["extra"] = 42;"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{child: #{a:1,b:2,c:3}};", r#"m["child"].extra = 42;"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{child: #{a:1,b:2,c:3}};", r#"m.child["extra"] = 42;"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = [#{a:1,b:2,c:3,d:4}];", r#"m[0]["extra"] = 42;"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = [#{a:1,b:2}, #{c:3,d:4}];", "m[0].extra = 42;", true),
+        #[cfg(not(feature = "no_function"))]
+        ("fn add() { this.child.extra = 42; } let m = #{child: #{a:1,b:2,c:3}};", "m.add();", true),
+        #[cfg(not(feature = "no_closure"))]
+        ("let m = #{child: #{a:1,b:2,c:3}}; let f = || { m.child.extra = 42; };", "f.call();", true),
+    ];
+
+    for (setup, mutation, oversized) in cases {
+        for limit in [4, 5, 0] {
+            let mut engine = Engine::new();
+            engine.set_max_map_size(limit);
+            engine.register_fn("grow_map", |map: &mut rhai::Map| {
+                map.insert("extra".into(), Dynamic::from_int(42));
+                42 as rhai::INT
+            });
+            let hits = Arc::new(AtomicUsize::new(0));
+            let counter = hits.clone();
+            engine.register_fn("marker", move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+            });
+
+            let source = format!("{setup} marker(); {mutation} marker();");
+            let ast = engine.compile(&source).unwrap();
+            let program = Compiler::new().compile(&ast);
+            assert_eq!(program.residual_count(), 0, "{source}");
+
+            for grain in [false, true] {
+                hits.store(0, Ordering::SeqCst);
+                let result = if grain { Vm::new(&engine).eval_with_scope(&mut Scope::new(), &program) } else { engine.eval_ast::<Dynamic>(&ast) };
+                if oversized && limit == 4 {
+                    assert!(matches!(*result.unwrap_err(), EvalAltResult::ErrorDataTooLarge(..)), "{source}, grain={grain}");
+                    assert_eq!(hits.load(Ordering::SeqCst), 1, "{source}, grain={grain}");
+                } else {
+                    result.unwrap();
+                    assert_eq!(hits.load(Ordering::SeqCst), 2, "{source}, grain={grain}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(not(feature = "no_object"))]
 fn map_templates_only_emit_computed_properties() {
     let mut engine = Engine::new();
     #[cfg(not(feature = "no_optimize"))]

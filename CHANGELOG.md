@@ -16,6 +16,7 @@ Bug fixes
 * `AST::clone_functions_only_filtered` now applies its filter, as does `AST::merge_filtered` when the first `AST` has no functions. Previously every function was kept (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1192`](https://github.com/rhaiscript/rhai/pull/1192)).
 * Rhai Grain no longer merges distinct constants of a custom type (such as two custom syntax states) in the constant pool because they print the same (thanks [`@luispedro`](https://github.com/luispedro) [`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
 * A function called inside a module now always resolves within that module. Previously, when two modules defined a function with the same name and parameters, a bare call could silently run the other module's function, because the call into the module shared the caller's function resolution cache.
+* Rhai and Rhai Grain now properly enforce object map size limits in all mutation scenarios ([`#1214`](https://github.com/rhaiscript/rhai/issues/1214)).
 
 Enhancements
 ------------

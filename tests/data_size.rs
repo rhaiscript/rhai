@@ -282,6 +282,87 @@ fn test_max_array_size() {
 
 #[test]
 #[cfg(not(feature = "no_object"))]
+fn test_max_map_size_assignment() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let cases = [
+        ("let m = #{a:1,b:2,c:3};", "m.d = 4;", false),
+        ("let m = #{a:1,b:2,c:3,d:4};", "m.a = 42;", false),
+        ("let m = #{a:1,b:2,c:3,d:4};", "m.extra = 42;", true),
+        ("let m = #{child: #{a:1,b:2,c:3}};", "m.child.extra = 42;", true),
+        ("let m = #{a:1,b:2,c:3,d:4};", "m.a = #{x:42};", true),
+        ("let m = #{child: #{a:1,b:2,c:3}};", "m.child += #{extra:42};", true),
+        ("let m = #{child: #{a:1,b:2,c:3}};", "m.child.grow_map().type_of();", true),
+        ("", "(#{a:1,b:2,c:3,d:4}).grow_map().type_of();", true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{a:1,b:2,c:3};", r#"m["d"] = 4;"#, false),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{a:1,b:2,c:3,d:4};", r#"m["a"] = 42;"#, false),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{a:1,b:2,c:3,d:4};", r#"m["extra"] = 42;"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{child: #{a:1,b:2,c:3}};", r#"m["child"]["extra"] = 42;"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{child: #{a:1,b:2,c:3}};", r#"m["child"].extra = 42;"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{child: #{a:1,b:2,c:3}};", r#"m.child["extra"] = 42;"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{a:1,b:2,c:3,d:4};", r#"m["a"] = #{x:42};"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = [#{a:1,b:2,c:3,d:4}];", r#"m[0]["extra"] = 42;"#, true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = [#{a:1,b:2,c:3,d:4}];", "m[0].extra = 42;", true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = [#{a:1,b:2}, #{c:3,d:4}];", "m[0].extra = 42;", true),
+        #[cfg(not(feature = "no_index"))]
+        ("let m = #{child: [#{a:1,b:2,c:3}]};", "m.child.grow_array().type_of();", true),
+        #[cfg(not(feature = "no_function"))]
+        ("fn add() { this.child.extra = 42; } let m = #{child: #{a:1,b:2,c:3}};", "m.add();", true),
+        #[cfg(not(feature = "no_closure"))]
+        ("let m = #{child: #{a:1,b:2,c:3}}; let f = || { m.child.extra = 42; };", "f.call();", true),
+        #[cfg(all(not(feature = "no_closure"), not(feature = "no_index")))]
+        ("let m = #{a:1,b:2,c:3,d:4}; let f = || { m[\"extra\"] = 42; };", "f.call();", true),
+    ];
+
+    for (setup, assignment, oversized) in cases {
+        for limit in [4, 5, 0] {
+            let hits = Arc::new(AtomicUsize::new(0));
+            let mut engine = Engine::new();
+            engine.set_max_map_size(limit);
+            engine.register_fn("grow_map", |map: &mut Map| {
+                map.insert("extra".into(), rhai::Dynamic::from_int(42));
+                42 as INT
+            });
+            #[cfg(not(feature = "no_index"))]
+            engine.register_fn("grow_array", |array: &mut Array| {
+                let mut map = Map::new();
+                map.insert("extra".into(), rhai::Dynamic::from_int(42));
+                array.push(map.into());
+                42 as INT
+            });
+            let counter = hits.clone();
+            engine.register_fn("marker", move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+            });
+
+            let script = format!("{setup} marker(); {assignment} marker();");
+            let result = engine.run(&script);
+            if oversized && limit == 4 {
+                assert!(matches!(*result.unwrap_err(), EvalAltResult::ErrorDataTooLarge(..)), "{script}");
+                assert_eq!(hits.load(Ordering::SeqCst), 1, "{script}");
+            } else {
+                result.unwrap();
+                assert_eq!(hits.load(Ordering::SeqCst), 2, "{script}");
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(not(feature = "no_object"))]
 fn test_max_map_size() {
     let mut engine = Engine::new();
     engine.set_max_map_size(10);
