@@ -224,3 +224,14 @@ fn test_method_call_walk_count_visits_matches_fn_call() {
         assert!(fn_vars.contains(&name.to_string()), "free-fn syntax: walk should visit `{name}`", name = name);
     }
 }
+
+#[test]
+fn test_method_call_copied_first_arg() {
+    let engine = Engine::new();
+
+    // A variable passed by reference to a function that does not take `&mut` is copied first.
+    // Run under Miri to check the copy is accessed soundly.
+    assert!(engine.eval::<bool>(r#"let x = "hello world"; x.contains("world")"#).unwrap());
+    #[cfg(not(feature = "no_function"))]
+    assert_eq!(engine.eval::<INT>(r#"fn f(s) { s.len() } let x = "hello world"; f(x)"#).unwrap(), 11);
+}

@@ -181,17 +181,13 @@ impl FnCallHashes {
 #[derive(Debug)]
 struct ArgBackup<'a> {
     orig_mut: Option<&'a mut Dynamic>,
-    value_copy: Dynamic,
 }
 
 impl<'a> ArgBackup<'a> {
     /// Create a new `ArgBackup`.
     #[inline(always)]
     pub fn new() -> Self {
-        Self {
-            orig_mut: None,
-            value_copy: Dynamic::UNIT,
-        }
+        Self { orig_mut: None }
     }
     /// This function replaces the first argument of a method call with a clone copy.
     /// This is to prevent a pure function unintentionally consuming the first argument.
@@ -211,9 +207,13 @@ impl<'a> ArgBackup<'a> {
     ///
     /// Panics when `args` is empty.
     #[inline(always)]
-    pub fn change_first_arg_to_copy(&mut self, args: &mut FnCallArgs<'a>) {
+    pub fn change_first_arg_to_copy(
+        &mut self,
+        args: &mut FnCallArgs<'a>,
+        value_copy: &mut Dynamic,
+    ) {
         // Clone the original value.
-        self.value_copy = args[0].clone();
+        *value_copy = args[0].clone();
 
         // Replace the first reference with a reference to the clone, force-casting the lifetime.
         // Must remember to restore it later with `restore_first_arg`.
@@ -226,7 +226,7 @@ impl<'a> ArgBackup<'a> {
         // We can do this here because, before the end of this scope, we'd restore the original
         // reference via `restore_first_arg`. Therefore this shorter lifetime does not leak.
         self.orig_mut = Some(mem::replace(&mut args[0], unsafe {
-            mem::transmute::<&mut Dynamic, &'a mut Dynamic>(&mut self.value_copy)
+            mem::transmute::<&mut Dynamic, &'a mut Dynamic>(value_copy)
         }));
     }
     /// This function restores the first argument that was replaced by `change_first_arg_to_copy`.
@@ -618,6 +618,7 @@ impl Engine {
                 .as_ref()
                 .map_or(0, |dbg| dbg.call_stack().len());
 
+            let value_copy = &mut Dynamic::UNIT;
             let backup = &mut ArgBackup::new();
 
             // Calling non-method function but the first argument is a reference?
@@ -625,7 +626,7 @@ impl Engine {
 
             if swap {
                 // Clone the first argument
-                backup.change_first_arg_to_copy(args);
+                backup.change_first_arg_to_copy(args, value_copy);
             }
 
             // Restore the first argument on every exit, including an unwind. If it were restored
@@ -923,13 +924,14 @@ impl Engine {
                     )
                 } else {
                     // Normal call of script function
+                    let value_copy = &mut Dynamic::UNIT;
                     let backup = &mut ArgBackup::new();
 
                     // The first argument is a reference?
                     let swap = is_ref_mut && !args.is_empty();
 
                     if swap {
-                        backup.change_first_arg_to_copy(args);
+                        backup.change_first_arg_to_copy(args, value_copy);
                     }
 
                     defer! { args = (args) if swap => move |a| backup.restore_first_arg(a) }
