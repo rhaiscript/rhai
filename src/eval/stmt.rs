@@ -307,6 +307,12 @@ impl Engine {
                             Expr::Dot(..) => self.eval_dot_index_chain(
                                 global, caches, scope, this_ptr, lhs, _new_val,
                             ),
+                            // Constant expression (e.g., a constant object or array)
+                            expr if expr.is_constant() => Err(ERR::ErrorAssignmentToConstant(
+                                String::new(),
+                                lhs.position(),
+                            )
+                            .into()),
                             _ => unreachable!("cannot assign to expression: {:?}", lhs),
                         }?;
                     }

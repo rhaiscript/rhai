@@ -16,6 +16,13 @@ fn test_constant() {
         *engine.run("const x = [1, 2, 3, 4, 5]; x[2] = 42;").expect_err("expects error"),
         EvalAltResult::ErrorAssignmentToConstant(x, ..) if x == "x"
     ));
+
+    #[cfg(not(feature = "no_object"))]
+    #[cfg(not(feature = "no_optimize"))]
+    assert!(matches!(
+        *engine.run("const x = #{}; x.p = 42;").expect_err("expects error"),
+        EvalAltResult::ErrorAssignmentToConstant(x, ..) if x == ""
+    ));
 }
 
 #[test]
