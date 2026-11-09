@@ -96,6 +96,14 @@ impl Engine {
                             global, caches, scope, None, lhs, expr, target, rhs, idx_values,
                             new_val,
                         )
+                        .and_then(|(value, changed)| {
+                            if changed {
+                                self.check_data_size(target.source(), expr.position())
+                                    .map(|_| (value, changed))
+                            } else {
+                                Ok((value, changed))
+                            }
+                        })
                     },
                 )
             }
@@ -110,6 +118,14 @@ impl Engine {
                 self.eval_dot_index_chain_raw(
                     global, caches, None, None, lhs, expr, target, rhs, idx_values, new_val,
                 )
+                .and_then(|(value, changed)| {
+                    if changed {
+                        self.check_data_size(target.source(), expr.position())
+                            .map(|_| (value, changed))
+                    } else {
+                        Ok((value, changed))
+                    }
+                })
             }
             // {expr}.??? = ??? or {expr}[???] = ???
             (_, Some(..)) => unreachable!("cannot assign to an expression"),
@@ -124,6 +140,14 @@ impl Engine {
                     global, caches, scope, this_ptr, lhs_expr, expr, item_ptr, rhs, idx_values,
                     None,
                 )
+                .and_then(|(value, changed)| {
+                    if changed {
+                        self.check_data_size(item_ptr.source(), expr.position())
+                            .map(|_| (value, changed))
+                    } else {
+                        Ok((value, changed))
+                    }
+                })
             }
         }
         .map(|(v, ..)| v)
@@ -352,7 +376,6 @@ impl Engine {
                                 self.eval_op_assignment(
                                     global, caches, op_info, root, item_ptr, new_val,
                                 )?;
-                                self.check_data_size(item_ptr.as_ref(), op_info.position())?;
                                 None
                             }
                             // Indexed value cannot be referenced - use indexer
@@ -487,7 +510,6 @@ impl Engine {
                             )?;
                             self.eval_op_assignment(global, caches, op_info, root, item, new_val)?;
                         }
-                        self.check_data_size(target.source(), op_info.position())?;
                         Ok((Dynamic::UNIT, true))
                     }
                     // {xxx:map}.id
@@ -617,6 +639,7 @@ impl Engine {
                     (Expr::Index(x, ..) | Expr::Dot(x, ..), new_val, true) => {
                         let _node = &x.lhs;
                         let mut _tp = this_ptr.as_deref_mut();
+                        let mut changed = false;
                         #[cfg(not(feature = "no_closure"))]
                         let mut target_guard;
 
@@ -667,11 +690,11 @@ impl Engine {
                                 let arg1_pos =
                                     args.first().map_or(crate::Position::NONE, Expr::position);
 
-                                self.make_method_call(
+                                let (value, updated) = self.make_method_call(
                                     global, caches, name, *hashes, target, call_args, arg1_pos, pos,
-                                )?
-                                .0
-                                .into()
+                                )?;
+                                changed = updated;
+                                value.into()
                             }
                             // Others - syntax error
                             ref expr => unreachable!("invalid dot expression: {:?}", expr),
@@ -681,6 +704,7 @@ impl Engine {
                             global, caches, s, this_ptr, root, rhs, item, &x.rhs, idx_values,
                             new_val,
                         )
+                        .map(|(result, updated)| (result, changed || updated))
                     }
                     // xxx.sub_lhs[expr] | xxx.sub_lhs.expr
                     (Expr::Index(x, ..) | Expr::Dot(x, ..), new_val, ..) => {
@@ -773,7 +797,7 @@ impl Engine {
                                     "method call in dot chain should not be namespace-qualified"
                                 );
 
-                                let val = {
+                                let (val, changed) = {
                                     #[cfg(feature = "debugging")]
                                     let reset =
                                         self.dbg_reset(global, caches, x!(s, b), _tp, _node)?;
@@ -794,7 +818,6 @@ impl Engine {
                                     self.make_method_call(
                                         global, caches, name, *hashes, target, call_args, pos1, pos,
                                     )?
-                                    .0
                                 };
 
                                 let val = &mut val.into();
@@ -803,6 +826,7 @@ impl Engine {
                                     global, caches, s, _this_ptr, root, rhs, val, &x.rhs,
                                     idx_values, new_val,
                                 )
+                                .map(|(result, updated)| (result, changed || updated))
                             }
                             // Others - syntax error
                             ref expr => unreachable!("invalid dot expression: {:?}", expr),

@@ -1177,6 +1177,15 @@ impl<'e> Vm<'e> {
                 )
             }
         });
+        let result = result.and_then(|(out, changed)| {
+            if changed {
+                self.engine
+                    .check_data_size(&*root.as_mut(), pos)
+                    .map(|_| out)
+            } else {
+                Ok(out)
+            }
+        });
 
         // The receiver is the one root that travels rather than being walked
         // where it lives, so it goes back — and it goes back however the walk
@@ -1187,7 +1196,7 @@ impl<'e> Vm<'e> {
             self.this = Some(value);
         }
 
-        let (out, _) = result?;
+        let out = result?;
         self.stack.truncate(frame_pointer);
         Ok(out)
     }
