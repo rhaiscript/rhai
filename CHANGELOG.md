@@ -18,6 +18,7 @@ Bug fixes
 * A function called inside a module now always resolves within that module. Previously, when two modules defined a function with the same name and parameters, a bare call could silently run the other module's function, because the call into the module shared the caller's function resolution cache.
 * Rhai and Rhai Grain now properly enforce object map size limits in all mutation scenarios ([`#1214`](https://github.com/rhaiscript/rhai/issues/1214)).
 * (Fuzzing) Fixed panic when assigning to a property of a constant object.
+* Fixed undefined behavior (an aliasing violation detected by Miri) when a variable is passed to a function that does not take its first argument by `&mut`, e.g. `x.contains("a")` or `f(x)` for a script function. This was a regression in 1.27.0.
 
 Enhancements
 ------------
