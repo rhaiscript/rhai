@@ -15,7 +15,7 @@ Bug fixes
 * Native functions that call back into the engine (e.g. `==` or `to_string` on arrays) now count towards `max_call_levels`, so comparing or printing a deeply-nested array returns an error instead of overflowing the stack (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1208`](https://github.com/rhaiscript/rhai/pull/1208)).
 * `AST::clone_functions_only_filtered` now applies its filter, as does `AST::merge_filtered` when the first `AST` has no functions. Previously every function was kept (thanks [`@ImTheSquid`](https://github.com/ImTheSquid) [`#1192`](https://github.com/rhaiscript/rhai/pull/1192)).
 * Rhai Grain no longer merges distinct constants of a custom type (such as two custom syntax states) in the constant pool because they print the same (thanks [`@luispedro`](https://github.com/luispedro) [`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
-* A function called inside a module now always resolves within that module. Previously, when two modules defined a function with the same name and parameters, a bare call could silently run the other module's function, because the call into the module shared the caller's function resolution cache.
+* A function called inside a module now resolves correctly instead of incorrectly using a cached resolution (thanks [`@yuvalrakavy`](https://github.com/yuvalrakavy) [`#1211`](https://github.com/rhaiscript/rhai/pull/1211)).
 * Rhai and Rhai Grain now properly enforce object map size limits in all mutation scenarios ([`#1214`](https://github.com/rhaiscript/rhai/issues/1214)).
 * (Fuzzing) Fixed panic when assigning to a property of a constant object.
 * Fixed undefined behavior (an aliasing violation detected by Miri) when a variable is passed to a function that does not take its first argument by `&mut`, e.g. `x.contains("a")` or `f(x)` for a script function. This was a regression in 1.27.0.
@@ -30,6 +30,8 @@ Enhancements
 * `Engine::set_max_call_levels` and `Engine::max_call_levels` are now available under `no_function`, since native functions calling back into the engine are also bound by this limit (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1208`](https://github.com/rhaiscript/rhai/pull/1208)).
 * Large object map literals now run faster by storing constant property values in their templates, only computed properties are evaluated at runtime ([`#1207`](https://github.com/rhaiscript/rhai/pull/1207)).
 * Rhai Grain now compiles scripts with many constants, such as large object map literals, in linear instead of quadratic time, by indexing the constant pool by hash (thanks [`@luispedro`](https://github.com/luispedro) [`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
+* Rhai Grain `Program::iter_functions` now exposes metadata for compiled functions, similar to `AST::iter_functions` ([`#1212`](https://github.com/rhaiscript/rhai/pull/1212)).
+* Rhai Grain `Program::has_functions` checks whether a program contains compiled functions ([`#1212`](https://github.com/rhaiscript/rhai/pull/1212)).
 
 
 Version 1.27.0
