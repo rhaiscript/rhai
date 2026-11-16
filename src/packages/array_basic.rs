@@ -1668,7 +1668,9 @@ pub mod array_functions {
             array.sort_by(|a, b| {
                 let a = a.as_float().unwrap();
                 let b = b.as_float().unwrap();
-                a.partial_cmp(&b).unwrap_or(Ordering::Equal)
+                // NaN sorts after every number, otherwise the order is not total and `sort_by` may panic.
+                a.partial_cmp(&b)
+                    .unwrap_or_else(|| a.is_nan().cmp(&b.is_nan()))
             });
             return Ok(());
         }
@@ -1775,7 +1777,11 @@ pub mod array_functions {
             array.sort_by(|a, b| {
                 let a = a.as_float().unwrap();
                 let b = b.as_float().unwrap();
-                match a.partial_cmp(&b).unwrap_or(Ordering::Equal) {
+                // NaN sorts before every number, otherwise the order is not total and `sort_by` may panic.
+                match a
+                    .partial_cmp(&b)
+                    .unwrap_or_else(|| a.is_nan().cmp(&b.is_nan()))
+                {
                     Ordering::Less => Ordering::Greater,
                     Ordering::Equal => Ordering::Equal,
                     Ordering::Greater => Ordering::Less,

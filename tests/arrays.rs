@@ -516,6 +516,27 @@ fn test_arrays_index_of() {
 }
 
 #[test]
+#[cfg(not(feature = "no_float"))]
+#[cfg(not(feature = "no_object"))]
+fn test_arrays_sort_nan() {
+    let engine = Engine::new();
+
+    // 60 numbers, every fourth one NaN.
+    let setup = "let a = []; for i in 0..60 { a.push(if i % 4 == 0 { 0.0 / 0.0 } else { (i * 37 % 61).to_float() }); }";
+    let floats = |a: Array| a.iter().map(|v| v.as_float().unwrap()).collect::<Vec<_>>();
+
+    let sorted = floats(engine.eval::<Array>(&format!("{setup} a.sort(); a")).unwrap());
+    assert_eq!(sorted.len(), 60);
+    assert!(sorted[..45].windows(2).all(|w| w[0] <= w[1]));
+    assert!(sorted[45..].iter().all(|v| v.is_nan()));
+
+    let sorted = floats(engine.eval::<Array>(&format!("{setup} a.sort_desc(); a")).unwrap());
+    assert_eq!(sorted.len(), 60);
+    assert!(sorted[..15].iter().all(|v| v.is_nan()));
+    assert!(sorted[15..].windows(2).all(|w| w[0] >= w[1]));
+}
+
+#[test]
 #[cfg(not(feature = "no_object"))]
 #[cfg(not(feature = "no_function"))]
 fn test_arrays_index_of_with_named_fn() {
