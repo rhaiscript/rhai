@@ -517,6 +517,7 @@ fn test_arrays_index_of() {
 
 #[test]
 #[cfg(not(feature = "no_float"))]
+#[cfg(not(feature = "no_object"))]
 fn test_arrays_sort_nan() {
     let engine = Engine::new();
 
