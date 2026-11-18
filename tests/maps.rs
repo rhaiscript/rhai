@@ -101,10 +101,16 @@ fn test_map_template_evaluation_and_isolation() {
         assert_eq!(engine.eval::<INT>("#{ a: 42, b: () }.a").unwrap(), 42);
         assert_eq!(engine.eval_with_scope::<INT>(&mut scope, "#{ a: 42, b: input }.a").unwrap(), 42);
 
+        // Values that only become constant after optimization are not in the template yet
+        assert_eq!(engine.eval::<INT>("#{ a: 42, b: { 1 } }.b").unwrap(), 1);
+        assert_eq!(engine.eval::<INT>("#{ a: if true { 1 } else { 2 } }.a").unwrap(), 1);
+        assert_eq!(engine.eval::<INT>("#{ a: 42, b: (() ?? 1) }.b").unwrap(), 1);
+
         #[cfg(not(feature = "no_index"))]
         {
             assert_eq!(engine.eval::<INT>(r#"#{ a: 42, b: () }["a"]"#).unwrap(), 42);
             assert_eq!(engine.eval_with_scope::<INT>(&mut scope, r#"#{ a: 42, b: input }["a"]"#).unwrap(), 42);
+            assert_eq!(engine.eval::<INT>(r#"#{ a: 42, b: { 1 } }["b"]"#).unwrap(), 1);
 
             let ast = engine.compile("#{ values: [#{ x: 1 }], computed: input }").unwrap();
 
