@@ -89,6 +89,15 @@ impl Engine {
                             )
                             .into(),
                         ),
+                        // Identifiers, keywords and custom operators would let the text call
+                        // functions (including `eval`) or read variables and properties
+                        Token::Identifier(s) | Token::Reserved(s) => Token::LexError(
+                            LexError::ImproperSymbol(s.to_string(), String::new()).into(),
+                        ),
+                        #[cfg(not(feature = "no_custom_syntax"))]
+                        Token::Custom(s) => Token::LexError(
+                            LexError::ImproperSymbol(s.to_string(), String::new()).into(),
+                        ),
                         // All others
                         _ => token,
                     }
@@ -112,6 +121,15 @@ impl Engine {
                                 String::new(),
                             )
                             .into(),
+                        ),
+                        // Identifiers, keywords and custom operators would let the text call
+                        // functions (including `eval`) or read variables and properties
+                        Token::Identifier(s) | Token::Reserved(s) => Token::LexError(
+                            LexError::ImproperSymbol(s.to_string(), String::new()).into(),
+                        ),
+                        #[cfg(not(feature = "no_custom_syntax"))]
+                        Token::Custom(s) => Token::LexError(
+                            LexError::ImproperSymbol(s.to_string(), String::new()).into(),
                         ),
                         // All others
                         _ => token,
