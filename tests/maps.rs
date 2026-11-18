@@ -396,6 +396,9 @@ fn test_map_json() {
     assert!(matches!(*engine.parse_json("{a:()}", true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
     assert!(matches!(*engine.parse_json("#{a:123+456}", true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
     assert!(matches!(*engine.parse_json("{a:`hello${world}`}", true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
+    assert!(matches!(*engine.parse_json(r#"{"a":print("x")}"#, true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
+    assert!(matches!(*engine.parse_json(r#"{"a":eval("40+2")}"#, false).unwrap_err(), EvalAltResult::ErrorParsing(..)));
+    assert!(matches!(*engine.parse_json(r#"{"a":"hello".len}"#, true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
 }
 
 #[test]
