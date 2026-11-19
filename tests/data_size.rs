@@ -199,6 +199,22 @@ fn test_max_array_size() {
         EvalAltResult::ErrorDataTooLarge(..)
     ));
 
+    // 4 * 2^62 wraps to zero in a 64-bit usize
+    #[cfg(not(feature = "no_object"))]
+    #[cfg(not(feature = "only_i32"))]
+    #[cfg(target_pointer_width = "64")]
+    assert!(matches!(
+        *engine
+            .run(
+                "
+                    let x = [];
+                    x.pad(4611686018427387904, [1, 2, 3]);
+                "
+            )
+            .unwrap_err(),
+        EvalAltResult::ErrorDataTooLarge(..)
+    ));
+
     assert_eq!(
         engine
             .eval::<INT>(
