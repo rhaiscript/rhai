@@ -22,6 +22,7 @@ Bug fixes
 * `sort` and `sort_desc` no longer panic on an array of floating-point numbers that contains NaN. NaN now sorts after every other number (before them for `sort_desc`) (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) ([`#1216`](https://github.com/rhaiscript/rhai/pull/1216)).
 * `pad` on an array now enforces `max_array_size` when the padding length is large enough to overflow the size calculation (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) ([`#1218`](https://github.com/rhaiscript/rhai/pull/1218)).
 * `eval` is no longer allowed in `Engine::eval_expression` and `Engine::compile_expression` (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) ([`#1223`](https://github.com/rhaiscript/rhai/pull/1223)).
+* `to_json` and serializing a `Dynamic` with `serde` no longer panic or overflow the stack when an object map contains a closure that captures the map itself (a reference loop). The built-in formatter writes `null` where the loop closes, while `serde` returns an error (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) ([`#1222`](https://github.com/rhaiscript/rhai/pull/1222)).
 
 Enhancements
 ------------
