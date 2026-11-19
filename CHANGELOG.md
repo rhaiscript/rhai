@@ -20,6 +20,7 @@ Bug fixes
 * (Fuzzing) Fixed panic when assigning to a property of a constant object.
 * Fixed undefined behavior (an aliasing violation detected by Miri) when a variable is passed to a function that does not take its first argument by `&mut`, e.g. `x.contains("a")` or `f(x)` for a script function. This was a regression in 1.27.0.
 * `sort` and `sort_desc` no longer panic on an array of floating-point numbers that contains NaN. NaN now sorts after every other number (before them for `sort_desc`) (thanks [`@Rockyrok77`](https://github.com/Rockyrok77)).
+* `Engine::parse_json` (and the `parse_json` function without the `metadata` feature) no longer accepts identifiers or custom operators in the JSON text. Previously the text could call any registered function, `eval` included, e.g. `{"a": eval("...")}`. Comments and arithmetic expressions are still allowed.
 
 Enhancements
 ------------
