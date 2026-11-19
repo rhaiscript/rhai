@@ -283,6 +283,21 @@ pub fn verify(
         });
     }
 
+    for function in functions {
+        for index in std::iter::once(function.name)
+            .chain(function.params.iter().copied())
+            .chain(function.this_type)
+        {
+            if pools.names.get(index).is_none() {
+                return Err(VerifyError::BadIndex {
+                    at: function.chunk.entry() as usize,
+                    what: "name",
+                    index,
+                });
+            }
+        }
+    }
+
     chunks
         .iter()
         .map(|chunk| verify_chunk(caps, code, chunk, &starts, pools))

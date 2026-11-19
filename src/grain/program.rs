@@ -445,6 +445,52 @@ impl<'a> Program<'a> {
         &self.functions
     }
 
+    /// Iterate through all compiled script function definitions.
+    ///
+    /// Not available under `no_function`.
+    ///
+    /// Like [`AST::iter_functions`][crate::AST::iter_functions], this includes
+    /// private functions, typed methods and anonymous functions.
+    ///
+    /// Fallback functions retained only in AST form are _excluded_.
+    ///
+    /// Iteration order is unspecified.
+    ///
+    /// Names, parameters and receiver types borrow from this [`Program`].
+    ///
+    /// Doc-comments are not retained, so `comments` (under `metadata`) is always empty.
+    #[cfg(not(feature = "no_function"))]
+    #[inline]
+    pub fn iter_functions(&self) -> impl Iterator<Item = crate::ScriptFnMetadata<'_>> {
+        self.functions
+            .iter()
+            .map(|function| crate::ScriptFnMetadata {
+                name: self.name(function.name).unwrap(),
+                params: function
+                    .params
+                    .iter()
+                    .map(|&p| self.name(p).unwrap())
+                    .collect(),
+                access: function.access,
+                #[cfg(not(feature = "no_object"))]
+                this_type: function.this_type.map(|t| self.name(t).unwrap()),
+                #[cfg(feature = "metadata")]
+                comments: Vec::new(),
+            })
+    }
+
+    /// Does this [`Program`] contain compiled script functions?
+    ///
+    /// Not available under `no_function`.
+    ///
+    /// Fallback functions retained only in AST form are _excluded_.
+    #[cfg(not(feature = "no_function"))]
+    #[inline(always)]
+    #[must_use]
+    pub fn has_functions(&self) -> bool {
+        !self.functions.is_empty()
+    }
+
     /// Number of compiled script functions in this[`Program`].
     #[inline(always)]
     #[must_use]
@@ -862,6 +908,68 @@ mod tests {
                 source: None,
             },
         )
+    }
+
+    #[cfg(not(feature = "no_function"))]
+    #[test]
+    fn discovery_of_compiled_functions() {
+        let empty = program_of(&[]);
+        assert!(!empty.has_functions());
+        assert_eq!(empty.iter_functions().count(), 0);
+
+        let program = program_of(&[(0, None, 2)]);
+        assert!(program.has_functions());
+        assert_eq!(program.iter_functions().count(), program.num_functions());
+        let function = program.iter_functions().next().unwrap();
+        assert_eq!(function.name, "f");
+        assert_eq!(function.params, ["f", "f"]);
+        assert_eq!(function.access, FnAccess::Public);
+        #[cfg(not(feature = "no_object"))]
+        assert_eq!(function.this_type, None);
+        #[cfg(feature = "metadata")]
+        assert!(function.comments.is_empty());
+
+        let bytes = program.write().unwrap();
+        let loaded = Program::read(&bytes).unwrap();
+        assert_eq!(loaded.iter_functions().next().unwrap(), function);
+        let owned = loaded.into_owned();
+        assert_eq!(owned.iter_functions().next().unwrap(), function);
+    }
+
+    #[cfg(not(any(feature = "no_function", feature = "no_object")))]
+    #[test]
+    fn discovery_of_typed_functions() {
+        let program = program_of(&[(0, Some(1), 0), (0, Some(2), 0)]);
+        let functions: Vec<_> = program.iter_functions().collect();
+        assert_eq!(functions.len(), 2);
+        assert_eq!(functions[0].this_type, Some("i64"));
+        assert_eq!(functions[1].this_type, Some("string"));
+    }
+
+    #[cfg(not(feature = "no_function"))]
+    #[test]
+    fn discovery_rejects_invalid_function_metadata_on_load() {
+        use crate::grain::bytecode::VerifyError;
+        use crate::grain::ReadError;
+
+        for field in 0..3 {
+            let mut program = program_of(&[(0, None, 1)]);
+            let function = &mut program.functions[0];
+            match field {
+                0 => function.name = 3,
+                1 => function.params[0] = 3,
+                _ => function.this_type = Some(3),
+            }
+            let bytes = program.write().unwrap();
+            assert!(matches!(
+                Program::read(&bytes),
+                Err(ReadError::Unverifiable(VerifyError::BadIndex {
+                    what: "name",
+                    index: 3,
+                    ..
+                }))
+            ));
+        }
     }
 
     /// Rhai tries the receiver's type first and falls back to the untyped
