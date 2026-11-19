@@ -59,8 +59,15 @@ fn test_expressions() {
     let _ = engine.compile_expression("x = 42").unwrap_err();
     let _ = engine.compile_expression("let x = 42").unwrap_err();
     let _ = engine.compile_expression("do { break 42; } while true").unwrap_err();
+    let _ = engine.compile_expression(r#"eval("let x = 42; x")"#).unwrap_err();
+    let _ = engine.eval_expression_with_scope::<()>(&mut scope, r#"eval("x = 42")"#).unwrap_err();
+    assert_eq!(scope.get_value::<INT>("x").unwrap(), 10);
+    #[cfg(not(feature = "no_index"))]
+    #[cfg(not(feature = "no_function"))]
+    let _ = engine.compile_expression(r#"[1].map(|v| eval("v"))"#).unwrap_err();
 
     engine.compile("40 + { let x = 2; x }").unwrap();
+    engine.compile(r#"eval("let x = 42; x")"#).unwrap();
 }
 
 /// This example taken from https://github.com/rhaiscript/rhai/issues/115
