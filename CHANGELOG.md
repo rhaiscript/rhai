@@ -24,7 +24,7 @@ Bug fixes
 * `eval` is no longer allowed in `Engine::eval_expression` and `Engine::compile_expression` (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) ([`#1223`](https://github.com/rhaiscript/rhai/pull/1223)).
 * `to_json` and serializing a `Dynamic` with `serde` no longer panic or overflow the stack when an object map contains a closure that captures the map itself (a reference loop). The built-in formatter writes `null` where the loop closes, while `serde` returns an error (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) ([`#1222`](https://github.com/rhaiscript/rhai/pull/1222)).
 * A constant string, integer or BLOB can no longer be modified through an index (e.g. `s[0] = 'x'`, `n[0..4] = 15`, `b[0] = 1`) or a mutating method on the indexed item (e.g. `s[0].make_upper()`), and a new property can no longer be added to a constant object map. The same applies to such values nested inside a constant array or object map.
-* `Engine::parse_json` (and the `parse_json` function without the `metadata` feature) no longer accepts identifiers or custom operators in the JSON text. Previously the text could call any registered function, `eval` included, e.g. `{"a": eval("...")}`. Comments and arithmetic expressions are still allowed.
+* `Engine::parse_json` (and the `parse_json` function without the `metadata` feature) no longer evaluates expressions in the JSON text. Previously the text could call any registered function, `eval` included, e.g. `{"a": eval("...")}`. Only JSON literals (including negative numbers), objects, arrays and comments are accepted (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1221`](https://github.com/rhaiscript/rhai/pull/1221)).
 
 Enhancements
 ------------
