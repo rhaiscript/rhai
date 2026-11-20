@@ -15,6 +15,8 @@ error[E0277]: the trait bound `NonClonable: Clone` is not satisfied
 note: required by a bound in `Dynamic::from`
   --> $WORKSPACE/src/types/dynamic.rs
    |
+   | impl Dynamic {
+...
    |     pub fn from<T: Variant + Clone>(value: T) -> Self {
    |                              ^^^^^ required by this bound in `Dynamic::from`
    = note: this error originates in the attribute macro `export_fn` (in Nightly builds, run with -Z macro-backtrace for more info)

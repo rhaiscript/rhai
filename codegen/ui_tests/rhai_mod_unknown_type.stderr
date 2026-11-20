@@ -1,12 +1,14 @@
 error[E0425]: cannot find type `Pointer` in this scope
   --> ui_tests/rhai_mod_unknown_type.rs:12:27
    |
- 4 | pub struct Point {
-   | ---------------- similarly named struct `Point` defined here
-...
 12 |     pub fn test_fn(input: Pointer) -> bool {
-   |                           ^^^^^^^
+   |                           ^^^^^^^ not found in this scope
    |
+note: similarly named struct `Point` defined here
+  --> ui_tests/rhai_mod_unknown_type.rs:4:1
+   |
+ 4 | pub struct Point {
+   | ^^^^^^^^^^^^^^^^
 help: a struct with a similar name exists
    |
 12 -     pub fn test_fn(input: Pointer) -> bool {

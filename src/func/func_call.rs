@@ -618,7 +618,8 @@ impl Engine {
                 .as_ref()
                 .map_or(0, |dbg| dbg.call_stack().len());
 
-            let value_copy = &mut Dynamic::UNIT;
+            let mut unit = Dynamic::UNIT;
+            let value_copy = &mut unit;
             let backup = &mut ArgBackup::new();
 
             // Calling non-method function but the first argument is a reference?
@@ -924,7 +925,8 @@ impl Engine {
                     )
                 } else {
                     // Normal call of script function
-                    let value_copy = &mut Dynamic::UNIT;
+                    let mut unit = Dynamic::UNIT;
+                    let value_copy = &mut unit;
                     let backup = &mut ArgBackup::new();
 
                     // The first argument is a reference?

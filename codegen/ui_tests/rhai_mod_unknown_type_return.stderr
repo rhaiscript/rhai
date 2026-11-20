@@ -2,7 +2,7 @@ error[E0425]: cannot find type `boool` in this scope
   --> ui_tests/rhai_mod_unknown_type_return.rs:12:37
    |
 12 |     pub fn test_fn(input: Point) -> boool {
-   |                                     ^^^^^
+   |                                     ^^^^^ not found in this scope
    |
 help: a builtin type with a similar name exists
    |
