@@ -618,6 +618,21 @@ impl Engine {
         capture_parent_scope: bool,
         #[cfg(not(feature = "no_module"))] mut namespace: crate::module::Namespace,
     ) -> ParseResult<Expr> {
+        // `eval` runs a full script in the current scope, so it cannot be allowed
+        // where statements are not
+        #[cfg(not(feature = "no_module"))]
+        let is_eval = namespace.is_empty() && id == crate::engine::KEYWORD_EVAL;
+        #[cfg(feature = "no_module")]
+        let is_eval = id == crate::engine::KEYWORD_EVAL;
+
+        if is_eval && settings.has_flag(ParseSettingFlags::DISALLOW_STATEMENTS_IN_BLOCKS) {
+            return Err(LexError::ImproperSymbol(
+                id.to_string(),
+                "'eval' cannot be used in an expression".into(),
+            )
+            .into_err(settings.pos));
+        }
+
         let (token, token_pos) = if no_args {
             &(Token::RightParen, Position::NONE)
         } else {

@@ -21,6 +21,7 @@ Bug fixes
 * Fixed undefined behavior (an aliasing violation detected by Miri) when a variable is passed to a function that does not take its first argument by `&mut`, e.g. `x.contains("a")` or `f(x)` for a script function. This was a regression in 1.27.0.
 * `sort` and `sort_desc` no longer panic on an array of floating-point numbers that contains NaN. NaN now sorts after every other number (before them for `sort_desc`) (thanks [`@Rockyrok77`](https://github.com/Rockyrok77)).
 * `pad` on an array now enforces `max_array_size` when the padding length is large enough to overflow the size calculation. Previously it could pass the check and then panic or abort the process while allocating (thanks [`@Rockyrok77`](https://github.com/Rockyrok77)).
+* `eval` is no longer allowed in `Engine::eval_expression` and `Engine::compile_expression`. Previously it could run statements, loops and assignments inside an expression, including assignments to variables in the `Scope` passed in (thanks [`@Rockyrok77`](https://github.com/Rockyrok77)).
 
 Enhancements
 ------------
