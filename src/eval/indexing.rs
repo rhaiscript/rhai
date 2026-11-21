@@ -49,7 +49,9 @@ impl Engine {
     ) -> RhaiResultOf<Target<'t>> {
         self.track_operation(global, Position::NONE)?;
 
-        match target {
+        let read_only = target.is_read_only();
+
+        let result = match target {
             #[cfg(not(feature = "no_index"))]
             Dynamic(Union::Array(arr, ..)) => {
                 // val_array[idx]
@@ -115,12 +117,18 @@ impl Engine {
                     }
                 }
 
-                if _add_if_not_found && (map.is_empty() || !map.contains_key(index.as_str())) {
+                if _add_if_not_found
+                    && !read_only
+                    && (map.is_empty() || !map.contains_key(index.as_str()))
+                {
                     map.insert(index.clone().into(), Dynamic::UNIT);
                 }
 
                 if let Some(value) = map.get_mut(index.as_str()) {
                     value.try_into()
+                } else if _add_if_not_found {
+                    // The map is read-only, so the new property cannot be added
+                    Ok(Target::from(Dynamic::UNIT.into_read_only()))
                 } else if self.fail_on_invalid_map_property() {
                     Err(ERR::ErrorPropertyNotFound(index.to_string(), idx_pos).into())
                 } else {
@@ -386,7 +394,28 @@ impl Engine {
                 op_pos,
             )
             .into()),
-        }
+        };
+
+        // A character, slice, bit or byte copied out of a constant is read-only, just like an
+        // element of a constant array, otherwise it can be modified and written back to the source.
+        #[cfg(not(feature = "no_index"))]
+        let result = result.map(|mut item| {
+            match item {
+                Target::Bit { ref mut value, .. }
+                | Target::BitField { ref mut value, .. }
+                | Target::BlobByte { ref mut value, .. }
+                | Target::StringChar { ref mut value, .. }
+                | Target::StringSlice { ref mut value, .. }
+                    if read_only =>
+                {
+                    value.set_access_mode(crate::types::dynamic::AccessMode::ReadOnly);
+                }
+                _ => (),
+            }
+            item
+        });
+
+        result
     }
 
     /// Call a get indexer.
