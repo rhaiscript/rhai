@@ -66,6 +66,22 @@ fn test_serde_ser_array() {
 #[test]
 #[cfg(not(feature = "no_index"))]
 #[cfg(not(feature = "no_object"))]
+#[cfg(not(feature = "no_function"))]
+#[cfg(not(feature = "no_closure"))]
+fn test_serde_ser_shared_loop() {
+    let engine = Engine::new();
+
+    // A closure capturing the object map it is stored in forms a reference loop.
+    let value = engine.eval::<Dynamic>("let m = #{}; let f = || m; m.f = f; #{a: m}").unwrap();
+    assert!(serde_json::to_string(&value).is_err());
+
+    let value = engine.eval::<Dynamic>("let m = #{x: 1}; let f = || m; #{a: m, b: [m]}").unwrap();
+    assert_eq!(serde_json::to_string(&value).unwrap(), r#"{"a":{"x":1},"b":[{"x":1}]}"#);
+}
+
+#[test]
+#[cfg(not(feature = "no_index"))]
+#[cfg(not(feature = "no_object"))]
 fn test_serde_ser_struct() {
     #[derive(Debug, Serialize, PartialEq)]
     struct Hello {

@@ -14,8 +14,36 @@ use serde::ser::SerializeMap;
 use crate::types::dynamic::Variant;
 
 impl Serialize for Dynamic {
+    #[inline(always)]
     fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
-        match self.0 {
+        DynamicSer {
+            value: self,
+            shared: None,
+        }
+        .serialize(ser)
+    }
+}
+
+/// Shared values currently being serialized, innermost first.
+#[cfg_attr(feature = "no_closure", allow(dead_code))]
+struct SharedPath<'a> {
+    ptr: *const crate::Locked<Dynamic>,
+    parent: Option<&'a SharedPath<'a>>,
+}
+
+/// Serializes a [`Dynamic`] while keeping track of the shared values it is nested in,
+/// so that a reference loop (e.g. a closure capturing the object map it is stored in)
+/// is reported as an error instead of recursing forever.
+struct DynamicSer<'a> {
+    value: &'a Dynamic,
+    shared: Option<&'a SharedPath<'a>>,
+}
+
+impl Serialize for DynamicSer<'_> {
+    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        let shared = self.shared;
+
+        match self.value.0 {
             Union::Unit(..) => ser.serialize_unit(),
             Union::Bool(x, ..) => ser.serialize_bool(x),
             Union::Str(ref s, ..) => ser.serialize_str(s),
@@ -55,18 +83,26 @@ impl Serialize for Dynamic {
             }
 
             #[cfg(not(feature = "no_index"))]
-            Union::Array(ref a, ..) => (**a).serialize(ser),
+            Union::Array(ref a, ..) => {
+                ser.collect_seq(a.iter().map(|value| DynamicSer { value, shared }))
+            }
             #[cfg(not(feature = "no_index"))]
             Union::Blob(ref a, ..) => ser.serialize_bytes(a),
             #[cfg(not(feature = "no_object"))]
             Union::Map(ref m, ..) => {
                 let mut map = ser.serialize_map(Some(m.len()))?;
-                m.iter()
-                    .try_for_each(|(k, v)| map.serialize_entry(k.as_str(), v))?;
+                m.iter().try_for_each(|(k, value)| {
+                    map.serialize_entry(k.as_str(), &DynamicSer { value, shared })
+                })?;
                 map.end()
             }
             Union::FnPtr(ref f, ..) if f.is_curried() => {
-                ser.collect_seq(once(f.fn_name().into()).chain(f.iter_curry().cloned()))
+                let fn_name: Dynamic = f.fn_name().into();
+                ser.collect_seq(
+                    once(&fn_name)
+                        .chain(f.iter_curry())
+                        .map(|value| DynamicSer { value, shared }),
+                )
             }
             Union::FnPtr(ref f, ..) => ser.serialize_str(f.fn_name()),
             #[cfg(not(feature = "no_time"))]
@@ -75,14 +111,33 @@ impl Serialize for Dynamic {
             Union::Variant(ref v, ..) => ser.serialize_str((***v).type_name()),
 
             #[cfg(not(feature = "no_closure"))]
-            #[cfg(not(feature = "sync"))]
-            Union::Shared(ref cell, ..) => cell.borrow().serialize(ser),
-            #[cfg(not(feature = "no_closure"))]
-            #[cfg(feature = "sync")]
-            #[cfg(not(feature = "no_std"))]
-            Union::Shared(ref cell, ..) => cell.read().unwrap().serialize(ser),
-            #[cfg(feature = "no_std")]
-            Union::Shared(ref cell, ..) => cell.read().serialize(ser),
+            Union::Shared(ref cell, ..) => {
+                use serde::ser::Error;
+
+                let ptr: *const crate::Locked<Dynamic> = &**cell;
+
+                let mut path = shared;
+                while let Some(p) = path {
+                    if std::ptr::eq(p.ptr, ptr) {
+                        return Err(S::Error::custom("shared value contains a reference loop"));
+                    }
+                    path = p.parent;
+                }
+
+                let value = crate::func::locked_read(cell)
+                    .ok_or_else(|| S::Error::custom("shared value is locked"))?;
+
+                let path = SharedPath {
+                    ptr,
+                    parent: shared,
+                };
+
+                DynamicSer {
+                    value: &value,
+                    shared: Some(&path),
+                }
+                .serialize(ser)
+            }
         }
     }
 }

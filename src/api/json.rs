@@ -156,26 +156,41 @@ impl Engine {
 #[inline]
 #[must_use]
 pub fn format_map_as_json(map: &Map) -> String {
-    let mut result = String::from('{');
-
-    for (key, value) in map {
-        if result.len() > 1 {
-            result += ",";
-        }
-
-        write!(result, "{key:?}").unwrap();
-        result += ":";
-
-        format_dynamic_as_json(&mut result, value);
-    }
-
-    result += "}";
-
+    let mut result = String::new();
+    format_map_into_json(&mut result, map, &mut Vec::new());
     result
 }
 
+/// Format an [object map][Map] as JSON.
+///
+/// `shared` holds the shared values currently being formatted, to stop at reference loops.
+fn format_map_into_json(
+    result: &mut String,
+    map: &Map,
+    shared: &mut Vec<*const crate::Locked<Dynamic>>,
+) {
+    *result += "{";
+
+    for (i, (key, value)) in map.iter().enumerate() {
+        if i > 0 {
+            *result += ",";
+        }
+
+        write!(result, "{key:?}").unwrap();
+        *result += ":";
+
+        format_dynamic_as_json(result, value, shared);
+    }
+
+    *result += "}";
+}
+
 /// Format a [`Dynamic`] value as JSON.
-fn format_dynamic_as_json(result: &mut String, value: &Dynamic) {
+fn format_dynamic_as_json(
+    result: &mut String,
+    value: &Dynamic,
+    shared: &mut Vec<*const crate::Locked<Dynamic>>,
+) {
     match value.0 {
         Union::Unit(..) => *result += "null",
         Union::FnPtr(ref f, _, _) if f.is_curried() => {
@@ -183,12 +198,12 @@ fn format_dynamic_as_json(result: &mut String, value: &Dynamic) {
             write!(result, "{:?}", f.fn_name()).unwrap();
             f.iter_curry().for_each(|value| {
                 *result += ",";
-                format_dynamic_as_json(result, value);
+                format_dynamic_as_json(result, value, shared);
             });
             *result += "]";
         }
         Union::FnPtr(ref f, _, _) => write!(result, "{:?}", f.fn_name()).unwrap(),
-        Union::Map(ref m, ..) => *result += &format_map_as_json(m),
+        Union::Map(ref m, ..) => format_map_into_json(result, m, shared),
         #[cfg(not(feature = "no_index"))]
         Union::Array(ref a, _, _) => {
             *result += "[";
@@ -196,7 +211,7 @@ fn format_dynamic_as_json(result: &mut String, value: &Dynamic) {
                 if i > 0 {
                     *result += ",";
                 }
-                format_dynamic_as_json(result, x);
+                format_dynamic_as_json(result, x, shared);
             }
             *result += "]";
         }
@@ -213,8 +228,19 @@ fn format_dynamic_as_json(result: &mut String, value: &Dynamic) {
         }
         #[cfg(not(feature = "no_closure"))]
         Union::Shared(ref v, _, _) => {
-            let value = &*crate::func::locked_read(v).unwrap();
-            format_dynamic_as_json(result, value)
+            let ptr: *const crate::Locked<Dynamic> = &**v;
+
+            // A shared value that is already being formatted (or is locked for write
+            // by the caller) is part of a reference loop, e.g. a closure capturing the
+            // object map it is stored in.
+            match crate::func::locked_read(v) {
+                Some(value) if !shared.contains(&ptr) => {
+                    shared.push(ptr);
+                    format_dynamic_as_json(result, &value, shared);
+                    shared.pop();
+                }
+                _ => *result += "null",
+            }
         }
         _ => write!(result, "{value:?}").unwrap(),
     }
