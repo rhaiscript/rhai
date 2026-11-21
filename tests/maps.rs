@@ -449,3 +449,17 @@ fn test_map_missing_property_callback() {
         143
     );
 }
+
+#[test]
+#[cfg(not(feature = "no_function"))]
+#[cfg(not(feature = "no_closure"))]
+fn test_map_json_shared_loop() {
+    let engine = Engine::new();
+
+    // A closure capturing the object map it is stored in forms a reference loop.
+    engine.eval::<String>("let m = #{}; let f = || m; m.f = f; m.to_json()").unwrap();
+    engine.eval::<String>("let m = #{}; let f = || m; m.f = f; #{a: m}.to_json()").unwrap();
+
+    // The same shared value appearing more than once is not a loop.
+    assert_eq!(engine.eval::<String>("let m = #{x: 1}; let f = || m; #{a: m, b: m}.to_json()").unwrap(), r#"{"a":{"x":1},"b":{"x":1}}"#);
+}
