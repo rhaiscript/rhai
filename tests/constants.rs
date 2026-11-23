@@ -38,6 +38,42 @@ fn test_constant_scope() {
     ));
 }
 
+#[cfg(not(feature = "no_index"))]
+#[test]
+fn test_constant_scope_index() {
+    let engine = Engine::new();
+
+    let mut scope = Scope::new();
+    scope.push_constant("s", "hello");
+    scope.push_constant("n", 42 as INT);
+    scope.push_constant("b", vec![1_u8, 2, 3]);
+
+    for script in ["s[0] = 'j'", "s[1..3] = \"xy\"", "n[0] = true", "n[0..4] = 15", "b[0] = 9", "b[0] += 1"] {
+        assert!(matches!(*engine.run_with_scope(&mut scope, script).expect_err("expects error"), EvalAltResult::ErrorAssignmentToConstant(..)), "{script}");
+    }
+
+    #[cfg(not(feature = "no_object"))]
+    {
+        let mut map = rhai::Map::new();
+        map.insert("s".into(), "abc".into());
+        scope.push_constant("m", map);
+
+        for script in ["m.s[0] = 'z'", "m.t = 1", "m[\"t\"] = 1"] {
+            assert!(matches!(*engine.run_with_scope(&mut scope, script).expect_err("expects error"), EvalAltResult::ErrorAssignmentToConstant(..)), "{script}");
+        }
+
+        for script in ["s[0].make_upper()", "s[0..2].clear()", "n[0..4].set_bit(0, true)", "b[0].set_bit(7, true)"] {
+            assert!(matches!(*engine.run_with_scope(&mut scope, script).expect_err("expects error"), EvalAltResult::ErrorNonPureMethodCallOnConstant(..)), "{script}");
+        }
+
+        assert_eq!(format!("{:?}", scope.get_value::<rhai::Map>("m").unwrap()), r#"{"s": "abc"}"#);
+    }
+
+    assert_eq!(scope.get_value::<rhai::ImmutableString>("s").unwrap(), "hello");
+    assert_eq!(scope.get_value::<INT>("n").unwrap(), 42);
+    assert_eq!(scope.get_value::<rhai::Blob>("b").unwrap(), vec![1, 2, 3]);
+}
+
 #[cfg(not(feature = "no_object"))]
 #[test]
 fn test_constant_mut() {
