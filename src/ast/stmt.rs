@@ -642,13 +642,13 @@ impl Stmt {
             | Self::Switch(..)
             | Self::Block(..)
             | Self::Expr(..)
-            | Self::FnCall(..) => true,
+            | Self::FnCall(..)
+            | Self::TryCatch(..) => true,
 
-            Self::Noop(..)
-            | Self::While(..)
-            | Self::Do(..)
-            | Self::For(..)
-            | Self::TryCatch(..) => false,
+            // Loops return a value via `break value`.
+            Self::While(..) | Self::Do(..) | Self::For(..) => true,
+
+            Self::Noop(..) => false,
 
             Self::Var(..) | Self::Assignment(..) | Self::BreakLoop(..) | Self::Return(..) => false,
 

@@ -25,6 +25,7 @@ Bug fixes
 * `to_json` and serializing a `Dynamic` with `serde` no longer panic or overflow the stack when an object map contains a closure that captures the parent itself, creating a reference loop (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) ([`#1222`](https://github.com/rhaiscript/rhai/pull/1222)).
 * A constant string, integer or BLOB can no longer be modified through an index or a mutating method on the indexed item, and a new property can no longer be added to a constant object map; also when nested (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) ([`#1224`](https://github.com/rhaiscript/rhai/pull/1224)).
 * `Engine::parse_json` (and the `parse_json` function without the `metadata` feature) no longer evaluates expressions in the JSON text, including arithmetic expressions. The filter now only admits valid JSON literal tokens (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1221`](https://github.com/rhaiscript/rhai/pull/1221)).
+* The optimizer no longer drops the value of a `try` block, nor returns a previous value when a block ends with `{}` or with `return;` after a loop or `try` statement (thanks [`@bardrop`](https://github.com/bardrop) [`#1225`](https://github.com/rhaiscript/rhai/pull/1225)).
 
 Enhancements
 ------------
