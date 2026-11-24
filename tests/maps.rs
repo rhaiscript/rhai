@@ -347,7 +347,7 @@ fn test_map_for() {
 fn test_map_json() {
     let engine = Engine::new();
 
-    let json = r#"{"a":1, "b":true, "c":41+1, "$d e f!":"hello", "z":null}"#;
+    let json = r#"{"a":1, "b":true, "c":42, "$d e f!":"hello", "z":null, "n":-1}"#;
 
     let map = engine.parse_json(json, true).unwrap();
 
@@ -358,6 +358,7 @@ fn test_map_json() {
     assert_eq!(map["c"].as_int().unwrap(), 42);
     assert_eq!(map["$d e f!"].clone_cast::<String>(), "hello");
     let _: () = map["z"].as_unit().unwrap();
+    assert_eq!(map["n"].as_int().unwrap(), -1);
 
     #[cfg(not(feature = "no_index"))]
     {
@@ -380,7 +381,7 @@ fn test_map_json() {
                 )
                 .unwrap()
                 .len(),
-            11
+            12
         );
 
         assert_eq!(engine.eval::<String>("#{a:[#{b:42}]}.to_json()").unwrap(), r#"{"a":[{"b":42}]}"#);
@@ -396,6 +397,15 @@ fn test_map_json() {
     assert!(matches!(*engine.parse_json("{a:()}", true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
     assert!(matches!(*engine.parse_json("#{a:123+456}", true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
     assert!(matches!(*engine.parse_json("{a:`hello${world}`}", true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
+    assert!(matches!(*engine.parse_json(r#"{"a":print("x")}"#, true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
+    assert!(matches!(*engine.parse_json(r#"{"a":eval("40+2")}"#, false).unwrap_err(), EvalAltResult::ErrorParsing(..)));
+    assert!(matches!(*engine.parse_json(r#"{"a":"hello".len}"#, true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
+    #[cfg(not(feature = "no_float"))]
+    assert_eq!(engine.parse_json(r#"{"a":-1.5, "b":1e2}"#, true).unwrap()["b"].as_float().unwrap(), 100.0);
+    assert!(matches!(*engine.parse_json(r#"{"a":41+1}"#, true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
+    assert!(matches!(*engine.parse_json(r#"{"a":[1]+[2]}"#, true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
+    assert!(matches!(*engine.parse_json(r#"{"a":1 in [1]}"#, true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
+    assert!(matches!(*engine.parse_json(r#"{"a":- 1}"#, true).unwrap_err(), EvalAltResult::ErrorParsing(..)));
 }
 
 #[test]

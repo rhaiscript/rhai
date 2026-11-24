@@ -23,6 +23,9 @@ impl Engine {
     ///
     /// The JSON string must be an object hash.  It cannot be a simple primitive value.
     ///
+    /// The text is not evaluated as a script: only JSON literals, objects, arrays and comments
+    /// are accepted. Expressions, identifiers and function calls are syntax errors.
+    ///
     /// Set `has_null` to `true` in order to map `null` values to `()`.
     /// Setting it to `false` causes a syntax error for any `null` value.
     ///
@@ -71,52 +74,9 @@ impl Engine {
         let (stream, tokenizer_control) = self.lex_raw(
             &scripts,
             Some(if has_null {
-                &|token, _, _| {
-                    match token {
-                        // `null` => `()`
-                        Token::Reserved(s) if &*s == "null" => Token::Unit,
-                        // `{` => `#{`
-                        Token::LeftBrace => Token::MapStart,
-                        // Disallowed syntax
-                        t @ (Token::Unit | Token::MapStart) => Token::LexError(
-                            LexError::ImproperSymbol(t.literal_syntax().to_string(), String::new())
-                                .into(),
-                        ),
-                        Token::InterpolatedString(..) => Token::LexError(
-                            LexError::ImproperSymbol(
-                                "interpolated string".to_string(),
-                                String::new(),
-                            )
-                            .into(),
-                        ),
-                        // All others
-                        _ => token,
-                    }
-                }
+                &|token, _, _| map_json_token(token, true)
             } else {
-                &|token, _, _| {
-                    match token {
-                        Token::Reserved(s) if &*s == "null" => Token::LexError(
-                            LexError::ImproperSymbol("null".to_string(), String::new()).into(),
-                        ),
-                        // `{` => `#{`
-                        Token::LeftBrace => Token::MapStart,
-                        // Disallowed syntax
-                        t @ (Token::Unit | Token::MapStart) => Token::LexError(
-                            LexError::ImproperSymbol(t.literal_syntax().to_string(), String::new())
-                                .into(),
-                        ),
-                        Token::InterpolatedString(..) => Token::LexError(
-                            LexError::ImproperSymbol(
-                                "interpolated string".to_string(),
-                                String::new(),
-                            )
-                            .into(),
-                        ),
-                        // All others
-                        _ => token,
-                    }
-                }
+                &|token, _, _| map_json_token(token, false)
             }),
         );
 
@@ -134,6 +94,43 @@ impl Engine {
         };
 
         self.eval_ast(&ast)
+    }
+}
+
+/// Map a token for [`Engine::parse_json`].
+///
+/// Only the literals and punctuation that make up JSON are allowed through.
+/// Everything else (identifiers, keywords, operators etc.) becomes a lex error,
+/// so the text cannot evaluate expressions or call functions.
+#[cfg(not(feature = "no_ast"))]
+fn map_json_token(token: Token, has_null: bool) -> Token {
+    match token {
+        // `null` => `()`
+        Token::Reserved(ref s) if has_null && &**s == "null" => Token::Unit,
+        // `{` => `#{`
+        Token::LeftBrace => Token::MapStart,
+        // Allowed JSON syntax
+        Token::IntegerConstant(..)
+        | Token::StringConstant(..)
+        | Token::CharConstant(..)
+        | Token::True
+        | Token::False
+        | Token::RightBrace
+        | Token::LeftBracket
+        | Token::RightBracket
+        | Token::Colon
+        | Token::Comma
+        | Token::LexError(..)
+        | Token::EOF => token,
+        #[cfg(not(feature = "no_float"))]
+        Token::FloatConstant(..) => token,
+        #[cfg(feature = "decimal")]
+        Token::DecimalConstant(..) => token,
+        // Disallowed syntax
+        Token::InterpolatedString(..) => Token::LexError(
+            LexError::ImproperSymbol("interpolated string".to_string(), String::new()).into(),
+        ),
+        _ => Token::LexError(LexError::ImproperSymbol(token.to_string(), String::new()).into()),
     }
 }
 
