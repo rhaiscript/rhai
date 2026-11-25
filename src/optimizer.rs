@@ -168,14 +168,28 @@ fn optimize_stmt_block(
         Stmt::is_pure
     };
 
+    let returns_value = |stmt: &Stmt| match stmt {
+        // A loop returns a value via `break`, which is never pure.
+        Stmt::While(..) | Stmt::Do(..) | Stmt::For(..) => !stmt.is_pure(),
+        _ => stmt.returns_value(),
+    };
+
     // Flatten blocks
     while let Some(n) = statements.iter().position(
         |s| matches!(s, Stmt::Block(block, ..) if !block.iter().any(Stmt::is_block_dependent)),
     ) {
         let (first, second) = statements.split_at_mut(n);
         let mut stmt = second[0].take();
+        let pos = stmt.position();
         let stmts = match stmt {
-            Stmt::Block(ref mut block, ..) => block.statements_mut(),
+            Stmt::Block(ref mut block, ..) => {
+                let stmts = block.statements_mut();
+                // An empty block still returns `()`.
+                if stmts.is_empty() {
+                    stmts.push(Stmt::Noop(pos));
+                }
+                stmts
+            }
             _ => unreachable!("Stmt::Block expected but gets {:?}", stmt),
         };
         statements = first
@@ -282,7 +296,7 @@ fn optimize_stmt_block(
                         state.set_dirty();
                         statements.clear();
                     }
-                    [ref stmt] if !stmt.returns_value() && is_pure_for_this_block(stmt) => {
+                    [ref stmt] if !returns_value(stmt) && is_pure_for_this_block(stmt) => {
                         state.set_dirty();
                         statements.clear();
                     }
@@ -290,7 +304,7 @@ fn optimize_stmt_block(
                     [.., ref last_stmt, Stmt::Return(None, options, ..)]
                         if reduce_return
                             && !options.contains(ASTFlags::BREAK)
-                            && !last_stmt.returns_value() =>
+                            && !returns_value(last_stmt) =>
                     {
                         state.set_dirty();
                         statements.pop().unwrap();
@@ -306,17 +320,17 @@ fn optimize_stmt_block(
                     }
                     // { ...; stmt; noop } -> done
                     [.., ref second_last_stmt, Stmt::Noop(..)]
-                        if second_last_stmt.returns_value() =>
+                        if returns_value(second_last_stmt) =>
                     {
                         break
                     }
                     // { ...; stmt_that_returns; pure_non_value_stmt } -> { ...; stmt_that_returns; noop }
                     // { ...; stmt; pure_non_value_stmt } -> { ...; stmt }
                     [.., ref second_last_stmt, ref last_stmt]
-                        if !last_stmt.returns_value() && is_pure_for_this_block(last_stmt) =>
+                        if !returns_value(last_stmt) && is_pure_for_this_block(last_stmt) =>
                     {
                         state.set_dirty();
-                        if second_last_stmt.returns_value() {
+                        if returns_value(second_last_stmt) {
                             *statements.last_mut().unwrap() = Stmt::Noop(last_stmt.position());
                         } else {
                             statements.pop().unwrap();
@@ -828,15 +842,20 @@ fn optimize_stmt(stmt: &mut Stmt, state: &mut OptimizerState, preserve_result: b
             state.set_dirty();
             let statements = x.body.take_statements();
             let block = StmtBlock::new_with_span(
-                optimize_stmt_block(statements, state, false, true, false),
+                optimize_stmt_block(statements, state, preserve_result, true, false),
                 x.body.span(),
             );
             *stmt = Stmt::Block(block.into());
         }
         // try { try_block } catch ( var ) { catch_block }
         Stmt::TryCatch(x, ..) => {
-            *x.body.statements_mut() =
-                optimize_stmt_block(x.body.take_statements(), state, false, true, false);
+            *x.body.statements_mut() = optimize_stmt_block(
+                x.body.take_statements(),
+                state,
+                preserve_result,
+                true,
+                false,
+            );
             *x.branch.statements_mut() =
                 optimize_stmt_block(x.branch.take_statements(), state, false, true, false);
         }

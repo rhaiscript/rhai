@@ -248,3 +248,30 @@ fn test_optimizer_const_map() {
         assert!(res, "Constant map optimization failed for expression: {} => {:?}", expr, ast);
     }
 }
+
+#[cfg(not(feature = "no_function"))]
+#[test]
+fn test_optimizer_preserve_result() {
+    for level in [OptimizationLevel::None, OptimizationLevel::Simple, OptimizationLevel::Full] {
+        let mut engine = Engine::new();
+        engine.set_optimization_level(level);
+
+        // The value of a `try` statement is the value of the `try` block
+        for script in ["let x = 42; try { x } catch { 0 }", "let x = 42; try { foo(); x } catch { 0 } fn foo() {}", "fn foo(x) { try { x } catch { 0 } } foo(42)"] {
+            assert_eq!(engine.eval::<INT>(script).unwrap(), 42, "{script} ({level:?})");
+        }
+
+        // These end with a statement that has no value
+        for script in [
+            "let x = 42; x; {}",
+            "let x = 42; x; { {} }",
+            "loop { break 42; } {}",
+            "fn foo(x) { x; {} } foo(42)",
+            "fn foo() { loop { break 42; } return; } foo()",
+            "fn foo() { for x in 0..3 { break 42; } return; } foo()",
+            "fn foo(x) { try { bar(); x } catch { 0 } return; } fn bar() {} foo(42)",
+        ] {
+            assert!(engine.eval::<rhai::Dynamic>(script).unwrap().is_unit(), "{script} ({level:?})");
+        }
+    }
+}
