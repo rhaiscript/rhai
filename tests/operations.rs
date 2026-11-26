@@ -174,3 +174,24 @@ fn test_max_operations_progress() {
         *engine.run("for x in 0..500 {}").unwrap_err(),
         EvalAltResult::ErrorTerminated(x, ..) if x.as_int().unwrap() == 42));
 }
+
+// Without 64-bit atomics, `sync` builds cannot hand the count back from a callback.
+#[cfg(any(not(feature = "sync"), atomic_ops_count))]
+#[cfg(not(feature = "no_function"))]
+#[cfg(not(feature = "no_index"))]
+#[cfg(not(feature = "no_object"))]
+#[test]
+fn test_max_operations_closures_in_callbacks() {
+    let mut engine = Engine::new();
+    engine.set_max_operations(10_000);
+
+    // Each call of the closure takes about 1,000 operations, so 100 calls must hit the limit.
+    for script in [
+        "for k in 0..100 { [1].map(|x| { let s = 0; for i in 0..300 { s += i; } x + s }); }",
+        "for k in 0..100 { [1].filter(|x| { let s = 0; for i in 0..300 { s += i; } s > 0 }); }",
+        "for k in 0..100 { [1, 2].sort(|x, y| { let s = 0; for i in 0..300 { s += i; } x - y }); }",
+    ] {
+        let err = engine.run(script).unwrap_err();
+        assert!(matches!(err.unwrap_inner(), EvalAltResult::ErrorTooManyOperations(..)), "{script}: {err}");
+    }
+}

@@ -462,8 +462,14 @@ impl FnPtr {
                 let Some((fn_def, env)) = linked_script else {
                     unreachable!()
                 };
-                return context.engine().call_script_fn(
-                    global.into(),
+
+                // Run on a copy of the state, one level up, as `_call_fn_raw` does,
+                // so that the number of operations can be handed back afterwards.
+                let new_global = &mut global.clone();
+                new_global.level += 1;
+
+                let result = context.engine().call_script_fn(
+                    new_global.into(),
                     &mut crate::eval::Caches::new(),
                     scope,
                     this_ptr,
@@ -473,6 +479,17 @@ impl FnPtr {
                     true,
                     context.call_position(),
                 );
+
+                // Update number of operations
+                #[cfg(atomic_ops_count)]
+                global.num_operations.store(
+                    new_global.num_operations(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                #[cfg(not(feature = "sync"))]
+                global.num_operations.set(new_global.num_operations());
+
+                return result;
             }
             // Embedded native Rust function
             FnPtrType::Native(ref func) => {
