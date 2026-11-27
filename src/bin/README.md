@@ -27,6 +27,13 @@ How to Run
 cargo run --features bin-features --bin sample_app_to_run
 ```
 
+`rhai-run` and `rhai-repl` accept `-h` or `--help` to print command-line usage:
+
+```sh
+rhai-run --help
+rhai-repl --help
+```
+
 
 How to Install
 --------------

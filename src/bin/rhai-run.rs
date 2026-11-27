@@ -1,13 +1,7 @@
 #[cfg(feature = "grain")]
 use rhai::grain::{Program, Vm};
 use rhai::{Engine, EvalAltResult, Position};
-use std::{
-    env,
-    fs::File,
-    io::Read,
-    path::{Path, PathBuf},
-    process::exit,
-};
+use std::{env, fs::File, io::Read, path::Path, process::exit};
 
 fn eprint_error(input: &str, mut err: EvalAltResult) {
     fn eprint_line(lines: &[&str], pos: Position, err_msg: &str) {
@@ -102,7 +96,7 @@ fn run_grain_bytecode(filename: &Path) {
     let result = vm.eval_with_callbacks(&mut scope, &program);
 
     if let Err(err) = result {
-        let mut path = PathBuf::from(filename);
+        let mut path = std::path::PathBuf::from(filename);
         path.set_extension("rhai");
 
         if path.is_file() {
@@ -211,11 +205,31 @@ fn walk_ast(contents: &mut String, filename: &Path) {
     }
 }
 
+fn print_help() {
+    println!("Usage: rhai-run [OPTIONS] [<script>...]");
+    println!();
+    println!("Runs one or more Rhai scripts or Rhai Grain bytecode files.");
+    println!();
+    println!("Options:");
+    println!("  -h, --help  Print help");
+}
+
+fn has_help_flag(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "-h" || arg == "--help")
+}
+
 fn main() {
+    let args: Vec<_> = env::args().skip(1).collect();
+
+    if has_help_flag(&args) {
+        print_help();
+        return;
+    }
+
     #[cfg(not(feature = "no_ast"))]
     let mut contents = String::new();
 
-    for filename in env::args().skip(1) {
+    for filename in args {
         let filename = match Path::new(&filename).canonicalize() {
             Err(err) => {
                 eprintln!("Error script file path: {filename}\n{err}");

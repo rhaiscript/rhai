@@ -1,7 +1,7 @@
 Rhai Release Notes
 ==================
 
-Version 1.27.1
+Version 1.28.0
 ==============
 
 Bug fixes
@@ -39,6 +39,7 @@ Enhancements
 * Rhai Grain now compiles scripts with many constants, such as large object map literals, in linear instead of quadratic time, by indexing the constant pool by hash (thanks [`@luispedro`](https://github.com/luispedro) [`#1196`](https://github.com/rhaiscript/rhai/issues/1196)).
 * Rhai Grain `Program::iter_functions` now exposes metadata for compiled functions, similar to `AST::iter_functions` ([`#1212`](https://github.com/rhaiscript/rhai/pull/1212)).
 * Rhai Grain `Program::has_functions` checks whether a program contains compiled functions ([`#1212`](https://github.com/rhaiscript/rhai/pull/1212)).
+* `rhai-repl` and `rhai-run` now accept the standard `--help` and `-h` flags to print command-line usage info for AI's.
 
 
 Version 1.27.0

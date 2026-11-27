@@ -111,15 +111,34 @@ fn print_keys() {
     println!();
 }
 
+/// Print command-line help.
+fn print_command_help() {
+    println!("Usage: rhai-repl [OPTIONS] [<script>...]");
+    println!();
+    println!("Starts the Rhai REPL. Any script filenames are loaded as initialization scripts.");
+    println!();
+    println!("Options:");
+    println!("  -h, --help  Print help");
+}
+
+fn has_help_flag(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "-h" || arg == "--help")
+}
+
 // Load script files specified in the command line.
 #[cfg(not(feature = "no_module"))]
 #[cfg(not(feature = "no_std"))]
-fn load_script_files(engine: &mut Engine) {
+fn load_script_files(engine: &mut Engine, args: &[String]) {
+    if has_help_flag(args) {
+        print_command_help();
+        exit(0);
+    }
+
     // Load init scripts
     let mut contents = String::new();
     let mut has_init_scripts = false;
 
-    for filename in env::args().skip(1) {
+    for filename in args {
         let filename = match Path::new(&filename).canonicalize() {
             Err(err) => {
                 eprintln!("Error script file path: {filename}\n{err}");
@@ -290,6 +309,13 @@ mod sample_functions {
 }
 
 fn main() {
+    let args: Vec<_> = env::args().skip(1).collect();
+
+    if has_help_flag(&args) {
+        print_command_help();
+        return;
+    }
+
     let title = format!("Rhai REPL tool (version {})", env!("CARGO_PKG_VERSION"));
     println!("{title}");
     println!("{0:=<1$}", "", title.len());
@@ -302,7 +328,7 @@ fn main() {
 
     #[cfg(not(feature = "no_module"))]
     #[cfg(not(feature = "no_std"))]
-    load_script_files(&mut engine);
+    load_script_files(&mut engine, &args);
 
     // Setup Engine
     #[cfg(not(feature = "no_optimize"))]
