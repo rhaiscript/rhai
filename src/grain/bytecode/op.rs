@@ -37,6 +37,18 @@ impl AssignOp {
     }
 }
 
+/// Which pseudo-error [`Op::BreakFlow`] raises, for a chunk nested in another
+/// to hand to the op that runs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flow {
+    /// `return`: pops the return value.
+    Return,
+    /// `break`: pops the break value, `()` if there is none.
+    Break,
+    /// `continue`: pops nothing.
+    Continue,
+}
+
 /// Where [`Op::CallRef`] finds the variable it calls through.
 ///
 /// They differ in how the variable is reached, not in what happens to it:
@@ -787,6 +799,12 @@ pub enum Op {
     /// site pool.
     ///
     /// Pushes the value the registered handler returns.
+    ///
+    /// If the handler fails with a `break` or `continue` pseudo-error (raised
+    /// by an input via [`Op::BreakFlow`], or by the handler itself) and the
+    /// site has an `on_loop_flow` address, that address is jumped to with two
+    /// values pushed: the break value (`()` for `continue`), then a `bool`
+    /// that is `true` for `break` and `false` for `continue`.
     CustomSyntax(u32),
 
     /// Arm a handler covering the instructions up to the matching
@@ -892,6 +910,30 @@ pub enum Op {
     /// Its table entry is the `throw` keyword's own position, not the
     /// expression's.
     Throw,
+
+    /// Raise a `return`, `break` or `continue` pseudo-error out of a custom
+    /// syntax input chunk, which cannot jump to the loop or function it
+    /// belongs to.
+    ///
+    /// Always fails, with
+    /// [`Return`][crate::EvalAltResult::Return] or
+    /// [`LoopBreak`][crate::EvalAltResult::LoopBreak]. Unlike [`Op::Throw`],
+    /// the error is not catchable. See [`Flow`] for the operands it pops.
+    ///
+    /// ## Position
+    ///
+    /// Its table entry is the statement's own position.
+    ///
+    /// ## Trapping
+    ///
+    /// A chunk nested inside another (currently a custom syntax input, see
+    /// [`Op::CustomSyntax`]) cannot jump to a loop, or return, on the far side
+    /// of its boundary, so it raises the pseudo-error for the op that runs the
+    /// chunk to deal with. That op traps `LoopBreak` when a loop in its own
+    /// frame encloses it, jumping to a stub that carries on as the `break` or
+    /// `continue` would have. Everything else propagates unchanged, to the
+    /// function that returns.
+    BreakFlow(Flow),
 
     /// End the chunk, yielding the top of the operand stack, or unit if empty.
     Return,

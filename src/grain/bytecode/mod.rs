@@ -31,4 +31,4 @@ use chunk::Chunk;
 use code::disassemble;
 
 #[crate::expose_under_internals]
-use op::{Op, Receiver};
+use op::{Flow, Op, Receiver};

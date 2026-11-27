@@ -23,8 +23,8 @@ use crate::grain::bytecode::code::{assemble, resolve_switch_targets};
 #[cfg(not(feature = "no_custom_syntax"))]
 use crate::grain::bytecode::CustomSyntaxSite;
 use crate::grain::bytecode::{
-    constant_caps, AssignOp, Chain, Chunk, Op, Positions, Receiver, Root, Step, StepFlags, Switch,
-    SwitchRange, Tail,
+    constant_caps, AssignOp, Chain, Chunk, Flow, Op, Positions, Receiver, Root, Step, StepFlags,
+    Switch, SwitchRange, Tail,
 };
 use crate::grain::compile::poolable::is_poolable;
 use crate::grain::compile::slots::Slots;
@@ -165,6 +165,7 @@ impl Compiler {
                         )
                     })
                     .collect(),
+                on_loop_flow: site.on_loop_flow.map(|target| offsets[target as usize]),
             })
             .collect();
         #[cfg(feature = "no_custom_syntax")]
@@ -246,7 +247,8 @@ struct Loop {
     /// of the loop disarms the ones inside it.
     handlers: usize,
     /// How many surplus stack slots enclosed this loop when it began, so a
-    /// jump out of the loop can drop them on the stack.
+    /// jump out of the loop can drop the ones it added: `switch` subjects and
+    /// operands pending in the expressions around it.
     stack_surplus: usize,
     /// `Jump` sites awaiting the address after the loop.
     breaks: Vec<usize>,
@@ -332,9 +334,14 @@ struct Lowering {
     /// The same for `try` regions: a `break` out of one has to disarm it, or
     /// the next unrelated error is caught into a block already left.
     handlers: usize,
-    /// How many surplus stack slots enclose this point in the lowering, so a
-    /// `break` out of a loop knows how many stack slots to drop.
+    /// How many stack slots enclose this point in the lowering, so a `break`
+    /// out of a loop knows how many to drop: `switch` subjects, and the
+    /// operands an enclosing expression has pushed and is still waiting to use.
     stack_surplus: usize,
+    /// How many chunks nested inside the one being lowered enclose this point
+    /// (currently custom syntax inputs). Each is a chunk of its own, which
+    /// `return`, `break` and `continue` cannot jump out of.
+    chunk_depth: usize,
     /// How many statements enclose the one being lowered, for the marker
     /// [`Lowering::statement`] emits. Restored on the way out, so it is the
     /// nesting rather than a running count.
@@ -456,10 +463,15 @@ impl Lowering {
 
         let rewind_mark = self.mark();
 
+        // Everything pushed below stays on the stack until `Op::Chain`, so a
+        // jump out of a loop from within the rest has to drop it.
+        let surplus = self.stack_surplus;
+
         if let Some(value) = value {
             // First evaluate the assigned value first, stash it so the chain
             // can read it back after the lvalue steps have been resolved.
             self.expression(value);
+            self.stack_surplus += 1;
         }
 
         // Index values and method arguments are evaluated first, in step
@@ -474,6 +486,7 @@ impl Lowering {
                 ChainStep::Index(index, bracket, flags) => {
                     self.caps.insert(Caps::INDEXING);
                     self.expression(index);
+                    self.stack_surplus += 1;
                     lowered.push(Step::Index {
                         operand: operands,
                         flags: *flags,
@@ -503,6 +516,7 @@ impl Lowering {
                             self.caps.insert(Caps::SHARING);
                         }
                         _ if !self.is_lowerable_call(call) => {
+                            self.stack_surplus = surplus;
                             if value.is_some() {
                                 self.rewind(rewind_mark);
                             }
@@ -511,6 +525,7 @@ impl Lowering {
                         _ => (),
                     }
                     let Ok(argc) = u8::try_from(call.args.len()) else {
+                        self.stack_surplus = surplus;
                         if value.is_some() {
                             self.rewind(rewind_mark);
                         }
@@ -519,6 +534,7 @@ impl Lowering {
                     let first = operands;
                     for arg in call.args.iter() {
                         self.expression(arg);
+                        self.stack_surplus += 1;
                         operands += 1;
                     }
                     lowered.push(Step::Method {
@@ -539,6 +555,7 @@ impl Lowering {
             self.expression(root);
         }
 
+        self.stack_surplus = surplus;
         let index = self.push_chain(Chain {
             root: root_spec,
             steps: lowered,
@@ -1474,69 +1491,35 @@ impl Lowering {
                 self.exit_loop(breaks, has_break_val)
             }
 
-            Stmt::BreakLoop(value, flags, ..) => {
-                let Some(active) = self.loops.last() else {
-                    // Outside any loop this is a parse error in Rhai, so it
-                    // should be unreachable; bail rather than emit a jump to
-                    // nowhere.
-                    return Lowered::Defeated;
-                };
-                let continue_target = active.continue_target;
-                let loop_iters = active.iters;
-                let loop_handlers = active.handlers;
-                let owns_iterator = active.owns_iterator;
-                let (break_depth, continue_depth) = (active.break_depth, active.continue_depth);
-                let pop_surplus = self.stack_surplus - active.stack_surplus;
+            Stmt::BreakLoop(value, flags, pos) => {
                 let is_break = flags.contains(ASTFlags::BREAK);
 
-                // A jump out of a loop skips whatever the straight-line path
-                // would have cleaned up. The nesting is lexical, so how many
-                // iterators are live is known here — a `break` inside a `try`
-                // inside a `for` has one to drop, and `continue` has none
-                // because it re-enters the loop that owns it.
-                //
-                // Any stack surplus needs to pop.
-                if is_break {
-                    // If there is a break value, it must first be rotated beyond
-                    // any switch subjects still on the stack.
-                    //
-                    // `Op::Rotate` can only handle up to 255 slots.
-                    let Ok(stack_surplus) = u8::try_from(pop_surplus) else {
+                if self.loops.is_empty() {
+                    // Outside any loop this is a parse error in Rhai, so it
+                    // should be unreachable, unless this is in a nested chunk
+                    // (a custom syntax input): its loop, if any, is on the
+                    // other side of the chunk, so the pseudo-error is raised
+                    // for the op running the chunk to trap. Otherwise bail rather than emit a jump to nowhere.
+                    if self.chunk_depth == 0 {
                         return Lowered::Defeated;
+                    }
+                    if is_break {
+                        match value {
+                            Some(expr) => self.expression(expr),
+                            None => self.emit(Op::Unit),
+                        }
+                    }
+                    let flow = if is_break {
+                        Flow::Break
+                    } else {
+                        Flow::Continue
                     };
-                    match value {
-                        Some(expr) => {
-                            self.expression(expr);
-                            self.emit(Op::Rotate(stack_surplus));
-                        }
-                        None if active.has_break_value => {
-                            self.emit(Op::Unit);
-                            self.emit(Op::Rotate(stack_surplus));
-                        }
-                        None => {}
-                    }
-                    for _ in 0..stack_surplus {
-                        self.emit(Op::Pop);
-                    }
+                    self.emit_at(Op::BreakFlow(flow), *pos);
+                    return Lowered::Empty;
+                }
 
-                    // Out of the loop entirely, so its own iterator goes too —
-                    // `loop_iters` counts from inside the loop and therefore
-                    // already includes it.
-                    self.pop_handlers(loop_handlers);
-                    self.drop_iterators(loop_iters - usize::from(owns_iterator));
-                    self.emit(Op::UnwindTo(break_depth));
-                    let site = self.emit_jump();
-                    self.loops.last_mut().expect("checked").breaks.push(site);
-                } else {
-                    for _ in 0..pop_surplus {
-                        self.emit(Op::Pop);
-                    }
-                    // Back into the same loop, so its iterator and its loop
-                    // variable both have to survive.
-                    self.pop_handlers(loop_handlers);
-                    self.drop_iterators(loop_iters);
-                    self.emit(Op::UnwindTo(continue_depth));
-                    self.emit(Op::Jump(continue_target));
+                if !self.leave_loop(is_break, value.as_deref(), false) {
+                    return Lowered::Defeated;
                 }
 
                 // Control left with the jump above, so nothing here falls
@@ -1557,12 +1540,18 @@ impl Lowering {
                 Lowered::Empty
             }
 
-            Stmt::Return(value, flags, ..) if !flags.contains(ASTFlags::BREAK) => {
+            Stmt::Return(value, flags, pos) if !flags.contains(ASTFlags::BREAK) => {
                 match value {
                     Some(expr) => self.expression(expr),
                     None => self.emit(Op::Unit),
                 }
-                self.emit(Op::Return);
+                // A nested chunk is one of its own, so `return` unwinds as
+                // an error for the op running it to pass on.
+                if self.chunk_depth > 0 {
+                    self.emit_at(Op::BreakFlow(Flow::Return), *pos);
+                } else {
+                    self.emit(Op::Return);
+                }
                 Lowered::Empty
             }
 
@@ -1696,8 +1685,10 @@ impl Lowering {
             Expr::Array(elements, ..) if elements.len() <= u16::MAX as usize => {
                 self.caps.insert(Caps::ARRAY);
 
+                let surplus = self.stack_surplus;
                 for (index, element) in elements.iter().enumerate() {
                     self.expression(element);
+                    self.stack_surplus += 1;
                     // Positioned at the element, because that is what Rhai
                     // blames when this element is the one that tips the
                     // running total over the limit.
@@ -1709,6 +1700,7 @@ impl Lowering {
                         element.position(),
                     );
                 }
+                self.stack_surplus = surplus;
                 self.emit_at(Op::MakeArray(elements.len() as u16), expr.position());
             }
 
@@ -1742,9 +1734,12 @@ impl Lowering {
                     *pos,
                 );
 
+                let surplus = self.stack_surplus;
+                self.stack_surplus += 1;
                 let mut count = 1;
                 for (key, value) in properties {
                     self.constant(key.name.clone().into());
+                    self.stack_surplus += 1;
                     self.expression(value);
                     self.emit_at(
                         Op::CheckSize {
@@ -1753,8 +1748,10 @@ impl Lowering {
                         },
                         value.position(),
                     );
+                    self.stack_surplus += 1;
                     count += 1;
                 }
+                self.stack_surplus = surplus;
                 self.emit_at(Op::MakeMap(count - 1), expr.position());
             }
 
@@ -1772,12 +1769,15 @@ impl Lowering {
             // this sees it, so what arrives has at least two segments.
             Expr::InterpolatedString(segments, ..) => {
                 self.emit(Op::InterpolateStart);
+                // The buffer stays on the stack under every segment.
+                self.stack_surplus += 1;
                 for segment in segments.iter() {
                     self.expression(segment);
                     // The append carries the segment's own position, because
                     // that is what Rhai blames when the size limit goes over.
                     self.emit_at(Op::InterpolateAppend, segment.position());
                 }
+                self.stack_surplus -= 1;
                 self.emit(Op::InterpolateEnd);
             }
 
@@ -1867,6 +1867,9 @@ impl Lowering {
 
     /// Push the arguments left to right, then dispatch.
     fn lower_call(&mut self, call: &FnCallExpr, pos: Position) {
+        // The receiver and the arguments stay on the stack until the call, so
+        // a jump out of a loop from within a later one has to drop them.
+        let surplus = self.stack_surplus;
         let capture_parent_scope = call.capture_parent_scope;
         let argc = u8::try_from(call.args.len()).expect("checked by is_lowerable_call");
 
@@ -1883,16 +1886,22 @@ impl Lowering {
             // `ns::f(x, ..)` -> `ns::f(&mut x, ..)`
             if let Some(receiver) = self.receiver(call) {
                 match receiver {
-                    Receiver::This => self.emit_at(Op::LoadThis, call.args[0].position()),
+                    Receiver::This => {
+                        self.emit_at(Op::LoadThis, call.args[0].position());
+                        self.stack_surplus += 1;
+                    }
                     Receiver::Named(var) => {
-                        self.emit_at(Op::LoadNamed(var), call.args[0].position())
+                        self.emit_at(Op::LoadNamed(var), call.args[0].position());
+                        self.stack_surplus += 1;
                     }
                     _ => (),
                 }
                 for arg in call.args.iter().skip(1) {
                     self.expression(arg);
+                    self.stack_surplus += 1;
                 }
 
+                self.stack_surplus = surplus;
                 self.emit_at(
                     Op::CallRef {
                         name,
@@ -1905,7 +1914,9 @@ impl Lowering {
             } else {
                 for arg in call.args.iter() {
                     self.expression(arg);
+                    self.stack_surplus += 1;
                 }
+                self.stack_surplus = surplus;
                 self.emit_at(
                     Op::Call {
                         name,
@@ -1932,10 +1943,13 @@ impl Lowering {
             // `this` being seen by the value passed.
             if let Receiver::This = receiver {
                 self.emit_at(Op::LoadThis, call.args[0].position());
+                self.stack_surplus += 1;
             }
             for arg in call.args.iter().skip(1) {
                 self.expression(arg);
+                self.stack_surplus += 1;
             }
+            self.stack_surplus = surplus;
             // A name is resolved here, where its own position is the one an
             // `ErrorVariableNotFound` wants, and then moved under the arguments
             // it was read after.
@@ -1965,7 +1979,9 @@ impl Lowering {
 
         for arg in call.args.iter() {
             self.expression(arg);
+            self.stack_surplus += 1;
         }
+        self.stack_surplus = surplus;
         let op = (argc == 1 || argc == 2)
             .then(|| call.op_token.clone())
             .flatten()
@@ -2089,23 +2105,30 @@ impl Lowering {
                 self.caps.insert(Caps::FN_PTR);
             }
             (crate::engine::KEYWORD_FN_PTR_CURRY, _) if argc > 1 => {
+                let surplus = self.stack_surplus;
                 let mut args = call.args.iter();
                 self.expression(args.next().expect("checked by the arity"));
+                self.stack_surplus += 1;
                 for arg in args {
                     // The captured variables. These must bind the *cell* — a
                     // flattening read would hand the closure a copy and it
                     // would stop being one.
                     self.unflattened(arg);
+                    self.stack_surplus += 1;
                 }
+                self.stack_surplus = surplus;
                 self.emit_at(Op::Curry((argc - 1) as u8), call.args[0].position());
                 self.caps.insert(Caps::FN_PTR | Caps::CURRYING);
             }
             (crate::engine::KEYWORD_FN_PTR_CALL, _)
                 if argc >= 1 && argc <= u8::MAX as usize + 1 =>
             {
+                let surplus = self.stack_surplus;
                 for arg in call.args.iter() {
                     self.expression(arg);
+                    self.stack_surplus += 1;
                 }
+                self.stack_surplus = surplus;
                 self.emit_at(
                     Op::CallFnPtr {
                         argc: (argc - 1) as u8,
@@ -2440,6 +2463,78 @@ impl Lowering {
         }
     }
 
+    /// Emit the jump out of (`break`) or back into (`continue`) the innermost
+    /// loop, which must exist.
+    ///
+    /// The break value is lowered from `value`, or is already on the stack
+    /// (`on_stack`) when the jump is a trapped pseudo-error.
+    ///
+    /// Returns false if the slot model gave up.
+    fn leave_loop(&mut self, is_break: bool, value: Option<&Expr>, on_stack: bool) -> bool {
+        let active = self.loops.last().expect("a loop encloses the jump");
+        let continue_target = active.continue_target;
+        let loop_iters = active.iters;
+        let loop_handlers = active.handlers;
+        let owns_iterator = active.owns_iterator;
+        let has_break_value = active.has_break_value;
+        let (break_depth, continue_depth) = (active.break_depth, active.continue_depth);
+        let pop_surplus = self.stack_surplus - active.stack_surplus;
+
+        // A jump out of a loop skips whatever the straight-line path
+        // would have cleaned up. The nesting is lexical, so how many
+        // iterators are live is known here — a `break` inside a `try`
+        // inside a `for` has one to drop, and `continue` has none
+        // because it re-enters the loop that owns it.
+        //
+        // Any stack surplus needs to pop.
+        if is_break {
+            // If there is a break value, it must first be rotated beyond
+            // any switch subjects still on the stack.
+            //
+            // `Op::Rotate` can only handle up to 255 slots.
+            let Ok(stack_surplus) = u8::try_from(pop_surplus) else {
+                return false;
+            };
+            match value {
+                Some(expr) => {
+                    self.expression(expr);
+                    self.emit(Op::Rotate(stack_surplus));
+                }
+                None if on_stack && !has_break_value => self.emit(Op::Pop),
+                None if on_stack => self.emit(Op::Rotate(stack_surplus)),
+                None if has_break_value => {
+                    self.emit(Op::Unit);
+                    self.emit(Op::Rotate(stack_surplus));
+                }
+                None => {}
+            }
+            for _ in 0..stack_surplus {
+                self.emit(Op::Pop);
+            }
+
+            // Out of the loop entirely, so its own iterator goes too —
+            // `loop_iters` counts from inside the loop and therefore
+            // already includes it.
+            self.pop_handlers(loop_handlers);
+            self.drop_iterators(loop_iters - usize::from(owns_iterator));
+            self.emit(Op::UnwindTo(break_depth));
+            let site = self.emit_jump();
+            self.loops.last_mut().expect("checked").breaks.push(site);
+        } else {
+            for _ in 0..pop_surplus {
+                self.emit(Op::Pop);
+            }
+            // Back into the same loop, so its iterator and its loop
+            // variable both have to survive.
+            self.pop_handlers(loop_handlers);
+            self.drop_iterators(loop_iters);
+            self.emit(Op::UnwindTo(continue_depth));
+            self.emit(Op::Jump(continue_target));
+        }
+
+        true
+    }
+
     fn residual_expr(&mut self, expr: &Expr) {
         let residual = self.push_residual(expr.clone());
         self.emit(Op::EvalAst {
@@ -2510,6 +2605,19 @@ impl Lowering {
         (self.residuals.len() - 1) as u32
     }
 
+    /// Lower a custom syntax into an [`Op::CustomSyntax`] site.
+    ///
+    /// Its inputs are chunks of their own, so a `break`, `continue` or `return`
+    /// in one cannot jump anywhere: it raises a pseudo-error with
+    /// [`Op::BreakFlow`] instead. `return` propagates out of the site like any
+    /// error, to the function (or program) that returns it.
+    ///
+    /// Inside a loop, the site also gets a _trap stub_, which the VM jumps to
+    /// when the handler fails with a `break` or `continue`, whether an input
+    /// raised it or the handler did. The stub is `JumpIfTrue` on the flag the VM
+    /// pushes, then the same exit code a `break` or `continue` statement would
+    /// have emitted.
+    ///
     #[cfg(not(feature = "no_custom_syntax"))]
     fn custom_syntax(&mut self, custom: &crate::ast::CustomExpr, pos: Position) -> bool {
         let Some(key) = custom.tokens.first().cloned() else {
@@ -2519,16 +2627,10 @@ impl Lowering {
         // A `$block$` input is lowered as its own chunk, called and returned
         // from independently of the code around the custom syntax expression.
         //
-        // `return` always unwinds past this chunk (and whatever loop and function
-        // it runs in), so it never has a valid target here.
-        //
-        // `break`/`continue` are only a problem when nothing inside the input
-        // catches them: one nested inside a `for`/`while`/`do` loop that catches
-        // it lowers fine.
-        if custom.inputs.iter().any(contains_escaping_jump) {
-            return false;
-        }
-
+        // `return`, `break` and `continue` inside it that are not caught within
+        // the input are raised as pseudo-errors by [`Op::BreakFlow`] rather
+        // than jumped to. They propagate out of the chunk and the handler, and
+        // are trapped by the site if a loop encloses it.
         let jump = self.emit_jump();
         let mut inputs = Vec::with_capacity(custom.inputs.len());
 
@@ -2536,7 +2638,9 @@ impl Lowering {
             let saved_loops = std::mem::take(&mut self.loops);
             let first = self.code.len();
             self.emit(Op::Checkpoint);
+            self.chunk_depth += 1;
             self.expression(input);
+            self.chunk_depth -= 1;
             self.loops = saved_loops;
 
             if self.defeated {
@@ -2555,10 +2659,41 @@ impl Lowering {
         let site = self.custom_syntax.len();
         let key = self.push_name(key);
         let state = self.push_const(custom.state.clone());
-        self.custom_syntax
-            .push(CustomSyntaxSite { key, state, inputs });
+        self.custom_syntax.push(CustomSyntaxSite {
+            key,
+            state,
+            inputs,
+            on_loop_flow: None,
+        });
         self.emit_at(Op::CustomSyntax(site as u32), pos);
         self.caps.insert(Caps::CUSTOM_SYNTAX);
+
+        // The handler or an input can fail with a `break` or `continue` meant
+        // for a loop around the site. The VM traps it and jumps to a stub that
+        // gets the break value and an `is_break` flag on the stack; the normal
+        // path skips the stub.
+        //
+        // Without a loop around the site, nothing is emitted and the
+        // pseudo-error propagates unchanged. A `return` always propagates
+        // unchanged.
+        if !self.loops.is_empty() {
+            let skip = self.emit_jump();
+            let stub = self.here();
+            let jump_to_break = self.code.len();
+            self.emit(Op::JumpIfTrue { target: u32::MAX });
+            // `continue`: drop the value.
+            self.emit(Op::Pop);
+            if !self.leave_loop(false, None, true) {
+                return false;
+            }
+            self.patch_here(jump_to_break);
+            if !self.leave_loop(true, None, true) {
+                return false;
+            }
+            self.patch_here(skip);
+            self.custom_syntax[site].on_loop_flow = Some(stub);
+        }
+
         true
     }
 
@@ -2761,6 +2896,9 @@ fn declaration_order(def: &ScriptFuncDef) -> (&str, usize, Option<&str>) {
 
 /// Check whether a statement block or statement contains a `break` with an
 /// expression value targeting this loop level (stopping at nested loops).
+///
+/// A custom syntax counts too: its handler can fail with a `break` carrying a
+/// value that no statement spells out.
 fn has_break_value(stmt: &Stmt) -> bool {
     let mut has_value = false;
     let mut path = Vec::new();
@@ -2772,59 +2910,16 @@ fn has_break_value(stmt: &Stmt) -> bool {
             has_value = true;
             false
         }
+        #[cfg(not(feature = "no_custom_syntax"))]
+        Some(ASTNode::Expr(Expr::Custom(..))) => {
+            has_value = true;
+            false
+        }
         Some(ASTNode::Stmt(Stmt::For(..) | Stmt::While(..) | Stmt::Do(..))) => false,
         _ => true,
     });
 
     has_value
-}
-
-/// Check whether a custom-syntax `$block$` / `$expr$` input contains a
-/// `return`, `break` or `continue` that would jump outside the chunk the
-/// input lowers to.
-///
-/// A `return` always escapes: it unwinds past the input's own chunk, and
-/// past whatever loop or function frame runs it, regardless of nesting. A
-/// `break`/`continue` (`Stmt::BreakLoop`) only escapes when nothing inside
-/// the input catches it -- once inside a `for`/`while`/`do` that is itself
-/// part of the input, every `break`/`continue` under it (at any depth)
-/// targets that loop's own exit, a target inside the same chunk, so it is
-/// never a problem for anything nested inside such a loop.
-///
-/// Unlike [`has_break_value`], which only needs *a* match and so is free to
-/// abort the whole walk as soon as it stops at a nested loop, this has to be
-/// exhaustive: an unmasked `break`/`return` can sit anywhere in the tree,
-/// including past a sibling loop `walk` would otherwise never reach if the
-/// callback aborted early. So the callback here always returns `true`, and
-/// whether a loop masks a `BreakLoop` is instead answered by checking the
-/// accumulated `path` for a loop ancestor.
-#[cfg(not(feature = "no_custom_syntax"))]
-fn contains_escaping_jump(expr: &Expr) -> bool {
-    let mut escapes = false;
-    let mut path = Vec::new();
-
-    expr.walk(&mut path, &mut |path| {
-        match path.last() {
-            Some(ASTNode::Stmt(Stmt::Return(..))) => escapes = true,
-            Some(ASTNode::Stmt(Stmt::BreakLoop(..))) => {
-                let masked = path[..path.len() - 1].iter().any(|node| {
-                    matches!(
-                        node,
-                        ASTNode::Stmt(Stmt::For(..) | Stmt::While(..) | Stmt::Do(..))
-                    )
-                });
-                if !masked {
-                    escapes = true;
-                }
-            }
-            _ => (),
-        }
-        // Always keep walking: `escapes` needs every matching node, not just
-        // the first one `walk`'s early-abort signal would find.
-        true
-    });
-
-    escapes
 }
 
 #[cfg(test)]

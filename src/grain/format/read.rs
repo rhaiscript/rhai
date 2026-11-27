@@ -425,13 +425,24 @@ fn get_custom_syntax(cursor: &mut Cursor) -> Result<Vec<CustomSyntaxSite>, ReadE
     for _ in 0..cursor.uvarint()? {
         let key = cursor.index()?;
         let state = cursor.index()?;
+        // The upper 32 bits are the trap's offset; zero is none.
+        let packed = cursor.uvarint()?;
+        let on_loop_flow = match packed >> 32 {
+            0 => None,
+            at => Some(u32::try_from(at).map_err(|_| ReadError::MalformedVarint)?),
+        };
         let mut inputs = Vec::new();
-        for _ in 0..cursor.uvarint()? {
+        for _ in 0..packed & u64::from(u32::MAX) {
             let chunk = get_chunk(cursor)?;
             let literal = cursor.index()?;
             inputs.push((chunk, (literal != u32::MAX).then_some(literal)));
         }
-        custom_syntax.push(CustomSyntaxSite { key, state, inputs });
+        custom_syntax.push(CustomSyntaxSite {
+            key,
+            state,
+            inputs,
+            on_loop_flow,
+        });
     }
     Ok(custom_syntax)
 }

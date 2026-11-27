@@ -40,6 +40,7 @@ Enhancements
 * Rhai Grain `Program::iter_functions` now exposes metadata for compiled functions, similar to `AST::iter_functions` ([`#1212`](https://github.com/rhaiscript/rhai/pull/1212)).
 * Rhai Grain `Program::has_functions` checks whether a program contains compiled functions ([`#1212`](https://github.com/rhaiscript/rhai/pull/1212)).
 * `rhai-repl` and `rhai-run` now accept the standard `--help` and `-h` flags to print command-line usage info for AI's.
+* Rhai Grain now lowers a custom syntax whose inputs contain `break`, `continue` or `return`, instead of keeping it as a residual fragment ([`#1230`](https://github.com/rhaiscript/rhai/pull/1230)).
 
 
 Version 1.27.0
