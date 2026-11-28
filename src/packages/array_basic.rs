@@ -1555,10 +1555,12 @@ pub mod array_functions {
     ///
     /// Any other return value type will yield unpredictable order.
     ///
+    /// If the `comparer` function does not implement a [total order](https://en.wikipedia.org/wiki/Total_order),
+    /// the resulting order is unspecified.
+    ///
     /// # Errors
     ///
-    /// If the `comparer` function does not implement a [total order](https://en.wikipedia.org/wiki/Total_order),
-    /// an error is returned.
+    /// The first error raised by the `comparer` function is returned, with the array left unchanged.
     ///
     /// # Example
     ///
@@ -1576,41 +1578,16 @@ pub mod array_functions {
             return Ok(());
         }
 
-        let closure = || {
-            array.sort_by(|x, y| {
-                comparer
-                    .call_raw(&ctx, None, [x.clone(), y.clone()])
-                    .ok()
-                    .and_then(|v| {
-                        v.as_int()
-                            .or_else(|_| v.as_bool().map(|v| if v { -1 } else { 1 }))
-                            .ok()
-                    })
-                    .map_or_else(
-                        || x.type_id().cmp(&y.type_id()),
-                        |v| match v {
-                            v if v > 0 => Ordering::Greater,
-                            v if v < 0 => Ordering::Less,
-                            0 => Ordering::Equal,
-                            _ => unreachable!("v is {}", v),
-                        },
-                    )
-            });
-        };
+        // `slice::sort_by` may panic if the comparer does not implement a total order, which
+        // `catch_unwind` cannot catch under `panic = "abort"` (common for WebAssembly).
+        // So use a sort that cannot panic and stops at the first error from the comparer.
+        crate::types::sort::try_sort_by(array, |x, y| {
+            let v = comparer.call_raw(&ctx, None, [x.clone(), y.clone()])?;
 
-        // `slice::sort_by` may panic if the comparer function does not implement a total order.
-        // Catch this instead.
-        #[cfg(not(feature = "no_std"))]
-        return std::panic::catch_unwind(std::panic::AssertUnwindSafe(closure)).map_err(|_| {
-            ERR::ErrorRuntime("error in comparer for sorting".into(), Position::NONE).into()
-        });
-
-        #[cfg(feature = "no_std")]
-        {
-            let mut closure = closure;
-            closure();
-            Ok(())
-        }
+            Ok(v.as_int()
+                .or_else(|_| v.as_bool().map(|v| if v { -1 } else { 1 }))
+                .map_or_else(|_| x.type_id().cmp(&y.type_id()), |v| v.cmp(&0)))
+        })
     }
     /// Sort the array.
     ///
@@ -1864,10 +1841,12 @@ pub mod array_functions {
     ///
     /// Any other return value type will yield unpredictable order.
     ///
+    /// If the `comparer` function does not implement a [total order](https://en.wikipedia.org/wiki/Total_order),
+    /// the resulting order is unspecified.
+    ///
     /// # Errors
     ///
-    /// If the `comparer` function does not implement a [total order](https://en.wikipedia.org/wiki/Total_order),
-    /// an error is returned.
+    /// The first error raised by the `comparer` function is returned, with the array left unchanged.
     ///
     /// # Example
     ///

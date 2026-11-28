@@ -13,6 +13,7 @@ pub mod parse_error;
 pub mod position;
 pub mod position_none;
 pub mod scope;
+pub mod sort;
 pub mod token;
 pub mod var_def;
 pub mod variant;

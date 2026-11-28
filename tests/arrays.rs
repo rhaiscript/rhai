@@ -593,3 +593,81 @@ fn test_array_invalid_index_callback() {
         143
     );
 }
+
+#[cfg(not(feature = "no_object"))]
+#[cfg(not(feature = "no_function"))]
+#[test]
+fn test_arrays_sort_comparer_not_an_order() {
+    let engine = Engine::new();
+
+    // Comparers that contradict themselves must not panic, and must keep every element.
+    for comparer in ["|x, y| (x ^ y) % 3 - 1", "|x, y| if (x + y) % 2 == 0 { 1 } else { -1 }", "|x, y| x % 7 < y % 5", "|x, y| 1", "|x, y| -1"] {
+        for n in [2, 3, 16, 17, 40, 63, 64, 65, 300] {
+            let script = format!(
+                "let a = []; let s = 7; for i in 0..{n} {{ s = (s * 75 + 74) % 65537; a.push(s % 50); }}
+                 let total = a.reduce(|t, x| t + x, 0);
+                 a.sort({comparer});
+                 a.len() == {n} && a.reduce(|t, x| t + x, 0) == total"
+            );
+            assert!(engine.eval::<bool>(&script).unwrap(), "{comparer} on {n} elements");
+        }
+    }
+}
+
+#[cfg(not(feature = "no_object"))]
+#[cfg(not(feature = "no_function"))]
+#[test]
+fn test_arrays_sort_comparer_same_as_slice_sort() {
+    let engine = Engine::new();
+
+    // Pairs of (key, original position), sorted by key in many patterns: the result must be
+    // exactly what `slice::sort_by_key` gives, ties included.
+    for n in [0, 1, 2, 15, 16, 17, 31, 33, 64, 100, 257, 1000] {
+        for pattern in 0..6 {
+            let mut keys: Vec<INT> = Vec::new();
+            let mut s: INT = 11 + pattern;
+            for i in 0..n {
+                s = (s * 75 + 74) % 65537;
+                keys.push(match pattern {
+                    0 => s % 1000,              // random
+                    1 => i,                     // ascending
+                    2 => n - i,                 // descending
+                    3 => s % 3,                 // many ties
+                    4 => (i / 7) % 5,           // runs up and down, with ties
+                    _ => i % 40 - i / 40 * 100, // rising runs, each below the one before
+                });
+            }
+            let mut expected: Vec<INT> = (0..n).collect();
+            expected.sort_by_key(|&i| keys[i as usize]);
+
+            let list = keys.iter().enumerate().map(|(i, k)| format!("[{k}, {i}]")).collect::<Vec<_>>().join(",");
+            for comparer in ["|x, y| x[0] - y[0]", "|x, y| x[0] < y[0]"] {
+                let script = format!("let a = [{list}]; a.sort({comparer}); a.map(|p| p[1])");
+                let actual = engine.eval::<Array>(&script).unwrap().into_iter().map(|v| v.as_int().unwrap()).collect::<Vec<_>>();
+                assert_eq!(actual, expected, "{comparer}, pattern {pattern}, {n} elements");
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "no_object"))]
+#[cfg(not(feature = "no_function"))]
+#[cfg(not(feature = "unchecked"))]
+#[test]
+fn test_arrays_sort_comparer_error() {
+    let mut engine = Engine::new();
+    engine.set_max_operations(100_000);
+
+    // A comparer stopped by the limit stops the sort at once.
+    let err = engine
+        .run("let a = []; for i in 0..2000 { a.push(if i % 2 == 0 { i } else { `s${i}` }); } a.sort(|x, y| { loop {} });")
+        .unwrap_err();
+    assert!(matches!(*err.unwrap_inner(), rhai::EvalAltResult::ErrorTooManyOperations(..)), "{err}");
+
+    // An error thrown by the comparer is returned, and the array is left as it was.
+    let script = "let a = [5, 3, 1, 4, 2]; let e = (); try { a.sort(|x, y| { if x == 4 || y == 4 { throw 42; } x - y }); } catch (err) { e = err; } [e, a]";
+    let r = engine.eval::<Array>(script).unwrap();
+    assert_eq!(r[0].as_int().unwrap(), 42);
+    let a = r[1].clone().into_array().unwrap();
+    assert_eq!(a.iter().map(|v| v.as_int().unwrap()).collect::<Vec<_>>(), [5, 3, 1, 4, 2]);
+}
