@@ -507,4 +507,23 @@ impl<'a> GlobalRef<'a> {
             GlobalRef::Mut(_) => Some(global),
         }
     }
+
+    /// If an owned [`GlobalRuntimeState`] instance was cloned from an immutable reference, set the
+    /// number of operations of the original to that of the clone.
+    ///
+    /// Under `sync` without 64-bit atomics, the number of operations cannot be set through an
+    /// immutable reference, so this does nothing.
+    #[inline]
+    pub fn update_num_operations(&self) {
+        #[cfg(any(not(feature = "sync"), atomic_ops_count))]
+        if let GlobalRef::Ref(g, Some(global)) = self {
+            #[cfg(atomic_ops_count)]
+            g.num_operations.store(
+                global.num_operations(),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            #[cfg(not(feature = "sync"))]
+            g.num_operations.set(global.num_operations());
+        }
+    }
 }

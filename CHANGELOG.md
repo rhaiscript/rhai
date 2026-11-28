@@ -26,6 +26,7 @@ Bug fixes
 * A constant string, integer or BLOB can no longer be modified through an index or a mutating method on the indexed item, and a new property can no longer be added to a constant object map; also when nested (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) ([`#1224`](https://github.com/rhaiscript/rhai/pull/1224)).
 * `Engine::parse_json` (and the `parse_json` function without the `metadata` feature) no longer evaluates expressions in the JSON text, including arithmetic expressions. The filter now only admits valid JSON literal tokens (thanks [`@Rockyrok77`](https://github.com/Rockyrok77) [`#1221`](https://github.com/rhaiscript/rhai/pull/1221)).
 * The optimizer no longer drops the value of a `try` block, nor returns a previous value when a block ends with `{}` or with `return;` after a loop or `try` statement (thanks [`@bardrop`](https://github.com/bardrop) [`#1225`](https://github.com/rhaiscript/rhai/pull/1225)).
+* Operations performed inside a closure called back from a native function (e.g. a closure passed to `map`, `filter` or `sort`) now count towards `max_operations` and the count reported to `Engine::on_progress`. Previously they were counted on a copy of the state and lost, so such a script could run far past the limit (thanks [`@batcoun7ry`](https://github.com/batcoun7ry) and Claude [`#1226`](https://github.com/rhaiscript/rhai/issues/1226)).
 
 Enhancements
 ------------

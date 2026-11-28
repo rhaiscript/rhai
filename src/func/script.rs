@@ -322,6 +322,7 @@ impl Engine {
                 let is_empty = is_empty && self.debugger_interface.is_none();
 
                 if is_empty {
+                    global_ref.update_num_operations();
                     return Ok(Dynamic::UNIT);
                 }
             }
@@ -556,6 +557,9 @@ impl Engine {
 
         // Restore state
         caches.rewind_fn_resolution_caches(orig_fn_resolution_caches_len);
+
+        // Operations counted on a copy of an immutable original count for the original too.
+        global_ref.update_num_operations();
 
         _result
     }
