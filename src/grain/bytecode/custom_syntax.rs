@@ -16,16 +16,30 @@ pub struct CustomSyntaxSite {
     /// Each `$expr$`/`$block$` input, in source order.
     /// Tuple is `(chunk, literal)`.
     pub inputs: Vec<(Chunk, Option<u32>)>,
+    /// Address to jump to when running the site fails with a `break` or
+    /// `continue` pseudo-error (see [`Op::BreakFlow`](crate::grain::bytecode::Op::BreakFlow)), with the break value
+    /// and an `is_break` flag pushed.
+    ///
+    /// `None` when no loop in the same frame encloses the site, in which case
+    /// the pseudo-error propagates unchanged.
+    pub on_loop_flow: Option<u32>,
 }
 
 impl CustomSyntaxSite {
     /// Dump the disassembly of the operation.
     #[cfg(feature = "internals")]
     pub fn disassemble(&self, program: &crate::grain::Program) -> String {
-        format!(
-            "{} [{} input(s)]",
-            program.name(self.key).unwrap_or("?"),
-            self.inputs.len(),
-        )
+        match self.on_loop_flow {
+            Some(target) => format!(
+                "{} [{} input(s)] on_loop_flow={target}",
+                program.name(self.key).unwrap_or("?"),
+                self.inputs.len(),
+            ),
+            None => format!(
+                "{} [{} input(s)]",
+                program.name(self.key).unwrap_or("?"),
+                self.inputs.len(),
+            ),
+        }
     }
 }

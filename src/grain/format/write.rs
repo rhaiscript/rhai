@@ -331,7 +331,13 @@ fn put_custom_syntax(out: &mut Vec<u8>, custom_syntax: &[CustomSyntaxSite]) {
     for site in custom_syntax {
         put_uvarint(out, u64::from(site.key));
         put_uvarint(out, u64::from(site.state));
-        put_uvarint(out, site.inputs.len() as u64);
+        // The count shares its varint with the trap's offset, one more than
+        // it in the upper 32 bits (zero is none, as the trap
+        // always follows the site and so is never at offset zero). No older writer set those
+        // bits, so an artifact without them reads exactly as it always did,
+        // and a reader unaware of them fails on the count rather than misreads.
+        let trap = site.on_loop_flow.map_or(0, u64::from);
+        put_uvarint(out, site.inputs.len() as u64 | trap << 32);
         for (chunk, literal) in &site.inputs {
             put_chunk(out, chunk);
             put_uvarint(out, u64::from(literal.unwrap_or(u32::MAX)));

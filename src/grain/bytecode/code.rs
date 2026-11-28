@@ -25,7 +25,7 @@
 
 use alloc::borrow::Cow;
 
-use crate::grain::bytecode::{Op, Receiver};
+use crate::grain::bytecode::{Flow, Op, Receiver};
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
@@ -175,6 +175,12 @@ pub mod tag {
     pub const CALL_FN_PTR_ON_THIS: u8 = 0x41;
     /// [`Op::SkipIfNotUnit`](super::Op::SkipIfNotUnit).
     pub const SKIP_IF_NOT_UNIT: u8 = 0x42;
+    /// [`Op::BreakFlow`](super::Op::BreakFlow) raising a `return`.
+    pub const BREAK_FLOW_RETURN: u8 = 0x43;
+    /// [`Op::BreakFlow`](super::Op::BreakFlow) raising a `break`.
+    pub const BREAK_FLOW_BREAK: u8 = 0x44;
+    /// [`Op::BreakFlow`](super::Op::BreakFlow) raising a `continue`.
+    pub const BREAK_FLOW_CONTINUE: u8 = 0x45;
     /// [`Op::Statement`](super::Op::Statement).
     pub const STATEMENT: u8 = 0x47;
     /// [`Op::StoreLocal`](super::Op::StoreLocal) as a constant.
@@ -212,6 +218,9 @@ static WIDTHS: [u8; 256] = {
     widths[tag::STATEMENT as usize] = 3;
     widths[tag::RETURN as usize] = 1;
     widths[tag::THROW as usize] = 1;
+    widths[tag::BREAK_FLOW_RETURN as usize] = 1;
+    widths[tag::BREAK_FLOW_BREAK as usize] = 1;
+    widths[tag::BREAK_FLOW_CONTINUE as usize] = 1;
     widths[tag::ITER_DROP as usize] = 1;
 
     widths[tag::ITER_INIT as usize] = 1;
@@ -674,6 +683,9 @@ pub fn assemble(ops: &[Op]) -> Result<(Vec<u8>, Vec<u32>), AssembleError> {
                 code.extend_from_slice(&depth.to_le_bytes());
             }
             Op::Throw => code.push(tag::THROW),
+            Op::BreakFlow(Flow::Return) => code.push(tag::BREAK_FLOW_RETURN),
+            Op::BreakFlow(Flow::Break) => code.push(tag::BREAK_FLOW_BREAK),
+            Op::BreakFlow(Flow::Continue) => code.push(tag::BREAK_FLOW_CONTINUE),
             Op::IterInit => code.push(tag::ITER_INIT),
             Op::IterDrop => code.push(tag::ITER_DROP),
             Op::PopHandler => code.push(tag::POP_HANDLER),
@@ -788,6 +800,7 @@ fn encoded_width(op: &Op) -> usize {
         | Op::Tick
         | Op::Checkpoint
         | Op::Throw
+        | Op::BreakFlow(..)
         | Op::IterInit
         | Op::IterDrop
         | Op::PopHandler
@@ -1066,6 +1079,9 @@ pub fn decode(code: &[u8], at: usize) -> Option<Op> {
         tag::CHECKPOINT => Op::Checkpoint,
         tag::STATEMENT => Op::Statement { depth: small(1)? },
         tag::THROW => Op::Throw,
+        tag::BREAK_FLOW_RETURN => Op::BreakFlow(Flow::Return),
+        tag::BREAK_FLOW_BREAK => Op::BreakFlow(Flow::Break),
+        tag::BREAK_FLOW_CONTINUE => Op::BreakFlow(Flow::Continue),
         tag::ITER_INIT => Op::IterInit,
         tag::ITER_DROP => Op::IterDrop,
         tag::ITER_NEXT => Op::IterNext {
@@ -1283,6 +1299,9 @@ mod tests {
             Op::Tick,
             Op::Statement { depth: 2 },
             Op::CustomSyntax(2),
+            Op::BreakFlow(Flow::Return),
+            Op::BreakFlow(Flow::Break),
+            Op::BreakFlow(Flow::Continue),
             Op::EvalAst {
                 residual: 0,
                 rewind_scope: true,

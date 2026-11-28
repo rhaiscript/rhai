@@ -4236,7 +4236,25 @@ impl<'e> Vm<'e> {
                         self.this.as_mut(),
                     );
 
-                    let value = (custom_syntax.func)(&mut context, &expressions, state)?;
+                    let operands = self.stack.len();
+                    let value = match (custom_syntax.func)(&mut context, &expressions, state) {
+                        Ok(value) => value,
+                        // A `break` or `continue` meant for a loop around this
+                        // site: back to where the site started, then hand the
+                        // value and the kind to its stub. Anything else,
+                        // `return` included, propagates unchanged.
+                        Err(err) => match (site.on_loop_flow, &*err) {
+                            (Some(target), EvalAltResult::LoopBreak(is_break, value, ..)) => {
+                                let (is_break, value) = (*is_break, value.clone());
+                                self.stack.truncate(operands);
+                                self.stack.push(value);
+                                self.stack.push(Dynamic::from_bool(is_break));
+                                transfer!(target as usize);
+                                continue;
+                            }
+                            _ => return Err(err),
+                        },
+                    };
 
                     #[cfg(not(feature = "unchecked"))]
                     self.engine.check_data_size(&value, pos())?;
@@ -4962,6 +4980,24 @@ impl<'e> Vm<'e> {
                     // its value rather than as the cell.
                     let value = self.pop()?.flatten();
                     return Err(Box::new(EvalAltResult::ErrorRuntime(value, pos())));
+                }
+
+                code::tag::BREAK_FLOW_RETURN => {
+                    let value = self.pop()?.flatten();
+                    return Err(Box::new(EvalAltResult::Return(value, pos())));
+                }
+
+                code::tag::BREAK_FLOW_BREAK => {
+                    let value = self.pop()?;
+                    return Err(Box::new(EvalAltResult::LoopBreak(true, value, pos())));
+                }
+
+                code::tag::BREAK_FLOW_CONTINUE => {
+                    return Err(Box::new(EvalAltResult::LoopBreak(
+                        false,
+                        Dynamic::UNIT,
+                        pos(),
+                    )));
                 }
 
                 code::tag::RETURN => {

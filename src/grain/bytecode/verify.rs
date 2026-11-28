@@ -1,6 +1,6 @@
 use crate::grain::bytecode::code::{self, tag};
 use crate::grain::bytecode::{
-    Chain, Chunk, CustomSyntaxSite, Op, Receiver, Root, Step, Strings, Switch, Tail,
+    Chain, Chunk, CustomSyntaxSite, Flow, Op, Receiver, Root, Step, Strings, Switch, Tail,
 };
 use crate::grain::format::Caps;
 use crate::grain::program::Function;
@@ -335,6 +335,15 @@ fn jump_targets(op: &Op, pools: &Pools, out: &mut Vec<u32>) {
         | Op::SkipIfNotUnit { target }
         | Op::PushHandler { target, .. }
         | Op::IterNext { exit: target, .. } => out.push(target),
+        Op::CustomSyntax(index) => {
+            if let Some(target) = pools
+                .custom_syntax
+                .get(index as usize)
+                .and_then(|site| site.on_loop_flow)
+            {
+                out.push(target);
+            }
+        }
         Op::Switch(index) => {
             if let Some(table) = pools.switches.get(index as usize) {
                 out.extend(
@@ -497,12 +506,12 @@ fn verify_chunk(
         };
 
         match op {
-            // Terminal: nothing follows. A `throw` always fails, so control
+            // Terminal: nothing follows. A `throw` (or `BreakFlow`) always fails, so control
             // leaves the chunk here as surely as it does at a `Return`.
             //
             // Neither has to balance the iterator stack: leaving a frame
             // truncates it to what the frame started with.
-            Op::Return | Op::Throw => {}
+            Op::Return | Op::Throw | Op::BreakFlow(..) => {}
 
             Op::Jump(target) => go(target, next_state)?,
 
@@ -525,6 +534,30 @@ fn verify_chunk(
             | Op::JumpIfTrue { target }
             | Op::SkipIfNotUnit { target } => {
                 go(target, next_state)?;
+                work_list.push((next, next_state));
+            }
+
+            // A trapped `break`/`continue` lands on `on_loop_flow` with the
+            // value and the flag pushed, and nothing else changed: the error
+            // is raised before the instruction pops or pushes anything.
+            Op::CustomSyntax(index) => {
+                if let Some(target) = pools
+                    .custom_syntax
+                    .get(index as usize)
+                    .and_then(|site| site.on_loop_flow)
+                {
+                    go(
+                        target,
+                        State {
+                            operands: depth + 2,
+                            iters: state.iters,
+                            handlers: state.handlers,
+                        },
+                    )?;
+                }
+                if next >= end {
+                    return Err(VerifyError::FallsOffTheEnd);
+                }
                 work_list.push((next, next_state));
             }
 
@@ -644,6 +677,7 @@ fn required_caps(op: &Op, pools: &Pools) -> Caps {
         | Op::InterpolateAppend
         | Op::InterpolateEnd
         | Op::Throw
+        | Op::BreakFlow(..)
         | Op::IterInit
         | Op::IterNext { .. }
         | Op::IterDrop
@@ -831,6 +865,10 @@ fn effect(op: &Op, pools: &Pools) -> (usize, usize, usize) {
 
         // Pops the thrown value; nothing follows, so what it leaves is moot.
         Op::Throw | Op::StoreShared(..) => (1, 1, 0),
+
+        // Pops the value of a `return` or a `break`; nothing follows.
+        Op::BreakFlow(Flow::Return | Flow::Break) => (1, 1, 0),
+        Op::BreakFlow(Flow::Continue) => (0, 0, 0),
 
         Op::ExportLocal { .. } | Op::ExportNamed { .. } => (0, 0, 0),
         Op::Import { .. } => (1, 1, 0),
